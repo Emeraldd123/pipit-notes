@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, ArrowLeftRight, ArrowUpRight, Check, CheckCheck, Circle, Code2, Copy, Download, Eraser, FilePlus2, FileText,
-  Hand, Highlighter, History, Layers, Lightbulb, LineChart, ListChecks, ImagePlus, Lasso, Loader2, Maximize2, Minus, MoreHorizontal, MousePointer2, Paintbrush, Pen,
+  Hand, Highlighter, History, Layers, Waves, Lightbulb, LineChart, ListChecks, ImagePlus, Lasso, Loader2, Maximize2, Minus, MoreHorizontal, MousePointer2, Paintbrush, Pen,
   Pencil, Printer, Redo2, Columns2, FileCode2, FlaskConical, Network, Shapes, TextCursorInput, Wand2, Scissors, ScanText, Sigma, Square, Trash, Trash2, Type, Undo2, ZoomIn, ZoomOut, Sparkles,
 } from "lucide-react";
 import { NoteCanvas, type CanvasImage, type NoteCanvasHandle, type Stroke, type Tool } from "@/components/note-canvas";
 import { BlocksLayer, BLOCK_DEFAULTS, Latex } from "@/components/blocks";
+import { PresetsButton } from "@/components/presets";
 import { PagesPanel } from "@/components/pages-panel";
 import { ExplainPanel, HighlightLayer, ReviewBar, ReviewSetup, type ExplainState, type Highlight, type ReviewState } from "@/components/understanding";
 import { Button, IconButton, Modal, Toast } from "@/components/ui";
@@ -693,6 +694,24 @@ function Editor({ note, startPage, splitWith, onReload }: { note: LoadedNote; st
     ...(explainRect && explain ? [{ id: "explain", ...explainRect, tone: "explain" as const }] : []),
   ];
 
+  // --- pen presets & recent colours ---------------------------------------------------------
+  const PEN_TOOLS = ["pencil", "pen", "highlighter", "marker"] as const;
+  function savePreset() {
+    if (!(PEN_TOOLS as readonly string[]).includes(tool)) return flash("Pick a pen, pencil, marker or highlighter first.");
+    updateSettings({ presets: [...settings.presets, { tool: tool as (typeof PEN_TOOLS)[number], color: inkColor, width }].slice(0, 8) });
+    count("pen.presetSaved");
+  }
+  function applyPreset(p: (typeof settings.presets)[number]) {
+    setTool(p.tool);
+    if (p.tool === "highlighter") setHlColor(p.color); else setColor(p.color);
+    setWidth(p.width);
+    count("pen.presetUsed");
+  }
+  function rememberColor(c: string) {
+    if (COLORS.includes(c) || HIGHLIGHTER_COLORS.includes(c)) return;
+    updateSettings({ recentColors: [c, ...settings.recentColors.filter((x) => x !== c)].slice(0, 5) });
+  }
+
   const activeTool: Tool = tool;
   const blockMode = tool === "block";
   const blocksTakeTouch = blockMode || tool === "text";
@@ -775,6 +794,7 @@ function Editor({ note, startPage, splitWith, onReload }: { note: LoadedNote; st
           <Sep />
           {rail(SHAPES)}
           <IconButton title={settings.shapeSnap ? "Hold-to-snap shapes: ON (hold the pen still after drawing a line, circle or box)" : "Hold-to-snap shapes: off"} active={settings.shapeSnap} onClick={() => updateSettings({ shapeSnap: !settings.shapeSnap })}><Wand2 size={17} /></IconButton>
+          <IconButton title={settings.scribbleErase ? "Scribble to erase: ON (scribble back and forth over ink to delete it)" : "Scribble to erase: off"} active={settings.scribbleErase} onClick={() => updateSettings({ scribbleErase: !settings.scribbleErase })}><Waves size={17} /></IconButton>
           <Sep />
           {rail(SELECT)}
           <Sep />
@@ -796,13 +816,18 @@ function Editor({ note, startPage, splitWith, onReload }: { note: LoadedNote; st
             ))}
           </div>
           <Sep />
+          <PresetsButton presets={settings.presets} onApply={applyPreset} onSave={savePreset} onDelete={(i) => updateSettings({ presets: settings.presets.filter((_, k) => k !== i) })} />
           <div className="flex items-center gap-1.5 md:grid md:grid-cols-2 md:gap-1.5">
             {(tool === "highlighter" ? HIGHLIGHTER_COLORS : COLORS).map((c) => (
               <button key={c} title={c} onClick={() => (tool === "highlighter" ? setHlColor(c) : setColor(c))}
                 className={`h-6 w-6 rounded-full ${inkColor === c ? "ring-2 ring-primary ring-offset-2 ring-offset-surface" : ""}`} style={{ backgroundColor: c }} />
             ))}
+            {settings.recentColors.map((c) => (
+              <button key={c} title={`Recent ${c}`} onClick={() => (tool === "highlighter" ? setHlColor(c) : setColor(c))}
+                className={`h-6 w-6 rounded-full ring-1 ring-border ${inkColor === c ? "ring-2 ring-primary ring-offset-2 ring-offset-surface" : ""}`} style={{ backgroundColor: c }} />
+            ))}
             <label className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full ring-1 ring-border" title="Custom colour" style={{ background: "conic-gradient(red, yellow, lime, aqua, blue, magenta, red)" }}>
-              <input type="color" value={inkColor} onChange={(e) => (tool === "highlighter" ? setHlColor(e.target.value) : setColor(e.target.value))} className="sr-only" />
+              <input type="color" value={inkColor} onChange={(e) => { const v = e.target.value; (tool === "highlighter" ? setHlColor : setColor)(v); rememberColor(v); }} className="sr-only" />
             </label>
           </div>
           <Sep />
@@ -836,6 +861,7 @@ function Editor({ note, startPage, splitWith, onReload }: { note: LoadedNote; st
             onCameraChange={onCameraChange}
             onTapDoc={(p) => { if (tool === "text") addBlock("text", { x: p.x, y: p.y - 10 }); else { addBlock("code", { x: p.x, y: p.y }); setTool("pen"); } }}
             shapeSnap={settings.shapeSnap}
+            scribbleErase={settings.scribbleErase}
             onInputSample={settings.diagnostics ? recordInputSample : undefined}
             onPageChange={(p) => setCurrentPage(p)}
             onSelectionChange={setHasSel}

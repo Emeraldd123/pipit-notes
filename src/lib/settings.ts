@@ -3,6 +3,8 @@
 // api.anthropic.com that the user triggers.
 import { useSyncExternalStore } from "react";
 
+export type Preset = { tool: "pencil" | "pen" | "highlighter" | "marker"; color: string; width: number };
+
 export type Settings = {
   /** Anthropic API key for handwriting recognition, search answers, practice questions. */
   apiKey: string;
@@ -20,6 +22,12 @@ export type Settings = {
   reportEnabled: boolean;
   /** Reporting endpoint; empty = this site's own /.netlify/functions/diag. */
   reportUrl: string;
+  /** Saved pen setups. */
+  presets: Preset[];
+  /** Custom colours picked recently (most recent first). */
+  recentColors: string[];
+  /** Scribbling back and forth over ink erases it (off by default — it can surprise you). */
+  scribbleErase: boolean;
 };
 
 const KEY = "pipit-notes.settings.v1";
@@ -33,6 +41,9 @@ export const DEFAULT_SETTINGS: Settings = {
   diagnostics: true,
   reportEnabled: true,
   reportUrl: "",
+  presets: [],
+  recentColors: [],
+  scribbleErase: false,
 };
 
 let cache: Settings | null = null;

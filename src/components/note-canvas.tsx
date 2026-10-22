@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useImperativeHandle, useRef } from "react";
 import type { NoteTool, NotePaper, StrokeInput } from "@/types";
 import { newStrokeId } from "@/lib/ids";
+import { isScribble, strokesUnder } from "@/lib/scribble";
 import { PAGE_W, PAGE_H, PAGE_GAP, pageTop } from "@/lib/page";
 import { classifyStroke } from "@/lib/shapes";
 
@@ -256,6 +257,7 @@ export function NoteCanvas({
   onCameraChange,
   onTapDoc,
   shapeSnap,
+  scribbleErase,
   onPageChange,
   onSelectionChange,
   onSnipRegion,
@@ -283,6 +285,8 @@ export function NoteCanvas({
   onTapDoc?: (pt: { x: number; y: number }) => void;
   /** Hold the pen still at the end of a stroke to snap a clear line / polygon / ellipse. Off by default. */
   shapeSnap?: boolean;
+  /** A rapid zigzag over existing ink erases it instead of drawing. */
+  scribbleErase?: boolean;
   onPageChange?: (page: number, count: number) => void;
   onSelectionChange?: (has: boolean) => void;
   /** A `snip` lasso finished: a PNG of the lassoed region + its doc size. */
@@ -313,6 +317,8 @@ export function NoteCanvas({
   const tapRef = useRef<{ x: number; y: number } | null>(null);
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const snappedRef = useRef(false);
+  const scribbleRef = useRef(!!scribbleErase);
+  useEffect(() => { scribbleRef.current = !!scribbleErase; }, [scribbleErase]);
   const shapeSnapRef = useRef(!!shapeSnap);
   useEffect(() => { shapeSnapRef.current = !!shapeSnap; }, [shapeSnap]);
   useEffect(() => { cameraCbRef.current = onCameraChange; tapCbRef.current = onTapDoc; }, [onCameraChange, onTapDoc]);
@@ -1600,6 +1606,17 @@ export function NoteCanvas({
     const buf = drawingRef.current;
     drawingRef.current = null;
     if (!buf) return;
+    if (scribbleRef.current && s.tool !== "highlighter" && isScribble(buf)) {
+      const under = strokesUnder(buf, strokesRef.current);
+      if (under.length) {
+        pushHistory();
+        const drop = new Set(under);
+        strokesRef.current = strokesRef.current.filter((_, i) => !drop.has(i));
+        redraw();
+        onCommit(strokesRef.current);
+        return;
+      }
+    }
     pushHistory();
     strokesRef.current.push({ id: newStrokeId(), tool: s.tool as NoteTool, color: s.color, width: s.width, points: packPts(buf) });
     // Pen-up used to repaint the whole visible page (~10ms on a big note — a stall
