@@ -12,7 +12,7 @@ import { newStrokeId } from "@/lib/ids";
 import { PAGE_W, PAGE_H, PAGE_GAP, pageTop } from "@/lib/page";
 import { classifyStroke } from "@/lib/shapes";
 
-export type Tool = NoteTool | "eraser" | "line" | "rect" | "ellipse" | "arrow" | "hand" | "lasso" | "image" | "snip" | "explain" | "block";
+export type Tool = NoteTool | "eraser" | "line" | "rect" | "ellipse" | "arrow" | "hand" | "lasso" | "image" | "snip" | "explain" | "text" | "block";
 // `id` is a stable per-stroke identity used for incremental (delta) saves. New
 // strokes get one on commit; strokes loaded from the DB carry their row id.
 export type Stroke = StrokeInput & { id?: string };
@@ -1309,7 +1309,7 @@ export function NoteCanvas({
     }
     const pt = eventToPoint(e.clientX, e.clientY, e.pressure, e.pointerType);
 
-    if (t === "block") {
+    if (t === "block" || t === "text") {
       tapRef.current = { x: pt.x, y: pt.y };
       return;
     }

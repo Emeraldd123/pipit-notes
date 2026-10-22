@@ -32,7 +32,7 @@ export function RichText({ text, className = "" }: { text: string; className?: s
 
 export const BLOCK_DEFAULTS: Record<BlockRec["kind"], { width: number; height: number }> = {
   code: { width: 620, height: 220 },
-  text: { width: 520, height: 120 },
+  text: { width: 440, height: 80 },
   math: { width: 520, height: 110 },
   graph: { width: 560, height: 380 },
 };
@@ -157,6 +157,8 @@ function BlockView({
             spellCheck={b.kind === "text"}
             autoCapitalize="off"
             autoCorrect="off"
+            autoFocus={b.kind === "text" && !b.text && Date.now() - b.createdAt < 1500}
+            onBlur={() => { if (b.kind === "text" && !bRef.current.text.trim()) onDelete(b.id); }}
             placeholder={b.kind === "graph" ? "y = x^2 + 3x   (one equation per line)" : b.kind === "code" ? "# python — sympy, numpy, matplotlib available" : b.kind === "math" ? "LaTeX, e.g. \\frac{dy}{dx} = 2x + 3" : "Type here…"}
             className={`block w-full resize-none bg-transparent px-4 py-3 outline-none ${b.kind === "code" || b.kind === "graph" ? "font-mono" : ""}`}
             style={{ minHeight: 64, fontSize: fontPx, lineHeight: 1.45, userSelect: "text", WebkitUserSelect: "text", pointerEvents: b.kind === "graph" ? "auto" : pe, fontFamily: b.kind === "code" ? "ui-monospace, SFMono-Regular, Menlo, monospace" : undefined }}

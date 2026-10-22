@@ -42,7 +42,7 @@ const PAPERS: { id: NotePaper; label: string }[] = [
   { id: "blank", label: "Blank" }, { id: "ruled", label: "Ruled" }, { id: "grid", label: "Grid" }, { id: "dotted", label: "Dotted" }, { id: "cornell", label: "Cornell" },
 ];
 
-const TOOL_NAMES: Partial<Record<Tool, string>> = { pen: "pen", pencil: "pencil", highlighter: "highlighter", marker: "marker", line: "line", rect: "rectangle", ellipse: "ellipse", arrow: "arrow", lasso: "lasso", image: "select", snip: "snip", explain: "explain", hand: "pan" };
+const TOOL_NAMES: Partial<Record<Tool, string>> = { pen: "pen", pencil: "pencil", highlighter: "highlighter", marker: "marker", line: "line", rect: "rectangle", ellipse: "ellipse", arrow: "arrow", lasso: "lasso", image: "select", snip: "snip", explain: "explain", text: "text", hand: "pan" };
 
 type ToolDef = { id: Tool; label: string; icon: React.ReactNode };
 const WRITE: ToolDef[] = [
@@ -695,6 +695,7 @@ function Editor({ note, startPage, splitWith, onReload }: { note: LoadedNote; st
 
   const activeTool: Tool = tool;
   const blockMode = tool === "block";
+  const blocksTakeTouch = blockMode || tool === "text";
   const rail = (defs: ToolDef[]) => (
     <div className="flex gap-1 md:flex-col">
       {defs.map((t) => <IconButton key={t.id} title={t.label} active={tool === t.id} onClick={() => setTool(t.id)}>{t.icon}</IconButton>)}
@@ -779,7 +780,7 @@ function Editor({ note, startPage, splitWith, onReload }: { note: LoadedNote; st
           <Sep />
           <div className="flex gap-1 md:flex-col">
             <IconButton title="Add a Python block (tap with the Blocks tool to place one)" onClick={() => addBlock("code")}><Code2 size={17} /></IconButton>
-            <IconButton title="Add a text block" onClick={() => addBlock("text")}><Type size={17} /></IconButton>
+            <IconButton title="Text tool — tap anywhere on the page and type" active={tool === "text"} onClick={() => setTool(tool === "text" ? "pen" : "text")}><Type size={17} /></IconButton>
             <IconButton title="Add a maths (LaTeX) block" onClick={() => addBlock("math")}><Sigma size={17} /></IconButton>
             <IconButton title="Add a graph block (type y = x^2, x^2 + y^2 = 25, z = sin(x)cos(y)…)" onClick={() => { count("graph.add"); addBlock("graph", undefined, "y = x^2"); }}><LineChart size={17} /></IconButton>
             <IconButton title="Edit blocks (blocks take touch)" active={blockMode} onClick={() => setTool(blockMode ? "pen" : "block")}><Sparkles size={17} /></IconButton>
@@ -833,7 +834,7 @@ function Editor({ note, startPage, splitWith, onReload }: { note: LoadedNote; st
             onHistoryChange={setHistory}
             onViewChange={setZoom}
             onCameraChange={onCameraChange}
-            onTapDoc={(p) => { addBlock("code", { x: p.x, y: p.y }); setTool("pen"); }}
+            onTapDoc={(p) => { if (tool === "text") addBlock("text", { x: p.x, y: p.y - 10 }); else { addBlock("code", { x: p.x, y: p.y }); setTool("pen"); } }}
             shapeSnap={settings.shapeSnap}
             onInputSample={settings.diagnostics ? recordInputSample : undefined}
             onPageChange={(p) => setCurrentPage(p)}
@@ -844,7 +845,7 @@ function Editor({ note, startPage, splitWith, onReload }: { note: LoadedNote; st
             onImageUpdate={(id, patch) => void updateImage(id, patch)}
             onImageDelete={(id) => void deleteImage(id)}
           />
-          <BlocksLayer blocks={blocks} innerRef={blocksInner} interactive={blockMode} scaleRef={scaleRef} running={running} onChange={onBlockChange} onDelete={onBlockDelete} onRun={onRunBlock} />
+          <BlocksLayer blocks={blocks} innerRef={blocksInner} interactive={blocksTakeTouch} scaleRef={scaleRef} running={running} onChange={onBlockChange} onDelete={onBlockDelete} onRun={onRunBlock} />
           <HighlightLayer rects={highlights} innerRef={highlightsInner} camRef={camRef} />
           {pagesOpen && (
             <PagesPanel count={pageCount} current={currentPage} rev={pagesRev}
