@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Download, FileUp, Folder, FolderPlus, Loader2, NotebookPen, Pencil, Pin, Plus, Search, Settings as SettingsIcon, Trash2, Upload,
+  Download, FileUp, Folder, FolderPlus, Loader2, Network, NotebookPen, Pencil, Pin, Plus, Search, Settings as SettingsIcon, Trash2, Upload,
 } from "lucide-react";
 import type { NoteMeta, NotebookRec } from "@/types";
 import {
@@ -176,6 +176,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
         </nav>
         <div className="mt-auto space-y-0.5 pt-6 text-sm">
           <button onClick={() => go({ name: "search" })} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-foreground-muted hover:bg-surface-secondary"><Search size={15} /> Search &amp; ask</button>
+          <button onClick={() => go({ name: "graph" })} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-foreground-muted hover:bg-surface-secondary"><Network size={15} /> Knowledge map</button>
           <button onClick={() => go({ name: "settings" })} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-foreground-muted hover:bg-surface-secondary"><SettingsIcon size={15} /> Settings &amp; backup</button>
         </div>
       </aside>
@@ -207,6 +208,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
             <Chip active={notebook === "none"} onClick={() => go({ name: "library", notebook: "none", q: "" })}>Unfiled</Chip>
             {notebooks.map((nb) => <Chip key={nb.id} active={notebook === nb.id} onClick={() => go({ name: "library", notebook: nb.id, q: "" })}>{nb.name}</Chip>)}
             <Chip onClick={newNotebook}>+ Notebook</Chip>
+            <Chip onClick={() => go({ name: "graph" })}>Map</Chip>
           </div>
 
           {overdue && (

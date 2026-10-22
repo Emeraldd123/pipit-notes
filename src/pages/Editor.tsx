@@ -2,14 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, ArrowUpRight, Check, CheckCheck, Circle, Code2, Copy, Download, Eraser, FilePlus2, FileText,
   Hand, Highlighter, History, ImagePlus, Lasso, Loader2, Maximize2, Minus, MoreHorizontal, MousePointer2, Paintbrush, Pen,
-  Pencil, Printer, Redo2, Scissors, ScanText, Sigma, Square, Trash, Trash2, Type, Undo2, ZoomIn, ZoomOut, Sparkles,
+  Pencil, Printer, Redo2, Columns2, Scissors, ScanText, Sigma, Square, Trash, Trash2, Type, Undo2, ZoomIn, ZoomOut, Sparkles,
 } from "lucide-react";
 import { NoteCanvas, type CanvasImage, type NoteCanvasHandle, type Stroke, type Tool } from "@/components/note-canvas";
 import { BlocksLayer, BLOCK_DEFAULTS, Latex } from "@/components/blocks";
 import { Button, IconButton, Modal, Toast } from "@/components/ui";
-import type { BlockKind, BlockRec, NotePaper } from "@/types";
+import type { BlockKind, BlockRec, NoteMeta, NotePaper } from "@/types";
 import {
-  addImage, dataUrlToBlob, deleteBlock, deleteImage, deleteNote, listVersions, loadNote, maybeSnapshot, patchNote, putBlock,
+  addImage, dataUrlToBlob, deleteBlock, deleteImage, deleteNote, listNotes, listVersions, loadNote, maybeSnapshot, patchNote, putBlock,
   restoreVersion, snapshotDue, syncStrokes, updateImage, type LoadedNote,
 } from "@/lib/db";
 import { computeDelta, strokeSig } from "@/lib/delta";
@@ -81,7 +81,7 @@ function printImages(urls: string[]) {
   setTimeout(() => iframe.remove(), 60000);
 }
 
-export function EditorPage({ id, page }: { id: string; page?: number }) {
+export function EditorPage({ id, page, splitWith }: { id: string; page?: number; splitWith?: string }) {
   const [loaded, setLoaded] = useState<LoadedNote | null | undefined>(undefined);
   useEffect(() => {
     let alive = true;
@@ -89,6 +89,10 @@ export function EditorPage({ id, page }: { id: string; page?: number }) {
     void loadNote(id).then((n) => { if (alive) setLoaded(n); });
     return () => { alive = false; };
   }, [id]);
+  // Image object URLs live exactly as long as the loaded note. (Revoking them in
+  // the editor's own cleanup broke images under React StrictMode's mount/unmount/
+  // mount: the simulated unmount revoked URLs the real mount then tried to load.)
+  useEffect(() => () => { loaded?.images.forEach((i) => URL.revokeObjectURL(i.data)); }, [loaded]);
   if (loaded === undefined) return <div className="flex h-full items-center justify-center text-sm text-foreground-muted"><Loader2 size={16} className="mr-2 animate-spin" /> Opening…</div>;
   if (loaded === null) return (
     <div className="flex h-full flex-col items-center justify-center gap-3 text-sm">
@@ -96,12 +100,16 @@ export function EditorPage({ id, page }: { id: string; page?: number }) {
       <Button onClick={() => go({ name: "library", notebook: null, q: "" })}>Back to notes</Button>
     </div>
   );
-  return <Editor key={id} note={loaded} startPage={page} />;
+  return <Editor key={id} note={loaded} startPage={page} splitWith={splitWith} />;
 }
 
 type SaveState = "saved" | "saving" | "error";
 
-function Editor({ note, startPage }: { note: LoadedNote; startPage?: number }) {
+// Which editor pane last received input — so keyboard shortcuts only act on the
+// pane you're using when two notes are open side by side.
+let activeEditor: string | null = null;
+
+function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: number; splitWith?: string }) {
   const noteId = note.meta.id;
   const settings = useSettings();
   const ai = aiReady(settings);
@@ -133,6 +141,7 @@ function Editor({ note, startPage }: { note: LoadedNote; startPage?: number }) {
   const [blocks, setBlocks] = useState<BlockRec[]>(note.blocks);
   const [running, setRunning] = useState<string | null>(null);
   const [check, setCheck] = useState<{ lines: WorkingLine[]; results: StepResult[] } | null>(null);
+  const [picking, setPicking] = useState<NoteMeta[] | null>(null);
 
   // page scrubber
   const [scrub, setScrub] = useState<number | null>(null);
@@ -207,9 +216,8 @@ function Editor({ note, startPage }: { note: LoadedNote; startPage?: number }) {
       window.removeEventListener("pagehide", onPageHide);
       if (saveTimer.current) clearTimeout(saveTimer.current);
       void flushRef.current(); // leaving the note: write whatever is pending
-      note.images.forEach((i) => URL.revokeObjectURL(i.data));
     };
-  }, [note.images]);
+  }, []);
 
   // open at a specific page (from a search result)
   useEffect(() => {
@@ -228,6 +236,7 @@ function Editor({ note, startPage }: { note: LoadedNote; startPage?: number }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (activeEditor !== null && activeEditor !== noteId) return;
       const t = e.target as HTMLElement;
       if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT") return;
       const mod = e.metaKey || e.ctrlKey;
@@ -238,7 +247,7 @@ function Editor({ note, startPage }: { note: LoadedNote; startPage?: number }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [noteId]);
 
   // --- camera → blocks overlay (direct DOM, no React state per frame) ------------------
   const onCameraChange = useCallback((c: { scale: number; camX: number; camY: number }) => {
@@ -429,7 +438,7 @@ function Editor({ note, startPage }: { note: LoadedNote; startPage?: number }) {
   const Sep = () => <div className="mx-1 h-6 w-px shrink-0 bg-border md:mx-0 md:my-1 md:h-px md:w-6" />;
 
   return (
-    <div className="safe-t flex h-full flex-col overflow-hidden bg-background">
+    <div className="safe-t flex h-full flex-col overflow-hidden bg-background" onPointerDownCapture={() => { activeEditor = noteId; }}>
       <header className="flex shrink-0 items-center gap-2 border-b border-border bg-surface px-3 py-2">
         <IconButton title="Back to notes" onClick={() => { void flush().then(() => go({ name: "library", notebook: note.meta.notebookId, q: "" })); }}><ArrowLeft size={18} /></IconButton>
         <input value={title} onChange={(e) => setTitle(e.target.value)} onBlur={commitTitle}
@@ -448,6 +457,11 @@ function Editor({ note, startPage }: { note: LoadedNote; startPage?: number }) {
               <div className="absolute right-0 z-40 mt-1 w-64 rounded-xl border border-border bg-surface p-1 text-sm shadow-xl">
                 <MenuItem icon={<ScanText size={15} />} label="Read handwriting for search" onClick={indexThisNote} />
                 <MenuItem icon={<History size={15} />} label="Version history" onClick={openHistory} />
+                {splitWith ? (
+                  <MenuItem icon={<Columns2 size={15} />} label="Close split (keep this note)" onClick={() => go({ name: "note", id: noteId })} />
+                ) : (
+                  <MenuItem icon={<Columns2 size={15} />} label="Open another note beside this" onClick={async () => { setMenu(false); setPicking((await listNotes()).filter((n) => n.id !== noteId)); }} />
+                )}
                 <div className="my-1 h-px bg-border" />
                 <MenuItem icon={<FileText size={15} />} label="Export as PDF" onClick={exportPdf} />
                 <MenuItem icon={<Download size={15} />} label="Export as PNG" onClick={exportPng} />
@@ -589,6 +603,21 @@ function Editor({ note, startPage }: { note: LoadedNote; startPage?: number }) {
         </Modal>
       )}
 
+      {picking && (
+        <Modal title="Open beside this note" onClose={() => setPicking(null)}>
+          {picking.length === 0 ? <p className="text-sm text-foreground-muted">No other notes yet.</p> : (
+            <ul className="space-y-1.5">
+              {picking.map((n) => (
+                <li key={n.id}>
+                  <button onClick={() => go({ name: "split", a: noteId, b: n.id })} className="flex w-full items-center justify-between rounded-xl border border-border px-4 py-2.5 text-left text-sm hover:border-primary/60">
+                    <span className="truncate font-medium">{n.title}</span><span className="ml-3 shrink-0 text-xs text-foreground-muted">{n.pageCount} p · {timeAgo(n.updatedAt)}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Modal>
+      )}
       {check && <CheckModal check={check} onClose={() => setCheck(null)} />}
       <Toast msg={toast} />
     </div>

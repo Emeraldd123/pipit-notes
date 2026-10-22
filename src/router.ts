@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 export type Route =
   | { name: "library"; notebook: string | null; q: string }
   | { name: "note"; id: string; page?: number }
+  | { name: "split"; a: string; b: string }
+  | { name: "graph" }
   | { name: "search" }
   | { name: "settings" };
 
@@ -17,6 +19,8 @@ export function parseHash(hash: string): Route {
     const pg = sp.get("p");
     return { name: "note", id: decodeURIComponent(parts[1]), page: pg != null && /^\d+$/.test(pg) ? Number(pg) : undefined };
   }
+  if (parts[0] === "split" && parts[1] && parts[2]) return { name: "split", a: decodeURIComponent(parts[1]), b: decodeURIComponent(parts[2]) };
+  if (parts[0] === "graph") return { name: "graph" };
   if (parts[0] === "search") return { name: "search" };
   if (parts[0] === "settings") return { name: "settings" };
   return { name: "library", notebook: sp.get("nb"), q: sp.get("q") ?? "" };
@@ -25,6 +29,8 @@ export function parseHash(hash: string): Route {
 export function href(r: Route): string {
   switch (r.name) {
     case "note": return `#/n/${encodeURIComponent(r.id)}${r.page != null ? `?p=${r.page}` : ""}`;
+    case "split": return `#/split/${encodeURIComponent(r.a)}/${encodeURIComponent(r.b)}`;
+    case "graph": return "#/graph";
     case "search": return "#/search";
     case "settings": return "#/settings";
     case "library": {
