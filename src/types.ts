@@ -40,7 +40,7 @@ export type ImageRec = {
 };
 
 // Text / code blocks that live on a note, positioned in document coordinates.
-export type BlockKind = "code" | "text" | "math";
+export type BlockKind = "code" | "text" | "math" | "graph";
 export type BlockRec = {
   id: string;
   noteId: string;

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import katex from "katex";
-import { Check, Code2, Loader2, Pencil, Play, Sigma, Trash2, Type } from "lucide-react";
+import { Check, Code2, LineChart, Loader2, Pencil, Play, Sigma, Trash2, Type } from "lucide-react";
+import { GraphCanvas } from "./graph-canvas";
 import type { BlockRec } from "@/types";
 
 export function Latex({ source, display = true, className = "" }: { source: string; display?: boolean; className?: string }) {
@@ -33,6 +34,7 @@ export const BLOCK_DEFAULTS: Record<BlockRec["kind"], { width: number; height: n
   code: { width: 620, height: 220 },
   text: { width: 520, height: 120 },
   math: { width: 520, height: 110 },
+  graph: { width: 560, height: 380 },
 };
 
 /**
@@ -70,7 +72,7 @@ function BlockView({
   b: BlockRec; interactive: boolean; scaleRef: React.RefObject<number>; running: boolean;
   onChange: (b: BlockRec) => void; onDelete: (id: string) => void; onRun: (b: BlockRec) => void;
 }) {
-  const [editing, setEditing] = useState(b.kind !== "math" || !b.text);
+  const [editing, setEditing] = useState((b.kind !== "math" && b.kind !== "graph") || !b.text);
   const drag = useRef<{ sx: number; sy: number; x: number; y: number } | null>(null);
   const size = useRef<{ sx: number; sy: number; w: number; h: number } | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -83,8 +85,8 @@ function BlockView({
     if (ta) { ta.style.height = "0px"; ta.style.height = `${ta.scrollHeight}px`; }
   }, [b.text, editing, b.width]);
 
-  const Icon = b.kind === "code" ? Code2 : b.kind === "math" ? Sigma : Type;
-  const label = b.kind === "code" ? "Python" : b.kind === "math" ? "Math" : "Text";
+  const Icon = b.kind === "code" ? Code2 : b.kind === "math" ? Sigma : b.kind === "graph" ? LineChart : Type;
+  const label = b.kind === "code" ? "Python" : b.kind === "math" ? "Math" : b.kind === "graph" ? "Graph" : "Text";
   const border = b.kind === "text" ? "border-transparent hover:border-border" : "border-border";
 
   const onDragDown = (e: React.PointerEvent) => {
@@ -116,7 +118,7 @@ function BlockView({
     try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* */ }
   };
 
-  const fontPx = b.kind === "code" ? 22 : 26;
+  const fontPx = b.kind === "code" || b.kind === "graph" ? 22 : 26;
   const pe = interactive ? "auto" : "none";
 
   return (
@@ -136,7 +138,7 @@ function BlockView({
             {running ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />} Run
           </button>
         )}
-        {b.kind === "math" && (
+        {(b.kind === "math" || b.kind === "graph") && (
           <button onClick={() => setEditing((v) => !v)} className="flex items-center gap-1 rounded-lg px-2 py-1 text-foreground-muted hover:bg-surface-secondary" style={{ fontSize: 15 }}>
             {editing ? <Check size={14} /> : <Pencil size={14} />} {editing ? "Done" : "Edit"}
           </button>
@@ -145,7 +147,7 @@ function BlockView({
       </div>
 
       <div style={{ pointerEvents: pe }}>
-        {b.kind === "math" && !editing ? (
+        {b.kind === "graph" && !editing ? null : b.kind === "math" && !editing ? (
           <div className="overflow-x-auto px-4 py-3" onDoubleClick={() => setEditing(true)}><Latex source={b.text} /></div>
         ) : (
           <textarea
@@ -155,11 +157,12 @@ function BlockView({
             spellCheck={b.kind === "text"}
             autoCapitalize="off"
             autoCorrect="off"
-            placeholder={b.kind === "code" ? "# python — sympy, numpy, matplotlib available" : b.kind === "math" ? "LaTeX, e.g. \\frac{dy}{dx} = 2x + 3" : "Type here…"}
-            className={`block w-full resize-none bg-transparent px-4 py-3 outline-none ${b.kind === "code" ? "font-mono" : ""}`}
+            placeholder={b.kind === "graph" ? "y = x^2 + 3x   (one equation per line)" : b.kind === "code" ? "# python — sympy, numpy, matplotlib available" : b.kind === "math" ? "LaTeX, e.g. \\frac{dy}{dx} = 2x + 3" : "Type here…"}
+            className={`block w-full resize-none bg-transparent px-4 py-3 outline-none ${b.kind === "code" || b.kind === "graph" ? "font-mono" : ""}`}
             style={{ minHeight: 64, fontSize: fontPx, lineHeight: 1.45, userSelect: "text", WebkitUserSelect: "text", pointerEvents: pe, fontFamily: b.kind === "code" ? "ui-monospace, SFMono-Regular, Menlo, monospace" : undefined }}
           />
         )}
+        {b.kind === "graph" && <GraphCanvas text={b.text} width={b.width} interactive={interactive} />}
         {b.kind === "math" && editing && b.text && (
           <div className="overflow-x-auto border-t border-border/70 px-4 py-2 text-foreground-muted" style={{ fontSize: 22 }}><Latex source={b.text} /></div>
         )}

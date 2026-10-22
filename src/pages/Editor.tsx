@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, ArrowLeftRight, ArrowUpRight, Check, CheckCheck, Circle, Code2, Copy, Download, Eraser, FilePlus2, FileText,
-  Hand, Highlighter, History, ImagePlus, Lasso, Loader2, Maximize2, Minus, MoreHorizontal, MousePointer2, Paintbrush, Pen,
+  Hand, Highlighter, History, LineChart, ImagePlus, Lasso, Loader2, Maximize2, Minus, MoreHorizontal, MousePointer2, Paintbrush, Pen,
   Pencil, Printer, Redo2, Columns2, FileCode2, FlaskConical, Network, Shapes, TextCursorInput, Wand2, Scissors, ScanText, Sigma, Square, Trash, Trash2, Type, Undo2, ZoomIn, ZoomOut, Sparkles,
 } from "lucide-react";
 import { NoteCanvas, type CanvasImage, type NoteCanvasHandle, type Stroke, type Tool } from "@/components/note-canvas";
@@ -634,6 +634,7 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
             <IconButton title="Add a Python block (tap with the Blocks tool to place one)" onClick={() => addBlock("code")}><Code2 size={17} /></IconButton>
             <IconButton title="Add a text block" onClick={() => addBlock("text")}><Type size={17} /></IconButton>
             <IconButton title="Add a maths (LaTeX) block" onClick={() => addBlock("math")}><Sigma size={17} /></IconButton>
+            <IconButton title="Add a graph block (type y = x^2, x^2 + y^2 = 25, z = sin(x)cos(y)…)" onClick={() => { count("graph.add"); addBlock("graph", undefined, "y = x^2"); }}><LineChart size={17} /></IconButton>
             <IconButton title="Edit blocks (blocks take touch)" active={blockMode} onClick={() => setTool(blockMode ? "pen" : "block")}><Sparkles size={17} /></IconButton>
             <IconButton title="Insert image" onClick={() => fileRef.current?.click()}><ImagePlus size={17} /></IconButton>
           </div>
