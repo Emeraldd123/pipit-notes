@@ -85,6 +85,10 @@ export function SettingsPage() {
             <span><strong>Enable AI features</strong><span className="block text-xs text-foreground-muted">Off by default.</span></span>
             <input type="checkbox" checked={s.aiEnabled} onChange={(e) => updateSettings({ aiEnabled: e.target.checked })} className="h-5 w-5 accent-[var(--primary)]" />
           </label>
+          <label className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-border px-4 py-3 text-sm">
+            <span><strong>Keep search up to date automatically</strong><span className="block text-xs text-foreground-muted">When you leave a note, pages you changed are read so search stays fresh (one AI call per changed page). Off by default.</span></span>
+            <input type="checkbox" checked={s.autoIndex} disabled={!s.aiEnabled} onChange={(e) => updateSettings({ autoIndex: e.target.checked })} className="h-5 w-5 accent-[var(--primary)]" />
+          </label>
           <label className="mt-3 block text-xs text-foreground-muted">Anthropic API key
             <input type="password" value={s.apiKey} onChange={(e) => updateSettings({ apiKey: e.target.value })} placeholder="sk-ant-…" autoComplete="off" autoCapitalize="off" spellCheck={false}
               className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2.5 font-mono text-sm text-foreground outline-none focus:border-primary" />

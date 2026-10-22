@@ -2,14 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, ArrowUpRight, Check, CheckCheck, Circle, Code2, Copy, Download, Eraser, FilePlus2, FileText,
   Hand, Highlighter, History, ImagePlus, Lasso, Loader2, Maximize2, Minus, MoreHorizontal, MousePointer2, Paintbrush, Pen,
-  Pencil, Printer, Redo2, Columns2, Scissors, ScanText, Sigma, Square, Trash, Trash2, Type, Undo2, ZoomIn, ZoomOut, Sparkles,
+  Pencil, Printer, Redo2, Columns2, FileCode2, Network, Shapes, Scissors, ScanText, Sigma, Square, Trash, Trash2, Type, Undo2, ZoomIn, ZoomOut, Sparkles,
 } from "lucide-react";
 import { NoteCanvas, type CanvasImage, type NoteCanvasHandle, type Stroke, type Tool } from "@/components/note-canvas";
 import { BlocksLayer, BLOCK_DEFAULTS, Latex } from "@/components/blocks";
 import { Button, IconButton, Modal, Toast } from "@/components/ui";
 import type { BlockKind, BlockRec, NoteMeta, NotePaper } from "@/types";
 import {
-  addImage, dataUrlToBlob, deleteBlock, deleteImage, deleteNote, listNotes, listVersions, loadNote, maybeSnapshot, patchNote, putBlock,
+  addImage, dataUrlToBlob, deleteBlock, deleteImage, deleteNote, getPageTexts, listNotes, listVersions, loadNote, maybeSnapshot, patchNote, putBlock,
   restoreVersion, snapshotDue, syncStrokes, updateImage, type LoadedNote,
 } from "@/lib/db";
 import { computeDelta, strokeSig } from "@/lib/delta";
@@ -21,7 +21,10 @@ import { runPython } from "@/lib/py";
 import { AiError, readWorking, recognizeMath, type WorkingLine } from "@/lib/ai";
 import { verifyWorking, type StepResult } from "@/lib/stepcheck";
 import { indexNote } from "@/lib/search";
-import { aiReady, useSettings } from "@/lib/settings";
+import { buildLatexDocument } from "@/lib/latex";
+import { buildPageSvg } from "@/lib/svg";
+import { relatedTo } from "@/lib/related";
+import { aiReady, getSettings, useSettings } from "@/lib/settings";
 import { timeAgo } from "@/lib/format";
 import { go } from "@/router";
 
@@ -142,6 +145,7 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
   const [running, setRunning] = useState<string | null>(null);
   const [check, setCheck] = useState<{ lines: WorkingLine[]; results: StepResult[] } | null>(null);
   const [picking, setPicking] = useState<NoteMeta[] | null>(null);
+  const [related, setRelated] = useState<{ note: { id: string; title: string }; weight: number; shared: string[] }[] | null>(null);
 
   // page scrubber
   const [scrub, setScrub] = useState<number | null>(null);
@@ -216,8 +220,11 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
       window.removeEventListener("pagehide", onPageHide);
       if (saveTimer.current) clearTimeout(saveTimer.current);
       void flushRef.current(); // leaving the note: write whatever is pending
+      // Opt-in: keep search fresh by reading the pages you changed.
+      const st = getSettings();
+      if (st.autoIndex && aiReady(st)) void flushRef.current().then(() => indexNote(noteId)).catch(() => undefined);
     };
-  }, []);
+  }, [noteId]);
 
   // open at a specific page (from a search result)
   useEffect(() => {
@@ -390,6 +397,46 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
     go({ name: "library", notebook: null, q: "" });
   }
 
+  async function blobUrlToDataUrl(url: string): Promise<string> {
+    const blob = await (await fetch(url)).blob();
+    return new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result)); fr.onerror = rej; fr.readAsDataURL(blob); });
+  }
+  async function exportSvg() {
+    setMenu(false); setBusy("Building SVG…");
+    try {
+      await flush();
+      const l = await loadExportNote(noteId);
+      if (!l) return;
+      const imgs = await Promise.all(l.note.images.map(async (i) => ({ dataUrl: await blobUrlToDataUrl(i.data), x: i.x, y: i.y, width: i.width, height: i.height, rotation: i.rotation, zIndex: i.zIndex })));
+      const svg = buildPageSvg(currentPage, l.note.strokes, imgs);
+      l.release();
+      triggerDownload(new Blob([svg], { type: "image/svg+xml" }), `${safeName(title, "Note")}-page-${currentPage + 1}.svg`);
+    } catch (e) { flash("SVG export failed: " + (e as Error).message); } finally { setBusy(null); }
+  }
+  async function exportLatex() {
+    setMenu(false);
+    if (!ai) return flash("LaTeX export reads your handwriting with AI — turn it on in Settings first.");
+    setBusy("Reading your handwriting…");
+    try {
+      await flush();
+      await indexNote(noteId, (p) => setBusy(`Reading page ${p.page + 1}/${p.total}…`));
+      const texts = await getPageTexts(noteId);
+      const pages = Array.from({ length: pageCount }, (_, i) => {
+        const ink = texts.find((t) => t.page === i && t.source === "ink")?.text;
+        const pdf = texts.find((t) => t.page === i && t.source === "pdf")?.text;
+        return { page: i, text: ink || pdf || "" };
+      });
+      triggerDownload(new Blob([buildLatexDocument(title, pages)], { type: "application/x-tex" }), `${safeName(title, "Note")}.tex`);
+      flash("LaTeX exported — compile with pdflatex or paste into Overleaf.");
+    } catch (e) { flash(e instanceof AiError ? e.message : "LaTeX export failed: " + (e as Error).message); } finally { setBusy(null); }
+  }
+  async function showRelated() {
+    setMenu(false);
+    const [all, texts] = await Promise.all([listNotes(), getPageTexts()]);
+    const rel = relatedTo(noteId, all.map((n) => ({ id: n.id, title: n.title, notebookId: n.notebookId, pages: n.pageCount })), texts.map((t) => ({ noteId: t.noteId, text: t.text })), 8, 0.05);
+    setRelated(rel.map((r) => ({ note: { id: r.note.id, title: r.note.title }, weight: r.weight, shared: r.shared })));
+  }
+
   // --- AI: read this note for search --------------------------------------------------------------
   async function indexThisNote() {
     setMenu(false);
@@ -457,6 +504,7 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
               <div className="absolute right-0 z-40 mt-1 w-64 rounded-xl border border-border bg-surface p-1 text-sm shadow-xl">
                 <MenuItem icon={<ScanText size={15} />} label="Read handwriting for search" onClick={indexThisNote} />
                 <MenuItem icon={<History size={15} />} label="Version history" onClick={openHistory} />
+                <MenuItem icon={<Network size={15} />} label="Related notes" onClick={showRelated} />
                 {splitWith ? (
                   <MenuItem icon={<Columns2 size={15} />} label="Close split (keep this note)" onClick={() => go({ name: "note", id: noteId })} />
                 ) : (
@@ -465,6 +513,8 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
                 <div className="my-1 h-px bg-border" />
                 <MenuItem icon={<FileText size={15} />} label="Export as PDF" onClick={exportPdf} />
                 <MenuItem icon={<Download size={15} />} label="Export as PNG" onClick={exportPng} />
+                <MenuItem icon={<Shapes size={15} />} label="Export this page as SVG" onClick={exportSvg} />
+                <MenuItem icon={<FileCode2 size={15} />} label="Export as LaTeX (reads handwriting)" onClick={exportLatex} />
                 <MenuItem icon={<Printer size={15} />} label="Print" onClick={doPrint} />
                 <div className="my-1 h-px bg-border" />
                 <MenuItem icon={<Trash2 size={15} />} label="Delete note" danger onClick={onDeleteNote} />
@@ -611,6 +661,22 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
                 <li key={n.id}>
                   <button onClick={() => go({ name: "split", a: noteId, b: n.id })} className="flex w-full items-center justify-between rounded-xl border border-border px-4 py-2.5 text-left text-sm hover:border-primary/60">
                     <span className="truncate font-medium">{n.title}</span><span className="ml-3 shrink-0 text-xs text-foreground-muted">{n.pageCount} p · {timeAgo(n.updatedAt)}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Modal>
+      )}
+      {related && (
+        <Modal title="Related notes" onClose={() => setRelated(null)}>
+          {related.length === 0 ? <p className="text-sm text-foreground-muted">Nothing similar yet. Related notes show up as you add more notes and “read” your handwriting (Search → Read my handwriting).</p> : (
+            <ul className="space-y-1.5">
+              {related.map((r) => (
+                <li key={r.note.id}>
+                  <button onClick={() => go({ name: "split", a: noteId, b: r.note.id })} className="w-full rounded-xl border border-border px-4 py-2.5 text-left hover:border-primary/60">
+                    <span className="block truncate text-sm font-medium">{r.note.title}</span>
+                    <span className="block truncate text-xs text-foreground-muted">{r.shared.join(", ")} · open beside this note</span>
                   </button>
                 </li>
               ))}
