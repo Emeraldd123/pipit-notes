@@ -15,7 +15,14 @@ A private, offline-first handwriting notebook. **No account, no server** — eve
   - *Review for mistakes* (⋯ menu) — pick pages or the whole note; every mistake is found and you step through them **top to bottom**, with the spot highlighted on the page, the explanation and the fix. Mark fixed / dismiss false alarms.
   - *Search & ask* — instant local search; ask questions answered from your own notes with citations.
   - *Practice exams* generated from your notes.
-- **Organise**: notebooks, split view (two notes side by side), a knowledge map that links related notes (local TF-IDF, no AI).
+- **Study** (opt-in AI to *make* material; everything else runs on the device):
+  - *Flashcards* generated from your notes (or a lasso, an Explain answer, a review mistake) with spaced repetition (SM-2 style).
+  - *Lessons* Duolingo-style: short sessions mixing matching, multiple choice, typing, fill-in-the-blank, ordering steps and self-graded flashcards; wrong answers come round again; hearts, combo, XP, daily goal, streak, a skill path per topic with crowns, sound effects.
+  - *Quick quizzes* from your cards, scored at the end.
+  - *Practice exams* written from your notes in the style of real papers: structured multi-part questions with **graphs, data tables, charts, diagrams and pictures cut from your own PDFs**. Timed; multiple-choice and numeric parts are marked locally, written/handwritten answers are marked by AI against a marking scheme; results by topic, model answers, one-tap flashcards for what you missed.
+  - *Mistake log*: every mistake found by Review for mistakes, grouped by type so you can see your patterns.
+- **Organise**: notebooks, multi-select (move / tag / export / delete), tags, a Recent view, batch PDF import, a pages panel (reorder, duplicate, insert, delete pages), split view, a knowledge map (local TF-IDF, no AI), search hits highlighted on PDF pages.
+- **Draw**: ruler (strokes snap to its edge) and protractor, pen presets + recent colours, a text tool, page templates (axes, number line, unit circle, periodic table, tables), optional scribble-to-erase, share a note as a PDF.
 - **Export**: PDF, PNG, SVG, LaTeX, whole notebook as a ZIP of PDFs.
 - **Safe**: installable PWA, persistent storage, one-tap backup to iCloud Drive (share sheet), restore/merge on any device.
 
@@ -57,7 +64,7 @@ Nothing else: no database, no accounts, no other keys.
     npm run dev          # http://localhost:5173
     npm run build        # static site in dist/
     npm run typecheck
-    npm test             # 80+ tests; step-checker tests need python + sympy (skipped otherwise)
+    npm test             # 120+ tests; step-checker tests need python + sympy (skipped otherwise)
 
 ## Monitoring (so problems can be found and fixed)
 
@@ -119,6 +126,9 @@ Notes never leave the device unless you export or back them up. AI features send
     src/lib/bundle-format.ts         backup format (shared with tools/)
     src/lib/{chem,stepcheck,py,ai,search,related,latex,svg}.ts
     src/lib/{mathexpr,graph-render,review-core}.ts   graphing + mistake review (pure, tested)
+    src/lib/{srs,study-core,exam-core,figure-core}.ts  study engine + exams + figure geometry (pure, tested)
+    src/lib/{ai-study,study-actions,study-db}.ts       study AI prompts, glue, persistence
+    src/pages/StudyPage.tsx, src/components/{lesson,exam-runner,figure,ink-pad}.tsx
     src/lib/{telemetry,telemetry-core,health,report}.ts   monitoring
     netlify/                         diagnostics endpoint (Function + handler)
     src/pages/                       Library, Editor, Search, Graph, Settings
