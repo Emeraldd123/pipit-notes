@@ -16,7 +16,12 @@ const CARDS_SYSTEM =
   'Use kind "cloze" for fill-in-the-blank: front is a sentence with ____ where the answer goes, back is just the missing term. ' +
   'Use kind "steps" for ordered procedures of 3–7 steps: front asks for the order, "steps" lists them correctly, back is a one-line summary. ' +
   '"topic" is a short unit name (1–3 words) and MUST be reused consistently for related cards. "src" is the excerpt number the card came from. ' +
-  "Use LaTeX in $...$ for maths and chemistry. Never invent facts that are not supported by the notes; skip anything unclear.";
+  "Every card must be ANSWERABLE on a tablet keyboard: the back must be plain words or a plain number (optionally with a unit), never something that needs special symbols " +
+  "(²  √  ∆  ≥  →  subscripts, ratios like S²:V²). If the idea is a formula, ratio or expression, do NOT ask the student to type it — ask about its MEANING instead " +
+  '(e.g. "What happens to the SA:V ratio as a cell gets bigger?" → "It decreases"), or ask for a value ("Surface area of a 2 cm cube?" → "24 cm²" is fine only as plain text like "24 cm2"). ' +
+  "Each card needs ONE unambiguous answer that the notes actually give; skip questions that are open-ended, need a diagram, or that you could not mark as right or wrong. " +
+  "Inside JSON strings write every LaTeX backslash DOUBLED (\\\\frac, \\\\Delta) so the JSON stays valid. Use LaTeX in $...$ for maths and chemistry in the displayed text only. " +
+  "Never invent facts that are not supported by the notes; skip anything unclear.";
 
 function toRawCards(raw: string): RawCard[] {
   const j = extractJson<{ cards?: RawCard[] }>(raw);
@@ -85,7 +90,8 @@ Make it feel like a real paper, not a quiz:
 - Use data and visuals wherever the subject allows: tables of experimental results, graphs to read or interpret, diagrams to label or calculate from, charts to compare. Questions must REQUIRE the figure ("Using the graph…", "From the table…") — never put a figure in just for decoration.
 - Include a short multiple-choice section (4 options, one correct) with some figure-based items, a short-answer/structured section, and 1–2 extended or applied questions that combine several ideas from different parts of the notes.
 - Numbers must be consistent: every answer you give must be derivable from the stem and figure. Double-check arithmetic and read values off the plotted functions exactly.
-- Stay within what the notes cover (you may apply it to new scenarios). Use LaTeX in $...$ for maths and chemistry.
+- Stay within what the notes cover (you may apply it to new scenarios). Use LaTeX in $...$ for maths and chemistry, and in the JSON write every LaTeX backslash DOUBLED (\\\\Delta, \\\\frac) so the JSON stays valid.
+- Be economical: keep stems tight and each model answer and marking-scheme point to a line, so the WHOLE exam fits comfortably in one reply (never stop mid-way).
 - Each part has: "type" ("mcq" | "numeric" | "short" | "working" | "tf"), "marks", "prompt", the model "answer", and a marking "scheme" (an array of the points that earn marks). mcq parts add "options" and "correct" (index from 0). numeric parts add "numeric":{"value":12.5,"tol":0.02,"unit":"m/s"} — tol is relative (0.02 = 2%). "working" = show-your-working or extended response. A one-part question may put these fields on the question itself.
 ${FIGURE_DOC}
 Return STRICT JSON only:
@@ -101,7 +107,7 @@ export async function generateExam(spec: ExamSpec): Promise<Exam> {
     (spec.figures ? "Lean heavily on figures, data and applied scenarios — at least half the questions should need one. " : "Include figures where they genuinely help. ") +
     (spec.images?.length ? "You may crop figures from the attached page images where one is clearly relevant. " : "")
   ));
-  const raw = await claude({ feature: "exam", maxTokens: 12000, system: EXAM_SYSTEM, user: content });
+  const raw = await claude({ feature: "exam", maxTokens: 16000, system: EXAM_SYSTEM, user: content });
   const exam = normalizeExam(extractJson<unknown>(raw));
   if (!exam) throw new AiError("The model's exam couldn't be read. Try again (a smaller exam often helps).");
   return exam;

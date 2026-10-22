@@ -3,6 +3,7 @@
 // an action that needs it (read a page, ask a question, check working, …).
 import { aiReady, getSettings } from "./settings";
 import { count, error as logErr, track, warn } from "./telemetry";
+import { JsonReplyError, parseModelJson } from "./json-repair.ts";
 import { normalizeIssues, type Issue } from "./review-core.ts";
 
 export class AiError extends Error {}
@@ -78,18 +79,17 @@ export async function claude(opts: {
   return (data.content ?? []).filter((b: { type: string }) => b.type === "text").map((b: { text: string }) => b.text).join("");
 }
 
-/** Pull the first JSON object/array out of a model reply (tolerates ``` fences / chatter). */
+/** Pull the first JSON object/array out of a model reply (tolerates fences, chatter, LaTeX backslashes, cut-off replies). */
 export function extractJson<T>(raw: string): T {
-  const start = raw.search(/[{[]/);
-  if (start < 0) throw new AiError("The model didn't return structured data.");
-  const open = raw[start];
-  const close = open === "{" ? "}" : "]";
-  const end = raw.lastIndexOf(close);
-  if (end <= start) throw new AiError("The model's reply was cut off.");
   try {
-    return JSON.parse(raw.slice(start, end + 1)) as T;
-  } catch {
-    throw new AiError("Couldn't parse the model's reply.");
+    return parseModelJson<T>(raw);
+  } catch (e) {
+    if (e instanceof JsonReplyError && e.truncated) {
+      warn("ai", "reply could not be parsed (cut off)", { chars: raw.length });
+      throw new AiError("The model's reply was cut off before it finished. Try again with fewer questions or a smaller scope.");
+    }
+    warn("ai", "reply could not be parsed", { chars: raw.length });
+    throw new AiError((e as Error).message || "Couldn't parse the model's reply.");
   }
 }
 

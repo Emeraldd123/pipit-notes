@@ -62,6 +62,7 @@ function TypedView({ ex, locked, report }: ViewProps<Extract<Exercise, { kind: "
       <input autoFocus value={v} disabled={locked} onChange={(e) => change(e.target.value)} autoCapitalize="off" autoCorrect="off" spellCheck={false}
         placeholder="Type your answer" className="w-full rounded-2xl border-2 border-border bg-surface px-4 py-3.5 text-lg outline-none focus:border-primary disabled:opacity-70" />
       {ex.hint && !locked && <p className="mt-3 text-sm text-foreground-muted">Hint: <RichText text={ex.hint} /></p>}
+      {!locked && <button onClick={() => report({ ready: true, correct: false, auto: true, shown: ex.answer })} className="mt-4 text-sm text-foreground-muted underline decoration-dotted hover:text-foreground">I can&apos;t type this — show me the answer</button>}
     </div>
   );
 }
@@ -200,9 +201,11 @@ export type LessonResult = { outcomes: Outcome[]; stats: LessonStats; xp: number
 
 const CONFETTI = ["🎉", "✨", "⭐", "🎊", "💫"];
 
-export function LessonRunner({ title, cards, exercises, progress, quiz, onFinish, onExit }: {
+export function LessonRunner({ title, cards, exercises, progress, quiz, onFinish, onExit, onFlagCard }: {
   title: string; cards: Card[]; exercises: Exercise[]; progress: Progress; quiz?: boolean;
   onFinish: (r: LessonResult) => void; onExit: () => void;
+  /** "This card is bad" — the card is paused for good (and its retry is dropped from this lesson). */
+  onFlagCard?: (cardId: string) => void;
 }) {
   const cardMap = useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards]);
   const startProgress = useRef(progress).current; // the summary shows before/after, so it must not see the already-saved update
@@ -321,6 +324,12 @@ export function LessonRunner({ title, cards, exercises, progress, quiz, onFinish
                 {wrong ? <X size={20} /> : <Check size={20} />} {wrong ? "Not quite" : ["Correct!", "Nice!", "Great!", "Perfect!"][Math.min(3, Math.floor(combo / 2))]}
               </p>
               {wrong && rep.shown && <p className="mt-0.5 text-sm"><span className="text-foreground-muted">Answer: </span><RichText text={rep.shown} /></p>}
+              {wrong && onFlagCard && cur.ex.kind !== "match" && (
+                <button className="mt-1 text-xs text-foreground-muted underline decoration-dotted hover:text-negative"
+                  onClick={() => { const id = exerciseCards(cur.ex)[0]; onFlagCard(id); setQueue((q) => q.filter((it, idx) => idx <= i || exerciseCards(it.ex)[0] !== id)); setRep((r) => ({ ...r, shown: "Card removed — it won't come up again." })); }}>
+                  Bad or unanswerable card? Remove it
+                </button>
+              )}
               {!wrong && cur.ex.kind !== "match" && checkCloseNote(cur.ex, rep)}
             </div>
           ) : <span className="text-sm text-foreground-muted">{isAutoKind ? "" : "Pick or type your answer"}</span>}

@@ -168,7 +168,8 @@ export function StudyPage({ view }: { view?: string }) {
 
   // --- session overlays ----------------------------------------------------------------------------------------------------
   if (progress && session?.kind === "lesson") {
-    return <LessonRunner title={session.title} cards={cards} exercises={session.exercises} progress={progress} quiz={session.quiz} onFinish={(r) => void onLessonFinish(r)} onExit={() => setSession(null)} />;
+    return <LessonRunner title={session.title} cards={cards} exercises={session.exercises} progress={progress} quiz={session.quiz} onFinish={(r) => void onLessonFinish(r)} onExit={() => setSession(null)}
+      onFlagCard={(id) => { const c = cards.find((x) => x.id === id); if (c) { void putCards([{ ...c, suspended: true, updatedAt: Date.now() }]); count("study.card.flagged"); } }} />;
   }
   if (session?.kind === "exam") return <ExamRunner exam={session.exam} onSubmit={(a, s) => void submitExam(session.exam, session.rec.id, a, s)} onExit={() => setSession(null)} />;
   if (session?.kind === "marking") return <MarkingScreen message={session.message} />;

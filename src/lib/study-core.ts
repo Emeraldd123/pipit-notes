@@ -45,6 +45,9 @@ export function normalizeAnswer(s: string): string {
   return s
     .toLowerCase()
     .replace(/[−–—]/g, "-")
+    // symbols a tablet keyboard doesn't have must still be answerable in plain letters and digits
+    .replace(/²/g, "^2").replace(/³/g, "^3").replace(/\bsquared\b/g, "^2").replace(/\bcubed\b/g, "^3")
+    .replace(/[×·]/g, "*").replace(/→/g, "->").replace(/≥/g, ">=").replace(/≤/g, "<=").replace(/√/g, "sqrt").replace(/π/g, "pi")
     .replace(/\\(?:left|right|,|;|!|text|mathrm|cdot|times)/g, (m) => (m === "\\cdot" || m === "\\times" ? "*" : ""))
     .replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, "($1)/($2)")
     .replace(/[$\\{}]/g, "")
@@ -53,7 +56,7 @@ export function normalizeAnswer(s: string): string {
     .replace(/\s+/g, " ")
     .trim();
 }
-const squash = (s: string) => normalizeAnswer(s).replace(/[\s()*]/g, "");
+const squash = (s: string) => normalizeAnswer(s).replace(/[\s()*^]/g, "");
 
 export function levenshtein(a: string, b: string): number {
   if (a === b) return 0;
@@ -135,15 +138,22 @@ export type Exercise =
 export const exerciseCards = (e: Exercise): string[] => (e.kind === "match" ? e.cardIds : [e.cardId]);
 
 const wordCount = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;
-const typable = (c: Card) => c.back.length <= 40 && wordCount(c.back) <= 6;
+/** Short, plain answers only: nothing that needs symbols a tablet keyboard lacks (², √, ∆, subscripts, LaTeX, "^"). */
+export const isTypable = (s: string) => s.length > 0 && s.length <= 40 && wordCount(s) <= 6 && /^[\x20-\x7e]*$/.test(s) && !/[\\$_{}^]/.test(s);
+const typable = (c: Card) => isTypable(c.back);
 
 function exerciseFor(card: Card, pool: Card[], rng: Rng, forceKind?: Exercise["kind"]): Exercise {
   const crowns = crownOf(card);
   const flip: Exercise = { kind: "flip", cardId: card.id, front: card.front, back: card.back };
   if (card.kind === "steps" && (card.steps?.length ?? 0) >= 3) return { kind: "order", cardId: card.id, prompt: card.front, steps: card.steps! };
-  if (card.kind === "cloze") return { kind: "cloze", cardId: card.id, prompt: card.front, answer: card.back, alts: [], hint: card.hint };
   const distractors = pickDistractors(card, pool, 3, rng);
   const canMcq = distractors.length >= 3 && card.back.length <= 120;
+  if (card.kind === "cloze") {
+    if (typable(card)) return { kind: "cloze", cardId: card.id, prompt: card.front, answer: card.back, alts: [], hint: card.hint };
+    // the blank can't be typed on a tablet → choose from options instead (or just reveal it)
+    if (canMcq) { const options = shuffle([card.back, ...distractors], rng); return { kind: "mcq", cardId: card.id, prompt: card.front, options, answer: options.indexOf(card.back) }; }
+    return flip;
+  }
   const canTf = pool.filter((c) => c.id !== card.id && c.kind === "basic").length >= 1 && card.back.length <= 120;
   const kinds: Exercise["kind"][] =
     crowns === 0 ? [canMcq ? "mcq" : "flip", canTf ? "tf" : "flip", "flip"]
