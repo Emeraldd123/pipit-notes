@@ -10,6 +10,7 @@ import { useCallback, useEffect, useImperativeHandle, useRef } from "react";
 import type { NoteTool, NotePaper, StrokeInput } from "@/types";
 import { newStrokeId } from "@/lib/ids";
 import { isScribble, strokesUnder } from "@/lib/scribble";
+import { nearGuide, projectOnGuide } from "@/lib/guides";
 import { PAGE_W, PAGE_H, PAGE_GAP, pageTop } from "@/lib/page";
 import { classifyStroke } from "@/lib/shapes";
 
@@ -258,6 +259,7 @@ export function NoteCanvas({
   onTapDoc,
   shapeSnap,
   scribbleErase,
+  guide,
   onPageChange,
   onSelectionChange,
   onSnipRegion,
@@ -287,6 +289,8 @@ export function NoteCanvas({
   shapeSnap?: boolean;
   /** A rapid zigzag over existing ink erases it instead of drawing. */
   scribbleErase?: boolean;
+  /** A ruler edge (document coordinates): strokes that start next to it are held to it. */
+  guide?: { a: { x: number; y: number }; b: { x: number; y: number } } | null;
   onPageChange?: (page: number, count: number) => void;
   onSelectionChange?: (has: boolean) => void;
   /** A `snip` lasso finished: a PNG of the lassoed region + its doc size. */
@@ -317,6 +321,9 @@ export function NoteCanvas({
   const tapRef = useRef<{ x: number; y: number } | null>(null);
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const snappedRef = useRef(false);
+  const guideRef = useRef(guide ?? null);
+  const guideLockRef = useRef(false);
+  useEffect(() => { guideRef.current = guide ?? null; }, [guide]);
   const scribbleRef = useRef(!!scribbleErase);
   useEffect(() => { scribbleRef.current = !!scribbleErase; }, [scribbleErase]);
   const shapeSnapRef = useRef(!!shapeSnap);
@@ -820,7 +827,9 @@ export function NoteCanvas({
     const r = rect();
     const v = viewRef.current;
     const p = pointerType === "pen" ? (pressure > 0 ? pressure : 0.5) : pressure > 0 && pressure !== 0.5 ? pressure : 0.5;
-    return { x: v.camX + (clientX - r.left) / v.scale, y: v.camY + (clientY - r.top) / v.scale, p };
+    const raw = { x: v.camX + (clientX - r.left) / v.scale, y: v.camY + (clientY - r.top) / v.scale };
+    if (guideLockRef.current && guideRef.current) return { ...projectOnGuide(raw, guideRef.current, 6 / v.scale), p };
+    return { ...raw, p };
   }
   function vpPoint(clientX: number, clientY: number) {
     const r = rect();
@@ -1313,7 +1322,8 @@ export function NoteCanvas({
       panRef.current = { sx: e.clientX, sy: e.clientY, camX: viewRef.current.camX, camY: viewRef.current.camY };
       return;
     }
-    const pt = eventToPoint(e.clientX, e.clientY, e.pressure, e.pointerType);
+    guideLockRef.current = false; // decided below, from where this stroke starts
+    let pt = eventToPoint(e.clientX, e.clientY, e.pressure, e.pointerType);
 
     if (t === "block" || t === "text") {
       tapRef.current = { x: pt.x, y: pt.y };
@@ -1360,6 +1370,11 @@ export function NoteCanvas({
     if (isShape(t)) {
       shapeStartRef.current = pt;
       return;
+    }
+    guideLockRef.current = false;
+    if (guideRef.current && nearGuide(pt, guideRef.current, 34 / viewRef.current.scale)) {
+      guideLockRef.current = true;
+      pt = { ...projectOnGuide(pt, guideRef.current, 6 / viewRef.current.scale), p: pt.p };
     }
     drawingRef.current = [pt];
     snappedRef.current = false;
@@ -1519,6 +1534,7 @@ export function NoteCanvas({
   }
 
   function onPointerUp(e: React.PointerEvent) {
+    guideLockRef.current = false;
     if (e.pointerType === "touch") {
       touches.current.delete(e.pointerId);
       if (touches.current.size < 2) pinchRef.current = null;

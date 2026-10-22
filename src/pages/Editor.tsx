@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, ArrowLeftRight, ArrowUpRight, Check, CheckCheck, Circle, Code2, Copy, Download, Eraser, FilePlus2, FileText,
-  Hand, Highlighter, History, Layers, Waves, Lightbulb, LineChart, ListChecks, ImagePlus, Lasso, Loader2, Maximize2, Minus, MoreHorizontal, MousePointer2, Paintbrush, Pen,
+  Compass, Grid3x3, Hand, Highlighter, History, Layers, Ruler, Waves, Lightbulb, LineChart, ListChecks, ImagePlus, Lasso, Loader2, Maximize2, Minus, MoreHorizontal, MousePointer2, Paintbrush, Pen,
   Pencil, Printer, Redo2, Columns2, FileCode2, FlaskConical, Network, Shapes, TextCursorInput, Wand2, Scissors, ScanText, Sigma, Square, Trash, Trash2, Type, Undo2, ZoomIn, ZoomOut, Sparkles,
 } from "lucide-react";
 import { NoteCanvas, type CanvasImage, type NoteCanvasHandle, type Stroke, type Tool } from "@/components/note-canvas";
 import { BlocksLayer, BLOCK_DEFAULTS, Latex } from "@/components/blocks";
+import { DrawingAids, type Cam, type ProtractorState } from "@/components/drawing-aids";
+import type { Segment } from "@/lib/guides";
+import { PX_PER_CM } from "@/lib/guides";
+import { TEMPLATES, renderTemplate, type TemplateId } from "@/lib/templates";
 import { PresetsButton } from "@/components/presets";
 import { PagesPanel } from "@/components/pages-panel";
 import { ExplainPanel, HighlightLayer, ReviewBar, ReviewSetup, type ExplainState, type Highlight, type ReviewState } from "@/components/understanding";
@@ -169,6 +173,14 @@ function Editor({ note, startPage, splitWith, onReload }: { note: LoadedNote; st
   const [check, setCheck] = useState<{ lines: WorkingLine[]; results: StepResult[] } | null>(null);
   const [picking, setPicking] = useState<NoteMeta[] | null>(null);
   const [chem, setChem] = useState<{ eq: ReadEquation; report: BalanceReport }[] | null>(null);
+  const [ruler, setRuler] = useState<Segment | null>(null);
+  const [protractor, setProtractor] = useState<ProtractorState | null>(null);
+  const [aidsCam, setAidsCam] = useState<Cam>({ scale: 1, camX: 0, camY: 0 });
+  const aidsOn = !!(ruler || protractor);
+  const aidsOnRef = useRef(false);
+  aidsOnRef.current = aidsOn;
+  const aidsFrame = useRef(0);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
   const [pagesOpen, setPagesOpen] = useState(false);
   const [pagesRev, setPagesRev] = useState(0);
   const [explain, setExplain] = useState<ExplainState | null>(null);
@@ -322,6 +334,7 @@ function Editor({ note, startPage, splitWith, onReload }: { note: LoadedNote; st
     const t = `scale(${c.scale}) translate(${-c.camX}px, ${-c.camY}px)`;
     if (el) el.style.transform = t;
     if (highlightsInner.current) highlightsInner.current.style.transform = t;
+    if (aidsOnRef.current && !aidsFrame.current) aidsFrame.current = requestAnimationFrame(() => { aidsFrame.current = 0; setAidsCam({ ...camRef.current }); });
   }, []);
 
   // --- blocks -------------------------------------------------------------------------------
@@ -694,6 +707,34 @@ function Editor({ note, startPage, splitWith, onReload }: { note: LoadedNote; st
     ...(explainRect && explain ? [{ id: "explain", ...explainRect, tone: "explain" as const }] : []),
   ];
 
+  function insertTemplate(id: TemplateId) {
+    setTemplatesOpen(false);
+    try {
+      const r = renderTemplate(id);
+      canvasRef.current?.insertImage(r.dataUrl, r.w, r.h, currentPage);
+      setTool("image");
+      count(`template.${id}`);
+      flash("Inserted — drag to move, or start writing on it.");
+    } catch (e) { failed("template", e, "Couldn't insert that template"); }
+  }
+
+  // --- ruler & protractor ----------------------------------------------------------------------
+  function toggleRuler() {
+    if (ruler) return setRuler(null);
+    const c = viewportCenter();
+    const len = PX_PER_CM * 14;
+    setAidsCam({ ...camRef.current });
+    setRuler({ a: { x: c.x - len / 2, y: c.y }, b: { x: c.x + len / 2, y: c.y } });
+    count("aid.ruler");
+  }
+  function toggleProtractor() {
+    if (protractor) return setProtractor(null);
+    const c = viewportCenter();
+    setAidsCam({ ...camRef.current });
+    setProtractor({ cx: c.x, cy: c.y + 120, rot: 0 });
+    count("aid.protractor");
+  }
+
   // --- pen presets & recent colours ---------------------------------------------------------
   const PEN_TOOLS = ["pencil", "pen", "highlighter", "marker"] as const;
   function savePreset() {
@@ -752,6 +793,7 @@ function Editor({ note, startPage, splitWith, onReload }: { note: LoadedNote; st
                 <MenuItem icon={<ScanText size={15} />} label="Read handwriting for search" onClick={indexThisNote} />
                 <MenuItem icon={<History size={15} />} label="Version history" onClick={openHistory} />
                 <MenuItem icon={<Network size={15} />} label="Related notes" onClick={showRelated} />
+                <MenuItem icon={<Grid3x3 size={15} />} label="Insert a template (axes, unit circle, periodic table…)" onClick={() => { setMenu(false); setTemplatesOpen(true); }} />
                 <MenuItem icon={<ListChecks size={15} />} label="Review for mistakes…" onClick={() => { setMenu(false); setReviewSetup(true); }} />
                 {splitWith ? (
                   <MenuItem icon={<Columns2 size={15} />} label="Close split (keep this note)" onClick={() => go({ name: "note", id: noteId })} />
@@ -795,6 +837,8 @@ function Editor({ note, startPage, splitWith, onReload }: { note: LoadedNote; st
           {rail(SHAPES)}
           <IconButton title={settings.shapeSnap ? "Hold-to-snap shapes: ON (hold the pen still after drawing a line, circle or box)" : "Hold-to-snap shapes: off"} active={settings.shapeSnap} onClick={() => updateSettings({ shapeSnap: !settings.shapeSnap })}><Wand2 size={17} /></IconButton>
           <IconButton title={settings.scribbleErase ? "Scribble to erase: ON (scribble back and forth over ink to delete it)" : "Scribble to erase: off"} active={settings.scribbleErase} onClick={() => updateSettings({ scribbleErase: !settings.scribbleErase })}><Waves size={17} /></IconButton>
+          <IconButton title={ruler ? "Hide ruler" : "Ruler — draw straight lines along its edge"} active={!!ruler} onClick={toggleRuler}><Ruler size={17} /></IconButton>
+          <IconButton title={protractor ? "Hide protractor" : "Protractor"} active={!!protractor} onClick={toggleProtractor}><Compass size={17} /></IconButton>
           <Sep />
           {rail(SELECT)}
           <Sep />
@@ -862,6 +906,7 @@ function Editor({ note, startPage, splitWith, onReload }: { note: LoadedNote; st
             onTapDoc={(p) => { if (tool === "text") addBlock("text", { x: p.x, y: p.y - 10 }); else { addBlock("code", { x: p.x, y: p.y }); setTool("pen"); } }}
             shapeSnap={settings.shapeSnap}
             scribbleErase={settings.scribbleErase}
+            guide={ruler}
             onInputSample={settings.diagnostics ? recordInputSample : undefined}
             onPageChange={(p) => setCurrentPage(p)}
             onSelectionChange={setHasSel}
@@ -873,6 +918,10 @@ function Editor({ note, startPage, splitWith, onReload }: { note: LoadedNote; st
           />
           <BlocksLayer blocks={blocks} innerRef={blocksInner} interactive={blocksTakeTouch} scaleRef={scaleRef} running={running} onChange={onBlockChange} onDelete={onBlockDelete} onRun={onRunBlock} />
           <HighlightLayer rects={highlights} innerRef={highlightsInner} camRef={camRef} />
+          {aidsOn && (
+            <DrawingAids cam={aidsCam} ruler={ruler} protractor={protractor} onRuler={setRuler} onProtractor={setProtractor}
+              onCloseRuler={() => setRuler(null)} onCloseProtractor={() => setProtractor(null)} />
+          )}
           {pagesOpen && (
             <PagesPanel count={pageCount} current={currentPage} rev={pagesRev}
               render={(p) => canvasRef.current?.previewPage(p, 150) ?? null}
@@ -960,6 +1009,19 @@ function Editor({ note, startPage, splitWith, onReload }: { note: LoadedNote; st
               ))}
             </ul>
           )}
+        </Modal>
+      )}
+      {templatesOpen && (
+        <Modal title="Insert a template" onClose={() => setTemplatesOpen(false)}>
+          <p className="mb-3 text-sm text-foreground-muted">Placed on the current page as a picture you can write on top of (move or resize it with the select tool).</p>
+          <div className="grid grid-cols-2 gap-2.5">
+            {TEMPLATES.map((t) => (
+              <button key={t.id} onClick={() => insertTemplate(t.id)} className="rounded-xl border border-border px-3 py-3 text-left hover:bg-surface-secondary">
+                <p className="text-sm font-medium">{t.name}</p>
+                <p className="text-xs text-foreground-muted">{t.blurb}</p>
+              </button>
+            ))}
+          </div>
         </Modal>
       )}
       {reviewSetup && <ReviewSetup pageCount={pageCount} currentPage={currentPage} thumb={(p) => { try { return canvasRef.current?.previewPage(p, 180) ?? null; } catch { return null; } }} onStart={runReview} onClose={() => setReviewSetup(false)} />}
