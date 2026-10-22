@@ -1533,7 +1533,35 @@ export function NoteCanvas({
     if (!buf) return;
     pushHistory();
     strokesRef.current.push({ id: newStrokeId(), tool: s.tool as NoteTool, color: s.color, width: s.width, points: packPts(buf) });
-    redraw();
+    // Pen-up used to repaint the whole visible page (~10ms on a big note — a stall
+    // right before the next stroke starts). The live render already painted every
+    // finalised segment with the exact geometry the committed render uses, so only
+    // the last segment(s) are missing: paint just those. Dots and the translucent
+    // highlighter still take the full repaint.
+    if (buf.length >= 3 && s.tool !== "highlighter") {
+      const cv = canvasRef.current;
+      const cx = cv?.getContext("2d");
+      if (cx) {
+        applyCamera(cx);
+        cx.strokeStyle = s.color;
+        cx.lineCap = "round";
+        cx.lineJoin = "round";
+        for (let k = segDrawnRef.current; k <= buf.length - 2; k++) {
+          const p1 = buf[k];
+          const p2 = buf[k + 1];
+          const { lineWidth, alpha } = toolStyle(s.tool as NoteTool, s.width, ((p1.p ?? 0.5) + (p2.p ?? 0.5)) / 2);
+          cx.globalAlpha = alpha;
+          cx.lineWidth = lineWidth;
+          cx.beginPath();
+          cx.moveTo(p1.x, p1.y);
+          catmullSeg(cx, buf[k - 1] ?? p1, p1, p2, buf[k + 2] ?? p2);
+          cx.stroke();
+        }
+        cx.globalAlpha = 1;
+      } else redraw();
+    } else {
+      redraw();
+    }
     onCommit(strokesRef.current);
   }
 
