@@ -216,8 +216,6 @@ export function LessonRunner({ title, cards, exercises, progress, quiz, onFinish
   const [heartsLeft, setHeartsLeft] = useState(5);
   const [heartsOn, setHeartsOn] = useState(!quiz && progress.hearts);
   const [combo, setCombo] = useState(0);
-  const [maxCombo, setMaxCombo] = useState(0);
-  const [firstTry, setFirstTry] = useState(0);
   const [finished, setFinished] = useState<LessonResult | null>(null);
   const [outOfHearts, setOutOfHearts] = useState(false);
   const outcomes = useRef<Outcome[]>([]);
@@ -250,12 +248,12 @@ export function LessonRunner({ title, cards, exercises, progress, quiz, onFinish
       } else if (ex.kind === "flip") {
         outcomes.current.push({ cardId: ex.cardId, firstTry: correct, grade: r.grade });
       } else outcomes.current.push({ cardId: ex.cardId, firstTry: correct });
-      if (correct) { st.current.firstTry++; setFirstTry(st.current.firstTry); }
+      if (correct) st.current.firstTry++;
     }
     if (correct) {
       st.current.combo++;
       st.current.maxCombo = Math.max(st.current.maxCombo, st.current.combo);
-      setCombo(st.current.combo); setMaxCombo(st.current.maxCombo);
+      setCombo(st.current.combo);
       playSfx("correct", progress.sound);
     } else {
       st.current.combo = 0; setCombo(0);
@@ -287,6 +285,9 @@ export function LessonRunner({ title, cards, exercises, progress, quiz, onFinish
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (e.key !== "Enter" || finished || outOfHearts) return;
+      // Enter on a focused button already "clicks" it — handling it here too would advance twice (skipping a question)
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "BUTTON" || t.tagName === "A" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
       if (checked) advance(); else check();
     };
     window.addEventListener("keydown", h);

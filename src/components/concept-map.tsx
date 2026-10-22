@@ -58,6 +58,16 @@ export function ConceptMapView({
     return { x: p.x - (p.x - v.x) * k, y: p.y - (p.y - v.y) * k, w: nw, h: v.h * k };
   });
 
+  // React attaches wheel listeners as passive, which makes preventDefault a no-op (the page would scroll while zooming) — attach natively
+  const zoomRef = useRef(zoom); zoomRef.current = zoom;
+  useEffect(() => {
+    const el = wrap.current;
+    if (!el) return;
+    const h = (e: WheelEvent) => { e.preventDefault(); zoomRef.current(e.deltaY > 0 ? 1.12 : 1 / 1.12, e.clientX, e.clientY); };
+    el.addEventListener("wheel", h, { passive: false });
+    return () => el.removeEventListener("wheel", h);
+  }, []);
+
   const onDown = (e: React.PointerEvent) => {
     (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -115,8 +125,7 @@ export function ConceptMapView({
   };
 
   return (
-    <div ref={wrap} className="relative h-full w-full touch-none select-none overflow-hidden rounded-2xl border border-border bg-surface"
-      onWheel={(e) => { e.preventDefault(); zoom(e.deltaY > 0 ? 1.12 : 1 / 1.12, e.clientX, e.clientY); }}>
+    <div ref={wrap} className="relative h-full w-full touch-none select-none overflow-hidden rounded-2xl border border-border bg-surface">
       <svg ref={svgRef} viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`} className="h-full w-full" style={{ touchAction: "none" }}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} fontFamily="ui-sans-serif, system-ui, sans-serif">
         <defs>

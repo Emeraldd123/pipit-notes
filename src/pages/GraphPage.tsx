@@ -200,15 +200,20 @@ function MapEditor({ initial, cards, mistakes, ai, flash, onCards, onDeleted, to
   const svgRef = useRef<SVGSVGElement>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const dirty = useRef(false);   // only write when something actually changed (opening a map must not touch it)
+  const gone = useRef(false);    // a deleted map must never be written back by a pending save
   const update = useCallback((m: ConceptMap) => {
     setMap(m);
+    dirty.current = true;
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => { void putMap(m).catch((e) => logError("map", e)); }, 500);
+    saveTimer.current = setTimeout(() => { if (gone.current) return; dirty.current = false; void putMap(m).catch((e) => logError("map", e)); }, 500);
   }, []);
-  useEffect(() => () => { if (saveTimer.current) { clearTimeout(saveTimer.current); } }, []);
   // make sure the last edit is written even if the page is left within the debounce window
   const latest = useRef(map); latest.current = map;
-  useEffect(() => () => { void putMap(latest.current); }, []);
+  useEffect(() => () => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    if (dirty.current && !gone.current) void putMap(latest.current);
+  }, []);
 
   const stats = useMemo(() => new Map<string, NodeStats>(map.nodes.map((n) => [n.id, nodeStats(n, cards, mistakes)])), [map.nodes, cards, mistakes]);
   const matches = useMemo(() => {
@@ -333,7 +338,7 @@ function MapEditor({ initial, cards, mistakes, ai, flash, onCards, onDeleted, to
         <button onClick={() => void saveCards(cardsFromMap(map), "manual")} disabled={!map.edges.length && !map.nodes.some((n) => n.note)} className={tb} title="One card per link, plus definitions"><Layers size={14} /> Cards from map</button>
         <button onClick={exportPng} className={tb}><Download size={14} /> PNG</button>
         <button onClick={exportOutline} className={tb}><Download size={14} /> Outline</button>
-        <button onClick={() => { if (confirm(`Delete "${map.title}"?`)) void deleteMap(map.id).then(onDeleted); }} className={`${tb} text-negative`}><Trash2 size={14} /></button>
+        <button onClick={() => { if (confirm(`Delete "${map.title}"?`)) { gone.current = true; void deleteMap(map.id).then(onDeleted); } }} className={`${tb} text-negative`}><Trash2 size={14} /></button>
       </div>
 
       {colorMode === "mastery" && (

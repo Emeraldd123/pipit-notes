@@ -24,7 +24,21 @@ export function RichText({ text, className = "" }: { text: string; className?: s
       {parts.map((p, i) =>
         p.startsWith("$$") && p.endsWith("$$") && p.length > 4 ? <Latex key={i} source={p.slice(2, -2)} display />
         : p.startsWith("$") && p.endsWith("$") && p.length > 2 ? <Latex key={i} source={p.slice(1, -1)} display={false} />
-        : <span key={i}>{p}</span>
+        : <Inline key={i} text={p} />
+      )}
+    </span>
+  );
+}
+
+/** **bold** and `code` in model output, so stray asterisks don't show up in explanations and cards. */
+function Inline({ text }: { text: string }) {
+  if (!text.includes("**") && !text.includes("`")) return <span>{text}</span>;
+  return (
+    <span>
+      {text.split(/(\*\*[^*\n]+\*\*|`[^`\n]+`)/g).map((t, i) =>
+        t.startsWith("**") && t.endsWith("**") && t.length > 4 ? <strong key={i}>{t.slice(2, -2)}</strong>
+        : t.startsWith("`") && t.endsWith("`") && t.length > 2 ? <code key={i} className="rounded bg-surface-secondary px-1 font-mono text-[0.92em]">{t.slice(1, -1)}</code>
+        : <span key={i}>{t}</span>
       )}
     </span>
   );

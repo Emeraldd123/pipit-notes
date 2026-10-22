@@ -97,7 +97,8 @@ export function StudyPage({ view }: { view?: string }) {
   async function onLessonFinish(r: LessonResult) {
     if (!progress) return;
     try {
-      const updated = applyOutcomes(cards, r.outcomes, Date.now());
+      // use what is in the database NOW: a card removed or edited during the lesson must not be overwritten by a stale copy
+      const updated = applyOutcomes(await listCards(), r.outcomes, Date.now());
       await putCards(updated);
       const np = r.stats.total ? addXp(progress, r.xp) : progress;
       await putProgress(np);
@@ -134,13 +135,22 @@ export function StudyPage({ view }: { view?: string }) {
         const m = markObjective(p, answers[p.id]);
         if (m) marks.push(m); else aiItems.push({ q, p, a: answers[p.id] });
       }
-      if (aiItems.length) {
+      // an unanswered part is 0 marks — no reason to pay for an AI call to find that out
+      const blank = (a: PartAnswer | undefined) => !a?.text?.trim() && !a?.ink;
+      for (const { p, a } of aiItems.filter((x) => blank(x.a))) marks.push({ partId: p.id, max: p.marks, marks: 0, auto: false, feedback: "No answer given." });
+      const toMark = aiItems.filter((x) => !blank(x.a));
+      if (toMark.length) {
+        const selfMark = (why: string) => { for (const { p } of toMark) marks.push({ partId: p.id, max: p.marks, marks: 0, auto: false, feedback: `${why} Compare with the model answer and set your own mark with + / −.` }); };
         if (ai) {
-          setSession({ kind: "marking", message: `Marking ${aiItems.length} written answer${aiItems.length === 1 ? "" : "s"}… (handwriting is read here)` });
-          marks.push(...(await markWithAi(aiItems)));
-        } else {
-          for (const { p, a } of aiItems) marks.push({ partId: p.id, max: p.marks, marks: 0, auto: false, feedback: a?.text?.trim() || a?.ink ? "AI marking is off — compare with the model answer and set your own mark with + / −." : "No answer given." });
-        }
+          setSession({ kind: "marking", message: `Marking ${toMark.length} written answer${toMark.length === 1 ? "" : "s"}… (handwriting is read here)` });
+          try { marks.push(...(await markWithAi(toMark))); }
+          catch (e) {
+            // never lose a finished exam to a network or key problem: fall back to marking those parts yourself
+            logError("study", e);
+            flash(e instanceof AiError ? e.message : "AI marking failed.");
+            selfMark("AI marking wasn't available.");
+          }
+        } else selfMark("AI marking is off.");
       }
       const result = buildResult(exam, marks);
       const slim = Object.fromEntries(Object.entries(answers).map(([k, v]) => [k, { text: v.text, choice: v.choice }]));
