@@ -1,7 +1,7 @@
 // Pure helpers for incremental stroke saves. A stroke is anything with a stable
 // `id` plus the mutable fields a save must persist. Writes to IndexedDB are cheap,
 // but a note can hold ~10k strokes, so we still only write what changed.
-import { newId } from "./ids";
+import { newId } from "./ids.ts";
 
 export type DeltaStroke = {
   id?: string;
