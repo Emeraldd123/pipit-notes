@@ -4,7 +4,7 @@ A private, offline-first handwriting notebook. **No account, no server** — eve
 
 ## What it does
 
-- **Write** with Apple Pencil: multi-page notes, PDF annotation, snip-to-new-page, page scrubber (hold the page chip and drag), shapes, lasso, undo/redo, version history.
+- **Write** with Apple Pencil: multi-page notes, PDF annotation, snip-to-new-page, page scrubber (hold the page chip and drag), shapes, lasso, undo/redo, version history, Cornell/ruled/grid/dotted paper, and optional **hold-to-snap** (hold the pen still after a rough line/circle/box and it straightens — conservative, never touches handwriting; the wand button in the tool rail).
 - **Blocks** on the page: runnable **Python** (Pyodide — SymPy/NumPy/SciPy/Matplotlib), text, and **LaTeX** maths.
 - **Understand** (opt-in, your own Anthropic key, off by default):
   - *Recognise maths* — lasso handwriting → LaTeX block.
@@ -23,7 +23,7 @@ A private, offline-first handwriting notebook. **No account, no server** — eve
 3. Open the app → **Settings & backup** → confirm "Persistent storage granted".
 4. Import your old notes: Settings → **Restore from backup** → choose the `.zip` files (see migration below).
 5. Back up regularly: **Back up now** → Save to Files → iCloud Drive.
-6. (Optional) Settings → AI features → add your API key and switch it on.
+6. (Optional) Settings → AI features → add your API key and switch it on. Settings → **Pen test** shows what your stylus reports (rate, pressure, tilt).
 
 ## Develop
 
@@ -31,7 +31,7 @@ A private, offline-first handwriting notebook. **No account, no server** — eve
     npm run dev          # http://localhost:5173
     npm run build        # static site in dist/
     npm run typecheck
-    npm test             # 36 tests; step-checker tests need python + sympy (skipped otherwise)
+    npm test             # 46 tests; step-checker tests need python + sympy (skipped otherwise)
 
 ## Migrate your notes from Pipit (Supabase)
 

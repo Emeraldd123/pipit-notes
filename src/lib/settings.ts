@@ -12,6 +12,8 @@ export type Settings = {
   theme: "system" | "light" | "dark";
   /** Re-read changed pages in the background so search stays fresh. */
   autoIndex: boolean;
+  /** Hold the pen still to snap rough lines/circles/rectangles into clean shapes. */
+  shapeSnap: boolean;
 };
 
 const KEY = "pipit-notes.settings.v1";
@@ -21,6 +23,7 @@ export const DEFAULT_SETTINGS: Settings = {
   model: "claude-sonnet-5",
   theme: "system",
   autoIndex: false,
+  shapeSnap: false,
 };
 
 let cache: Settings | null = null;

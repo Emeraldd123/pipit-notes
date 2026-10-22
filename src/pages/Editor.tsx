@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, ArrowUpRight, Check, CheckCheck, Circle, Code2, Copy, Download, Eraser, FilePlus2, FileText,
   Hand, Highlighter, History, ImagePlus, Lasso, Loader2, Maximize2, Minus, MoreHorizontal, MousePointer2, Paintbrush, Pen,
-  Pencil, Printer, Redo2, Columns2, FileCode2, FlaskConical, Network, Shapes, TextCursorInput, Scissors, ScanText, Sigma, Square, Trash, Trash2, Type, Undo2, ZoomIn, ZoomOut, Sparkles,
+  Pencil, Printer, Redo2, Columns2, FileCode2, FlaskConical, Network, Shapes, TextCursorInput, Wand2, Scissors, ScanText, Sigma, Square, Trash, Trash2, Type, Undo2, ZoomIn, ZoomOut, Sparkles,
 } from "lucide-react";
 import { NoteCanvas, type CanvasImage, type NoteCanvasHandle, type Stroke, type Tool } from "@/components/note-canvas";
 import { BlocksLayer, BLOCK_DEFAULTS, Latex } from "@/components/blocks";
@@ -25,7 +25,7 @@ import { indexNote } from "@/lib/search";
 import { buildLatexDocument } from "@/lib/latex";
 import { buildPageSvg } from "@/lib/svg";
 import { relatedTo } from "@/lib/related";
-import { aiReady, getSettings, useSettings } from "@/lib/settings";
+import { aiReady, getSettings, updateSettings, useSettings } from "@/lib/settings";
 import { timeAgo } from "@/lib/format";
 import { go } from "@/router";
 
@@ -568,6 +568,7 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
           <IconButton title="Eraser" active={tool === "eraser"} onClick={() => setTool("eraser")}><Eraser size={17} /></IconButton>
           <Sep />
           {rail(SHAPES)}
+          <IconButton title={settings.shapeSnap ? "Hold-to-snap shapes: ON (hold the pen still after drawing a line, circle or box)" : "Hold-to-snap shapes: off"} active={settings.shapeSnap} onClick={() => updateSettings({ shapeSnap: !settings.shapeSnap })}><Wand2 size={17} /></IconButton>
           <Sep />
           {rail(SELECT)}
           <Sep />
@@ -627,6 +628,7 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
             onViewChange={setZoom}
             onCameraChange={onCameraChange}
             onTapDoc={(p) => { addBlock("code", { x: p.x, y: p.y }); setTool("pen"); }}
+            shapeSnap={settings.shapeSnap}
             onPageChange={(p) => setCurrentPage(p)}
             onSelectionChange={setHasSel}
             onSnipRegion={onSnipRegion}

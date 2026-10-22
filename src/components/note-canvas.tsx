@@ -10,6 +10,7 @@ import { useCallback, useEffect, useImperativeHandle, useRef } from "react";
 import type { NoteTool, NotePaper, StrokeInput } from "@/types";
 import { newStrokeId } from "@/lib/ids";
 import { PAGE_W, PAGE_H, PAGE_GAP, pageTop } from "@/lib/page";
+import { classifyStroke } from "@/lib/shapes";
 
 export type Tool = NoteTool | "eraser" | "line" | "rect" | "ellipse" | "arrow" | "hand" | "lasso" | "image" | "snip" | "block";
 // `id` is a stable per-stroke identity used for incremental (delta) saves. New
@@ -252,6 +253,7 @@ export function NoteCanvas({
   onViewChange,
   onCameraChange,
   onTapDoc,
+  shapeSnap,
   onPageChange,
   onSelectionChange,
   onSnipRegion,
@@ -276,6 +278,8 @@ export function NoteCanvas({
   onCameraChange?: (cam: { scale: number; camX: number; camY: number }) => void;
   /** A tap with the `block` tool, in document coordinates. */
   onTapDoc?: (pt: { x: number; y: number }) => void;
+  /** Hold the pen still at the end of a stroke to snap a clear line / polygon / ellipse. Off by default. */
+  shapeSnap?: boolean;
   onPageChange?: (page: number, count: number) => void;
   onSelectionChange?: (has: boolean) => void;
   /** A `snip` lasso finished: a PNG of the lassoed region + its doc size. */
@@ -302,6 +306,10 @@ export function NoteCanvas({
   const cameraCbRef = useRef(onCameraChange);
   const tapCbRef = useRef(onTapDoc);
   const tapRef = useRef<{ x: number; y: number } | null>(null);
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const snappedRef = useRef(false);
+  const shapeSnapRef = useRef(!!shapeSnap);
+  useEffect(() => { shapeSnapRef.current = !!shapeSnap; }, [shapeSnap]);
   useEffect(() => { cameraCbRef.current = onCameraChange; tapCbRef.current = onTapDoc; }, [onCameraChange, onTapDoc]);
   useEffect(() => { diagRef.current = onInputSample; }, [onInputSample]);
   // Cached viewport rect — reading getBoundingClientRect() per input point forces
@@ -1331,6 +1339,8 @@ export function NoteCanvas({
       return;
     }
     drawingRef.current = [pt];
+    snappedRef.current = false;
+    if (holdTimerRef.current) { clearTimeout(holdTimerRef.current); holdTimerRef.current = null; }
     segDrawnRef.current = 0;
     lastMoveTsRef.current = e.timeStamp;
     diagRef.current?.({ phase: "down", t: e.timeStamp, ptr: e.pointerType, coalesced: 1, pressure: e.pressure, dt: 0, handlerMs: 0, x: pt.x, y: pt.y, n: 1 });
@@ -1387,6 +1397,7 @@ export function NoteCanvas({
     }
     if (!drawingRef.current) return;
     e.preventDefault();
+    if (snappedRef.current) return; // shape already snapped — hold it until the pen lifts
     const events = typeof e.nativeEvent.getCoalescedEvents === "function" ? e.nativeEvent.getCoalescedEvents() : [];
     const raw = events.length > 0 ? events : [e.nativeEvent];
     const canvas = canvasRef.current!;
@@ -1448,6 +1459,24 @@ export function NoteCanvas({
       ctx.stroke();
     }
     if (L - 2 > segDrawnRef.current) segDrawnRef.current = L - 2;
+    // Hold-to-snap: if the pen rests ~half a second, replace a clearly-geometric
+    // stroke (line / polygon / ellipse) with its clean version. Ambiguous strokes
+    // (handwriting) are never touched — see lib/shapes.ts.
+    if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+    if (shapeSnapRef.current) {
+      holdTimerRef.current = setTimeout(() => {
+        holdTimerRef.current = null;
+        const cur = drawingRef.current;
+        if (!cur || snappedRef.current) return;
+        const snap = classifyStroke(cur);
+        if (!snap) return;
+        snappedRef.current = true;
+        drawingRef.current = snap.points.map((q) => ({ x: q.x, y: q.y, p: 0.5 }));
+        segDrawnRef.current = drawingRef.current.length;
+        const st = settings.current;
+        redraw({ tool: st.tool as NoteTool, color: st.color, width: st.width, points: drawingRef.current });
+      }, 520);
+    }
     if (diagRef.current) {
       const last = buf[buf.length - 1];
       diagRef.current({
@@ -1549,6 +1578,7 @@ export function NoteCanvas({
       onCommit(strokesRef.current);
       return;
     }
+    if (holdTimerRef.current) { clearTimeout(holdTimerRef.current); holdTimerRef.current = null; }
     const buf = drawingRef.current;
     drawingRef.current = null;
     if (!buf) return;
