@@ -213,6 +213,9 @@ export function summarizeReport(r: DiagReport, now = Date.now()): { severity: "o
     lines.push("Metrics:");
     for (const [k, m] of rows) lines.push(`  ${k.padEnd(26)} n=${String(m.n).padStart(5)}  mean ${m.mean.toFixed(1).padStart(8)}  p95 ${m.p95.toFixed(1).padStart(8)}  max ${m.max.toFixed(1).padStart(8)}`);
   }
+  // the student told us an AI answer was wrong (bad exam question, Explain retried, review false alarm, card removed)
+  const reports = Object.entries(r.metrics).filter(([k]) => k.startsWith("usage.report.") || k === "usage.study.card.flagged");
+  if (reports.length) findings.push(`ℹ AI output reported as wrong: ${reports.map(([k, m]) => `${k.replace("usage.report.", "").replace("usage.", "")}×${m.n}`).join(", ")}`);
   const usage = Object.entries(r.metrics).filter(([k]) => k.startsWith("usage.")).sort((a, b) => b[1].n - a[1].n);
   if (usage.length) lines.push("Usage: " + usage.map(([k, m]) => `${k.slice(6)}×${m.n}`).join(", "));
 
