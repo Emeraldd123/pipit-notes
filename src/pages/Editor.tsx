@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, ArrowLeftRight, ArrowUpRight, Check, CheckCheck, Circle, Code2, Copy, Download, Eraser, FilePlus2, FileText,
-  Compass, Grid3x3, Hand, Highlighter, History, Layers, Ruler, Waves, Lightbulb, LineChart, ListChecks, ImagePlus, Lasso, Loader2, Maximize2, Minus, MoreHorizontal, MousePointer2, Paintbrush, Pen,
+  Compass, Grid3x3, Hand, Share2, Highlighter, History, Layers, Ruler, Waves, Lightbulb, LineChart, ListChecks, ImagePlus, Lasso, Loader2, Maximize2, Minus, MoreHorizontal, MousePointer2, Paintbrush, Pen,
   Pencil, Printer, Redo2, Columns2, FileCode2, FlaskConical, Network, Shapes, TextCursorInput, Wand2, Scissors, ScanText, Sigma, Square, Trash, Trash2, Type, Undo2, ZoomIn, ZoomOut, Sparkles,
 } from "lucide-react";
 import { NoteCanvas, type CanvasImage, type NoteCanvasHandle, type Stroke, type Tool } from "@/components/note-canvas";
@@ -13,6 +13,7 @@ import { findBoxes, boxToDoc } from "@/lib/search-core";
 import { PAGE_H, PAGE_W, PAGE_GAP } from "@/lib/page";
 import { TEMPLATES, renderTemplate, type TemplateId } from "@/lib/templates";
 import { PresetsButton } from "@/components/presets";
+import { shareOrDownload, useShareFlow } from "@/components/backup-flow";
 import { PagesPanel } from "@/components/pages-panel";
 import { ExplainPanel, HighlightLayer, ReviewBar, ReviewSetup, type ExplainState, type Highlight, type ReviewState } from "@/components/understanding";
 import { Button, IconButton, Modal, Toast } from "@/components/ui";
@@ -459,6 +460,23 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
   const changePaper = (p: NotePaper) => { setPaper(p); void patchNote(noteId, { paper: p }); };
 
   // --- export ----------------------------------------------------------------------------------------
+  // Share the note as a read-only PDF (share sheet → AirDrop / Messages / Files). Two steps so Safari allows the share.
+  const sharePdf = useShareFlow({
+    build: async () => {
+      count("share.pdf");
+      await flush();
+      const l = await loadExportNote(noteId);
+      if (!l) throw new Error("note not found");
+      try { return new File([(await buildNotePdf(l.note)).slice()], `${safeName(title, "Note")}.pdf`, { type: "application/pdf" }); } finally { l.release(); }
+    },
+    save: (f) => shareOrDownload(f, title),
+    title: "PDF ready to share",
+    hint: "Tap Save, then pick AirDrop, Messages, Mail or Save to Files. They get a read-only PDF.",
+    doneShared: "Shared.",
+    doneDownloaded: "PDF downloaded.",
+    failed: "Couldn't build the PDF",
+  }, (m) => flash(m));
+  useEffect(() => { if (sharePdf.building) setBusy("Building PDF…"); else setBusy((b) => (b === "Building PDF…" ? null : b)); }, [sharePdf.building]);
   async function exportPdf() {
     setMenu(false); setBusy("Building PDF…");
     count("export.pdf");
@@ -821,6 +839,7 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
                   <MenuItem icon={<Columns2 size={15} />} label="Open another note beside this" onClick={async () => { setMenu(false); setPicking((await listNotes()).filter((n) => n.id !== noteId)); }} />
                 )}
                 <div className="my-1 h-px bg-border" />
+                <MenuItem icon={<Share2 size={15} />} label="Share as PDF…" onClick={() => { setMenu(false); sharePdf.start(); }} />
                 <MenuItem icon={<FileText size={15} />} label="Export as PDF" onClick={exportPdf} />
                 <MenuItem icon={<Download size={15} />} label="Export as PNG" onClick={exportPng} />
                 <MenuItem icon={<Shapes size={15} />} label="Export this page as SVG" onClick={exportSvg} />
@@ -1049,6 +1068,7 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
           </div>
         </Modal>
       )}
+      {sharePdf.modal}
       {reviewSetup && <ReviewSetup pageCount={pageCount} currentPage={currentPage} thumb={(p) => { try { return canvasRef.current?.previewPage(p, 180) ?? null; } catch { return null; } }} onStart={runReview} onClose={() => setReviewSetup(false)} />}
       {chem && <ChemModal items={chem} onClose={() => setChem(null)} />}
       {check && <CheckModal check={check} onClose={() => setCheck(null)} />}
