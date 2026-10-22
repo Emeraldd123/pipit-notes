@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, ArrowUpRight, Check, CheckCheck, Circle, Code2, Copy, Download, Eraser, FilePlus2, FileText,
   Hand, Highlighter, History, ImagePlus, Lasso, Loader2, Maximize2, Minus, MoreHorizontal, MousePointer2, Paintbrush, Pen,
-  Pencil, Printer, Redo2, Columns2, FileCode2, Network, Shapes, Scissors, ScanText, Sigma, Square, Trash, Trash2, Type, Undo2, ZoomIn, ZoomOut, Sparkles,
+  Pencil, Printer, Redo2, Columns2, FileCode2, FlaskConical, Network, Shapes, Scissors, ScanText, Sigma, Square, Trash, Trash2, Type, Undo2, ZoomIn, ZoomOut, Sparkles,
 } from "lucide-react";
 import { NoteCanvas, type CanvasImage, type NoteCanvasHandle, type Stroke, type Tool } from "@/components/note-canvas";
 import { BlocksLayer, BLOCK_DEFAULTS, Latex } from "@/components/blocks";
@@ -18,7 +18,8 @@ import { saveThumb } from "@/lib/thumbs";
 import { buildNotePdf, safeName, triggerDownload } from "@/lib/export";
 import { loadExportNote } from "@/lib/note-io";
 import { runPython } from "@/lib/py";
-import { AiError, readWorking, recognizeMath, type WorkingLine } from "@/lib/ai";
+import { AiError, readChemistry, readWorking, recognizeMath, type ReadEquation, type WorkingLine } from "@/lib/ai";
+import { checkEquation, formatEquation, molarMass, type BalanceReport } from "@/lib/chem";
 import { verifyWorking, type StepResult } from "@/lib/stepcheck";
 import { indexNote } from "@/lib/search";
 import { buildLatexDocument } from "@/lib/latex";
@@ -145,6 +146,7 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
   const [running, setRunning] = useState<string | null>(null);
   const [check, setCheck] = useState<{ lines: WorkingLine[]; results: StepResult[] } | null>(null);
   const [picking, setPicking] = useState<NoteMeta[] | null>(null);
+  const [chem, setChem] = useState<{ eq: ReadEquation; report: BalanceReport }[] | null>(null);
   const [related, setRelated] = useState<{ note: { id: string; title: string }; weight: number; shared: string[] }[] | null>(null);
 
   // page scrubber
@@ -461,6 +463,17 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
       flash("Recognised — edit the LaTeX if anything's off.");
     } catch (e) { flash(e instanceof AiError ? e.message : "Couldn't recognise that: " + (e as Error).message); } finally { setBusy(null); }
   }
+  async function checkChemistry() {
+    if (!ai) return flash("Turn on AI in Settings to read equations.");
+    const sel = canvasRef.current?.selectionImage();
+    if (!sel) return flash("Lasso the equation(s) you want checked.");
+    setBusy("Reading the equation…");
+    try {
+      const eqs = await readChemistry(sel.dataUrl);
+      if (!eqs.length) return flash("I couldn't find a chemical equation in that selection.");
+      setChem(eqs.map((eq) => ({ eq, report: checkEquation(eq) })));
+    } catch (e) { flash(e instanceof AiError ? e.message : "Couldn't check that: " + (e as Error).message); } finally { setBusy(null); }
+  }
   async function checkSelection() {
     if (!ai) return flash("Turn on AI in Settings to check working.");
     const sel = canvasRef.current?.selectionImage();
@@ -531,6 +544,7 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
           <SelBtn onClick={() => canvasRef.current?.duplicateSelection()}><Copy size={13} /> Duplicate</SelBtn>
           <SelBtn onClick={recognizeSelection} accent><Sigma size={13} /> Recognise maths</SelBtn>
           <SelBtn onClick={checkSelection} accent><CheckCheck size={13} /> Check working</SelBtn>
+          <SelBtn onClick={checkChemistry} accent><FlaskConical size={13} /> Check equation</SelBtn>
           <SelBtn onClick={() => canvasRef.current?.deleteSelection()} danger><Trash2 size={13} /> Delete</SelBtn>
         </div>
       )}
@@ -684,6 +698,7 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
           )}
         </Modal>
       )}
+      {chem && <ChemModal items={chem} onClose={() => setChem(null)} />}
       {check && <CheckModal check={check} onClose={() => setCheck(null)} />}
       <Toast msg={toast} />
     </div>
@@ -741,6 +756,46 @@ function CheckModal({ check, onClose }: { check: { lines: WorkingLine[]; results
           );
         })}
       </ol>
+    </Modal>
+  );
+}
+
+function ChemModal({ items, onClose }: { items: { eq: ReadEquation; report: BalanceReport }[]; onClose: () => void }) {
+  return (
+    <Modal title={<span className="flex items-center gap-2"><FlaskConical size={16} className="text-primary" /> Equation check</span>} onClose={onClose} wide>
+      <div className="space-y-4">
+        {items.map(({ eq, report }, i) => {
+          const sugg = report.suggested ? formatEquation(eq, report.suggested) : null;
+          const all = [...eq.reactants, ...eq.products];
+          return (
+            <div key={i} className={`rounded-xl border px-4 py-3 ${report.errors.length ? "border-border" : report.balanced ? "border-positive/50 bg-positive/5" : "border-negative/50 bg-negative/5"}`}>
+              <p className="font-mono text-[15px]">{formatEquation(eq)}</p>
+              <p className="mt-1 text-sm font-medium">
+                {report.errors.length ? "Couldn't read every formula" : report.balanced ? "✓ Balanced — atoms and charge match on both sides." : "✗ Not balanced."}
+              </p>
+              {report.errors.length > 0 && <p className="mt-1 text-xs text-negative">{report.errors.join(" · ")} — fix the formula and try again.</p>}
+              {!report.errors.length && (
+                <table className="mt-2 text-sm">
+                  <thead><tr className="text-left text-xs text-foreground-muted"><th className="pr-6 font-medium">Atom</th><th className="pr-6 font-medium">Left</th><th className="pr-6 font-medium">Right</th><th /></tr></thead>
+                  <tbody>
+                    {report.elements.map((e) => (
+                      <tr key={e.el} className={e.ok ? "" : "font-semibold text-negative"}><td className="pr-6">{e.el}</td><td className="pr-6">{e.left}</td><td className="pr-6">{e.right}</td><td>{e.ok ? "✓" : "✗"}</td></tr>
+                    ))}
+                    {(report.charge.left !== 0 || report.charge.right !== 0) && (
+                      <tr className={report.charge.ok ? "" : "font-semibold text-negative"}><td className="pr-6">charge</td><td className="pr-6">{report.charge.left}</td><td className="pr-6">{report.charge.right}</td><td>{report.charge.ok ? "✓" : "✗"}</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              )}
+              {!report.balanced && sugg && <p className="mt-3 rounded-lg bg-surface-secondary px-3 py-2 text-sm">Balanced: <span className="font-mono font-semibold">{sugg}</span></p>}
+              {!report.balanced && !sugg && !report.errors.length && <p className="mt-3 text-xs text-foreground-muted">No single set of whole-number coefficients balances this as written — check the species.</p>}
+              {!report.errors.length && (
+                <p className="mt-3 text-xs text-foreground-muted">Molar masses (g/mol): {all.map((sp) => { try { return `${sp.formula} ${molarMass(sp.formula).toFixed(2)}`; } catch { return sp.formula; } }).join(" · ")}</p>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </Modal>
   );
 }

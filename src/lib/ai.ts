@@ -144,3 +144,24 @@ export async function practiceQuestions(excerpts: Excerpt[], count: number, diff
   });
   return extractJson<{ questions: PracticeQuestion[] }>(raw).questions ?? [];
 }
+
+export type ReadEquation = { reactants: { coef: number; formula: string }[]; products: { coef: number; formula: string }[] };
+
+/** Read chemical equations off a handwritten region. Only transcribes — balancing is checked locally (chem.ts). */
+export async function readChemistry(region: string): Promise<ReadEquation[]> {
+  const raw = await claude({
+    maxTokens: 2000,
+    system:
+      "You read handwritten chemical equations from an image and return STRICT JSON only: " +
+      '{"equations":[{"reactants":[{"coef":1,"formula":"H2"}],"products":[{"coef":1,"formula":"H2O"}]}]}. ' +
+      'Write formulas in plain text with no subscripts characters: H2O, Ca(OH)2, Ba(OH)2·8H2O. Write ion charges with a caret: Fe^3+, SO4^2-, Cl^-. ' +
+      'Omit state symbols like (aq), (s), (l), (g) and any text above/below the arrow (catalysts, heat). "coef" is the number written in front of the species (1 if none). ' +
+      "Transcribe EXACTLY what is written, including coefficients that are wrong — do NOT balance or correct anything. One object per equation.",
+    user: [imageBlock(region), text("Read the chemical equations.")],
+  });
+  const parsed = extractJson<{ equations: ReadEquation[] }>(raw);
+  return (parsed.equations ?? []).filter((e) => e.reactants?.length && e.products?.length).map((e) => ({
+    reactants: e.reactants.map((r) => ({ coef: Number(r.coef) || 1, formula: String(r.formula) })),
+    products: e.products.map((r) => ({ coef: Number(r.coef) || 1, formula: String(r.formula) })),
+  }));
+}
