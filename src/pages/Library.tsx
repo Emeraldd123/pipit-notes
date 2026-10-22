@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  CheckSquare, Clock, Download, FileUp, Folder, FolderInput, FolderPlus, GraduationCap, Loader2, Network, NotebookPen, Pencil, Pin, Plus, Search, Settings as SettingsIcon, Tag, Trash2, Upload, X,
+  CheckSquare, Clock, Download, RotateCcw, Trash, FileUp, Folder, FolderInput, FolderPlus, GraduationCap, Loader2, Network, NotebookPen, Pencil, Pin, Plus, Search, Settings as SettingsIcon, Tag, Trash2, Upload, X,
 } from "lucide-react";
 import type { NoteMeta, NotebookRec } from "@/types";
 import {
-  addImage, createNote, createNotebook, deleteNote, deleteNotebook, listNotebooks, listNotes, patchNote, putPageText,
+  addImage, createNote, createNotebook, deleteNote, deleteNotebook, listDeletedNotes, listNotebooks, listNotes, patchNote, purgeTrash, putPageText, restoreNotes, trashNotes, TRASH_RETENTION_DAYS,
 } from "@/lib/db";
 import { renderPdf } from "@/lib/pdf";
 import { PAGE_H, PAGE_W, pageTop } from "@/lib/page";
@@ -21,6 +21,8 @@ import { Button, Card, Toast, Wordmark } from "@/components/ui";
 
 export function Library({ notebook, q }: { notebook: string | null; q: string }) {
   const [notes, setNotes] = useState<NoteMeta[] | null>(null);
+  const [trashed, setTrashed] = useState<NoteMeta[]>([]);
+  const [undo, setUndo] = useState<{ label: string; onClick: () => void } | null>(null);
   const [notebooks, setNotebooks] = useState<NotebookRec[]>([]);
   const [filter, setFilter] = useState(q);
   const [busy, setBusy] = useState<string | null>(null);
@@ -40,18 +42,34 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
   const restoreRef = useRef<HTMLInputElement>(null);
 
   const reload = useCallback(async () => {
-    const [n, nb] = await Promise.all([listNotes(), listNotebooks()]);
+    await purgeTrash().catch(() => 0);
+    const [n, nb, tr] = await Promise.all([listNotes(), listNotebooks(), listDeletedNotes()]);
     setNotes(n);
+    setTrashed(tr);
     updateSentinel(n.length); // a copy of the note count outside IndexedDB, to detect a wiped database
     setNotebooks(nb);
     setOverdue(await backupIsOverdue());
   }, []);
   useEffect(() => { void reload(); }, [reload]);
 
-  const flash = (m: string) => { setToast(m); setTimeout(() => setToast((t) => (t === m ? null : t)), 3200); };
+  const flash = (m: string) => { setToast(m); setUndo(null); setTimeout(() => setToast((t) => (t === m ? null : t)), 3200); };
+  /** Deleting is never a dead end: the toast offers Undo, and the notes wait in "Recently deleted". */
+  const flashUndo = (m: string, ids: string[]) => {
+    setToast(m); setUndo({ label: "Undo", onClick: () => { void restoreNotes(ids).then(reload); setToast(null); setUndo(null); } });
+    setTimeout(() => setToast((t) => (t === m ? null : t)), 7000);
+  };
+  useEffect(() => {
+    // a note trashed from inside the editor: offer Undo here
+    try {
+      const raw = sessionStorage.getItem("pipit.trashed");
+      if (raw) { sessionStorage.removeItem("pipit.trashed"); const t = JSON.parse(raw) as { ids: string[]; title: string }; flashUndo(`“${t.title}” moved to Recently deleted.`, t.ids); }
+    } catch { /* ignore */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const visible = useMemo(() => {
     const f = filter.trim().toLowerCase();
+    if (notebook === "trash") return trashed;
     if (notebook === "recent") {
       return (notes ?? []).filter((n) => n.openedAt).sort((a, b) => (b.openedAt ?? 0) - (a.openedAt ?? 0)).slice(0, 16);
     }
@@ -61,7 +79,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
       if (!f) return true;
       return n.title.toLowerCase().includes(f) || n.tags.some((t) => t.toLowerCase().includes(f));
     });
-  }, [notes, notebook, filter, tagFilter]);
+  }, [notes, trashed, notebook, filter, tagFilter]);
 
   const allTags = useMemo(() => {
     const c = new Map<string, number>();
@@ -165,12 +183,12 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
     await reload();
   }
   async function deleteSelected() {
-    if (!confirm(`Delete ${picked.size} note${picked.size === 1 ? "" : "s"}? This can't be undone — back up first if unsure.`)) return;
-    for (const id of picked) await deleteNote(id);
+    const ids = [...picked];
+    await trashNotes(ids);
     count("library.bulkDelete");
-    flash(`Deleted ${picked.size}.`);
     stopSelecting();
     await reload();
+    flashUndo(`${ids.length} note${ids.length === 1 ? "" : "s"} moved to Recently deleted.`, ids);
   }
   async function exportSelected() {
     const list = (notes ?? []).filter((n) => picked.has(n.id));
@@ -226,7 +244,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
     }
   }
 
-  const activeName = notebook === "recent" ? "Recent" : notebook === "none" ? "Unfiled" : notebook ? notebooks.find((n) => n.id === notebook)?.name ?? "Notebook" : "All notes";
+  const activeName = notebook === "trash" ? "Recently deleted" : notebook === "recent" ? "Recent" : notebook === "none" ? "Unfiled" : notebook ? notebooks.find((n) => n.id === notebook)?.name ?? "Notebook" : "All notes";
 
   return (
     <div className="paper-bg safe-t flex min-h-full">
@@ -236,6 +254,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
         <nav className="space-y-0.5 text-sm">
           <SideItem active={!notebook} onClick={() => go({ name: "library", notebook: null, q: "" })} icon={<Folder size={15} />} label="All notes" count={notes?.length} />
           <SideItem active={notebook === "recent"} onClick={() => go({ name: "library", notebook: "recent", q: "" })} icon={<Clock size={15} />} label="Recent" />
+          {(trashed.length > 0 || notebook === "trash") && <SideItem active={notebook === "trash"} onClick={() => go({ name: "library", notebook: "trash", q: "" })} icon={<Trash size={15} />} label="Recently deleted" count={trashed.length} />}
           <SideItem active={notebook === "none"} onClick={() => go({ name: "library", notebook: "none", q: "" })} icon={<Folder size={15} />} label="Unfiled" count={counts.get(null)}
             action={<button title="Download as PDFs (.zip)" onClick={() => exportNotebookZip(null, "Unfiled")} className="p-1 text-foreground-muted hover:text-primary"><Download size={12} /></button>} />
           {notebooks.map((nb) => (
@@ -265,7 +284,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
             <div>
               <div className="md:hidden"><Wordmark /></div>
               <h1 className="serif hidden text-4xl tracking-tight md:block">{activeName}</h1>
-              <p className="mt-1 text-sm text-foreground-muted">{visible.length} note{visible.length === 1 ? "" : "s"} · stored on this device</p>
+              <p className="mt-1 text-sm text-foreground-muted">{notebook === "trash" ? `Removed for good after ${TRASH_RETENTION_DAYS} days — restore anything you want to keep.` : `${visible.length} note${visible.length === 1 ? "" : "s"} · stored on this device`}</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative">
@@ -333,7 +352,10 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
           ) : (
             <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4">
               {visible.map((n) => (
-                <NoteTile key={n.id} note={n} notebook={notebooks.find((b) => b.id === n.notebookId)} notebooks={notebooks} onChange={reload} flash={flash} selecting={selecting} picked={picked.has(n.id)} onPick={() => togglePick(n.id)} />
+                <NoteTile key={n.id} note={n} notebook={notebooks.find((b) => b.id === n.notebookId)} notebooks={notebooks} onChange={reload} flash={flash} selecting={selecting} picked={picked.has(n.id)} onPick={() => togglePick(n.id)}
+                  trashed={notebook === "trash"} onTrash={async () => { await trashNotes([n.id]); await reload(); flashUndo(`“${n.title}” moved to Recently deleted.`, [n.id]); }}
+                  onRestore={async () => { await restoreNotes([n.id]); await reload(); flash("Restored."); }}
+                  onPurge={async () => { if (confirm(`Permanently delete "${n.title}"? This can't be undone.`)) { await deleteNote(n.id); await reload(); flash("Deleted for good."); } }} />
               ))}
             </div>
           )}
@@ -366,7 +388,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
         </div>
       )}
       {backup.modal}
-      <Toast msg={toast} />
+      <Toast msg={toast} action={undo} />
     </div>
   );
 }
@@ -405,7 +427,7 @@ function Empty({ onNew, onPdf, onRestore, hasAny }: { onNew: () => void; onPdf: 
   );
 }
 
-function NoteTile({ note, notebook, notebooks, onChange, flash, selecting, picked, onPick }: { note: NoteMeta; notebook?: NotebookRec; notebooks: NotebookRec[]; onChange: () => void; flash: (m: string) => void; selecting: boolean; picked: boolean; onPick: () => void }) {
+function NoteTile({ note, notebook, notebooks, onChange, flash, selecting, picked, onPick, trashed, onTrash, onRestore, onPurge }: { note: NoteMeta; notebook?: NotebookRec; notebooks: NotebookRec[]; onChange: () => void; flash: (m: string) => void; selecting: boolean; picked: boolean; onPick: () => void; trashed: boolean; onTrash: () => void; onRestore: () => void; onPurge: () => void }) {
   const [thumb, setThumb] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
@@ -422,12 +444,7 @@ function NoteTile({ note, notebook, notebooks, onChange, flash, selecting, picke
     const t = prompt("Rename note", note.title);
     if (t?.trim()) { await patchNote(note.id, { title: t.trim() }, false); onChange(); }
   }
-  async function remove() {
-    if (!confirm(`Delete "${note.title}"? This can't be undone — back up first if unsure.`)) return;
-    await deleteNote(note.id);
-    flash("Note deleted.");
-    onChange();
-  }
+  void flash;
   const [moving, setMoving] = useState(false);
   async function moveTo(id: string | null) { setMoving(false); if (id !== note.notebookId) { await patchNote(note.id, { notebookId: id }, false); flash(id ? "Moved to notebook." : "Moved to Unfiled."); onChange(); } }
   async function editTags() {
@@ -446,13 +463,25 @@ function NoteTile({ note, notebook, notebooks, onChange, flash, selecting, picke
           {thumb ? <img src={thumb} alt="" className="h-full w-full object-cover object-top" draggable={false} /> : <div className="flex h-full items-center justify-center text-xs text-foreground-muted">{note.strokeCount || note.imageCount ? "Loading preview…" : "Blank"}</div>}
         </button>
         {selecting && <span className={`pointer-events-none absolute left-2 top-2 flex h-6 w-6 items-center justify-center rounded-full border-2 text-white ${picked ? "border-primary bg-primary" : "border-white bg-black/30"}`}>{picked ? "✓" : ""}</span>}
-        <div className={`absolute right-1.5 top-1.5 flex gap-1 opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 ${selecting ? "hidden" : ""}`}>
-          <Mini title={note.isPinned ? "Unpin" : "Pin"} onClick={togglePin} active={note.isPinned}><Pin size={12} /></Mini>
-          <Mini title="Move to notebook" onClick={() => setMoving((v) => !v)} active={moving}><FolderInput size={12} /></Mini>
-          <Mini title="Tags" onClick={editTags}><Tag size={12} /></Mini>
-          <Mini title="Rename" onClick={rename}><Pencil size={12} /></Mini>
-          <Mini title="Delete" onClick={remove} danger><Trash2 size={12} /></Mini>
-        </div>
+        {trashed ? (
+          <div className="absolute inset-x-1.5 bottom-1.5 flex justify-between gap-1">
+            <button onClick={onRestore} className="flex min-h-9 flex-1 items-center justify-center gap-1 rounded-lg bg-surface/95 px-2 text-xs font-medium text-primary shadow backdrop-blur"><RotateCcw size={13} /> Restore</button>
+            <button onClick={onPurge} className="flex min-h-9 items-center justify-center rounded-lg bg-surface/95 px-2.5 text-negative shadow backdrop-blur" title="Delete for good"><Trash2 size={13} /></button>
+          </div>
+        ) : (
+          <>
+            <div className={`absolute right-1.5 top-1.5 flex gap-1 opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 ${selecting ? "hidden" : ""}`}>
+              <Mini title={note.isPinned ? "Unpin" : "Pin"} onClick={togglePin} active={note.isPinned}><Pin size={13} /></Mini>
+              <Mini title="Move to notebook" onClick={() => setMoving((v) => !v)} active={moving}><FolderInput size={13} /></Mini>
+              <Mini title="Tags" onClick={editTags}><Tag size={13} /></Mini>
+              <Mini title="Rename" onClick={rename}><Pencil size={13} /></Mini>
+            </div>
+            {/* the destructive action lives in its own corner, far from the buttons used all the time */}
+            <div className={`absolute bottom-1.5 right-1.5 opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 ${selecting ? "hidden" : ""}`}>
+              <Mini title="Move to Recently deleted" onClick={onTrash} danger><Trash2 size={13} /></Mini>
+            </div>
+          </>
+        )}
       </div>
       {moving && (
         <div className="absolute left-1.5 top-10 z-20 max-h-56 w-44 overflow-auto rounded-xl border border-border bg-surface p-1 text-sm shadow-xl">
@@ -480,7 +509,7 @@ function NoteTile({ note, notebook, notebooks, onChange, flash, selecting, picke
 function Mini({ children, onClick, title, active, danger }: { children: React.ReactNode; onClick: () => void; title: string; active?: boolean; danger?: boolean }) {
   return (
     <button title={title} onClick={onClick}
-      className={`flex h-7 w-7 items-center justify-center rounded-lg border border-border bg-surface/95 shadow-sm backdrop-blur ${active ? "text-primary" : danger ? "text-negative" : "text-foreground-muted"} hover:bg-surface-secondary`}>
+      className={`flex h-7 w-7 items-center justify-center rounded-lg border border-border bg-surface/95 shadow-sm backdrop-blur [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:w-10 ${active ? "text-primary" : danger ? "text-negative" : "text-foreground-muted"} hover:bg-surface-secondary`}>
       {children}
     </button>
   );

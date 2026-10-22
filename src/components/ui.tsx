@@ -15,7 +15,7 @@ export function Button({
   children: ReactNode; onClick?: () => void; variant?: "primary" | "secondary" | "ghost" | "danger";
   disabled?: boolean; title?: string; className?: string; type?: "button" | "submit";
 }) {
-  const base = "inline-flex items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-medium transition-colors disabled:opacity-50";
+  const base = "inline-flex items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-medium transition-colors disabled:opacity-50 [@media(pointer:coarse)]:min-h-11";
   const v =
     variant === "primary" ? "bg-primary text-white hover:bg-primary-hover"
     : variant === "danger" ? "bg-negative/10 text-negative hover:bg-negative/20"
@@ -30,7 +30,7 @@ export function IconButton({
   return (
     <button
       title={title} aria-label={title} onClick={onClick} disabled={disabled}
-      className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors disabled:opacity-30 ${
+      className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors disabled:opacity-30 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 ${
         active ? "bg-primary text-white" : danger ? "text-negative hover:bg-negative/10" : "text-foreground-muted hover:bg-surface-secondary"
       } ${className}`}
     >
@@ -60,11 +60,12 @@ export function Modal({ title, onClose, children, wide }: { title: ReactNode; on
   );
 }
 
-export function Toast({ msg }: { msg: string | null }) {
+export function Toast({ msg, action }: { msg: string | null; action?: { label: string; onClick: () => void } | null }) {
   if (!msg) return null;
   return (
-    <div className="safe-b pointer-events-none fixed bottom-5 left-1/2 z-[60] max-w-[90vw] -translate-x-1/2 rounded-xl bg-foreground px-4 py-2.5 text-sm text-background shadow-xl">
-      {msg}
+    <div className={`safe-b fixed bottom-5 left-1/2 z-[60] flex max-w-[90vw] -translate-x-1/2 items-center gap-3 rounded-xl bg-foreground px-4 py-2.5 text-sm text-background shadow-xl ${action ? "" : "pointer-events-none"}`}>
+      <span>{msg}</span>
+      {action && <button onClick={action.onClick} className="rounded-md px-2 py-1 font-semibold underline decoration-dotted underline-offset-2 [@media(pointer:coarse)]:px-3 [@media(pointer:coarse)]:py-2">{action.label}</button>}
     </div>
   );
 }

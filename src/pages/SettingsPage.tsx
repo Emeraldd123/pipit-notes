@@ -184,7 +184,18 @@ export function SettingsPage() {
           <div className="mt-3"><Button onClick={() => setPenTest(true)}>Open pen test</Button></div>
         </Section>
 
-        <Section icon={<HardDrive size={16} />} title="Appearance">
+        <Section icon={<HardDrive size={16} />} title="Appearance & handedness">
+          <label className="block text-xs text-foreground-muted">Tool rail
+            <span className="mt-1 flex gap-2">
+              {(["left", "right"] as const).map((side) => (
+                <button key={side} onClick={() => updateSettings({ railSide: side })} className={`flex-1 rounded-xl border px-3 py-2.5 text-sm ${s.railSide === side ? "border-primary bg-primary/10 font-medium text-primary" : "border-border text-foreground-muted hover:bg-surface-secondary"}`}>
+                  {side === "left" ? "On the left (best if you write with your right hand)" : "On the right (best if you write left-handed)"}
+                </button>
+              ))}
+            </span>
+            <span className="mt-1 block">Keeps the tools under your resting, non-writing hand so your writing hand never reaches across the page.</span>
+          </label>
+          <label className="mt-4 block text-xs text-foreground-muted">Theme</label>
           <select value={s.theme} onChange={(e) => updateSettings({ theme: e.target.value as "system" | "light" | "dark" })} className="rounded-xl border border-border bg-surface px-3 py-2.5 text-sm">
             <option value="system">Match system</option><option value="light">Light</option><option value="dark">Dark</option>
           </select>

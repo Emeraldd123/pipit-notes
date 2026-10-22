@@ -161,6 +161,8 @@ export function ConceptMapView({
               {connectFrom === n.id && <rect x={-w / 2 - 5} y={-H / 2 - 5} width={w + 10} height={H + 10} rx={H / 2 + 5} fill="none" stroke="var(--primary)" strokeWidth={3} strokeDasharray="6 4" />}
               <rect x={-w / 2} y={-H / 2} width={w} height={H} rx={H / 2} fill={fill(n)} stroke={sel ? "var(--foreground)" : colorMode === "mastery" && st && st.mistakes > 0 ? "#dc2626" : "var(--surface)"} strokeWidth={sel ? 4 : st && st.mistakes > 0 && colorMode === "mastery" ? 4 : 2.5} />
               <text y={5} textAnchor="middle" fontSize={14} fontWeight={600} fill="#fff" style={{ pointerEvents: "none" }}>{n.label}</text>
+              {/* colour alone can't carry meaning (red/green look alike to many people): say it in words too */}
+              {colorMode === "mastery" && <text y={H / 2 + 14} textAnchor="middle" fontSize={11} fill="var(--foreground-muted)" style={{ pointerEvents: "none" }}>{st && st.mastery !== null ? `${Math.round(st.mastery * 100)}% known` : "no cards yet"}</text>}
               {colorMode === "mastery" && st && st.due > 0 && <g transform={`translate(${w / 2 - 6},${-H / 2 + 2})`}><circle r={10} fill="#dc2626" stroke="var(--surface)" strokeWidth={2} /><text y={4} textAnchor="middle" fontSize={11} fontWeight={700} fill="#fff">{st.due}</text></g>}
               {colorMode === "mastery" && st && st.mistakes > 0 && <g transform={`translate(${-w / 2 + 6},${-H / 2 + 2})`}><circle r={10} fill="#fff" stroke="#dc2626" strokeWidth={2} /><text y={4} textAnchor="middle" fontSize={12} fontWeight={800} fill="#dc2626">!</text></g>}
             </g>

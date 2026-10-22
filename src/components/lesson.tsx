@@ -372,7 +372,7 @@ function Summary({ title, result, progress, quiz, onDone }: { title: string; res
   return (
     <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-background px-5 text-center">
       <style>{`@keyframes fall{0%{transform:translateY(-10vh) rotate(0);opacity:1}100%{transform:translateY(110vh) rotate(540deg);opacity:.9}}`}</style>
-      {result.stats.completed && bits.map((b, k) => <span key={k} className="pointer-events-none absolute top-0 text-2xl" style={{ left: `${b.left}%`, animation: `fall ${b.dur}s ${b.delay}s ease-in forwards` }}>{b.e}</span>)}
+      {result.stats.completed && !window.matchMedia("(prefers-reduced-motion: reduce)").matches && bits.map((b, k) => <span key={k} className="pointer-events-none absolute top-0 text-2xl" style={{ left: `${b.left}%`, animation: `fall ${b.dur}s ${b.delay}s ease-in forwards` }}>{b.e}</span>)}
       <Trophy size={64} className={result.stats.completed ? "text-amber-500" : "text-foreground-muted"} />
       <h1 className="mt-4 text-3xl font-bold">{quiz ? `Quiz: ${result.stats.correctFirstTry} / ${result.stats.total}` : result.stats.completed ? (acc >= 90 ? "Flawless!" : acc >= 70 ? "Lesson complete!" : "Done — nice effort!") : "Lesson ended"}</h1>
       <p className="mt-1 text-sm text-foreground-muted">{title}</p>

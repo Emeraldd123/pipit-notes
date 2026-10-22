@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, ArrowLeftRight, ArrowUpRight, Check, CheckCheck, Circle, Code2, Copy, Download, Eraser, FilePlus2, FileText,
-  Compass, Grid3x3, Hand, Layers as LayersIcon, Share2, Highlighter, History, Layers, Ruler, Waves, Lightbulb, LineChart, ListChecks, ImagePlus, Lasso, Loader2, Maximize2, Minus, MoreHorizontal, MousePointer2, Paintbrush, Pen,
+  Compass, Grid3x3, Hand, Plus, Layers as LayersIcon, Share2, Highlighter, History, Layers, Ruler, Waves, Lightbulb, LineChart, ListChecks, ImagePlus, Lasso, Loader2, Maximize2, Minus, MoreHorizontal, MousePointer2, Paintbrush, Pen,
   Pencil, Printer, Redo2, Columns2, FileCode2, FlaskConical, Network, Shapes, TextCursorInput, Wand2, Scissors, ScanText, Sigma, Square, Trash, Trash2, Type, Undo2, ZoomIn, ZoomOut, Sparkles,
 } from "lucide-react";
 import { NoteCanvas, type CanvasImage, type NoteCanvasHandle, type Stroke, type Tool } from "@/components/note-canvas";
@@ -14,13 +14,14 @@ import { estimateUsd, formatUsd } from "@/lib/ai-cost";
 import { PAGE_H, PAGE_W, PAGE_GAP } from "@/lib/page";
 import { TEMPLATES, renderTemplate, type TemplateId } from "@/lib/templates";
 import { PresetsButton } from "@/components/presets";
+import { RailMenu } from "@/components/rail-menu";
 import { shareOrDownload, useShareFlow } from "@/components/backup-flow";
 import { PagesPanel } from "@/components/pages-panel";
 import { ExplainPanel, HighlightLayer, ReviewBar, ReviewSetup, type ExplainState, type Highlight, type ReviewState } from "@/components/understanding";
 import { Button, IconButton, Modal, Toast } from "@/components/ui";
 import type { BlockKind, BlockRec, NoteMeta, NotePaper } from "@/types";
 import {
-  addImage, dataUrlToBlob, deleteBlock, deleteImage, deleteNote, getPageTexts, listNotes, listVersions, loadNote, maybeSnapshot, patchNote, putBlock,
+  addImage, dataUrlToBlob, deleteBlock, deleteImage, trashNotes, getPageTexts, listNotes, listVersions, loadNote, maybeSnapshot, patchNote, putBlock,
   restoreVersion, restructurePages, snapshotDue, syncStrokes, updateImage, type LoadedNote,
 } from "@/lib/db";
 import { computeDelta, strokeSig } from "@/lib/delta";
@@ -511,8 +512,9 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
   }
   async function onDeleteNote() {
     setMenu(false);
-    if (!confirm(`Delete "${title}"? This can't be undone — back up first if unsure.`)) return;
-    await deleteNote(noteId);
+    await flush();
+    await trashNotes([noteId]);   // recoverable: the library offers Undo, and the note waits in "Recently deleted" for 30 days
+    try { sessionStorage.setItem("pipit.trashed", JSON.stringify({ ids: [noteId], title })); } catch { /* */ }
     go({ name: "library", notebook: null, q: "" });
   }
 
@@ -847,6 +849,7 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
   }
 
   const activeTool: Tool = tool;
+  const railSide = settings.railSide;
   const blockMode = tool === "block";
   const blocksTakeTouch = blockMode || tool === "text";
   const rail = (defs: ToolDef[]) => (
@@ -901,7 +904,7 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
                 <MenuItem icon={<FileCode2 size={15} />} label="Export as LaTeX (reads handwriting)" onClick={exportLatex} />
                 <MenuItem icon={<Printer size={15} />} label="Print" onClick={doPrint} />
                 <div className="my-1 h-px bg-border" />
-                <MenuItem icon={<Trash2 size={15} />} label="Delete note" danger onClick={onDeleteNote} />
+                <MenuItem icon={<Trash2 size={15} />} label="Move note to Recently deleted" danger onClick={onDeleteNote} />
               </div>
             </>
           )}
@@ -924,48 +927,53 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-        <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-border bg-surface px-2 py-2 md:min-h-0 md:w-[60px] md:flex-col md:items-center md:gap-1.5 md:overflow-y-auto md:overflow-x-visible md:border-b-0 md:border-r md:px-1.5 md:py-3">
+      <div className={`flex min-h-0 flex-1 flex-col ${railSide === "right" ? "md:flex-row-reverse" : "md:flex-row"}`}>
+        <div className={`flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-border bg-surface px-2 py-2 md:min-h-0 md:w-[60px] md:flex-col md:items-center md:gap-1.5 md:overflow-y-auto md:overflow-x-visible md:border-b-0 md:px-1.5 md:py-3 [@media(pointer:coarse)]:md:w-[68px] ${railSide === "right" ? "md:border-l" : "md:border-r"}`}>
           {rail(WRITE)}
           <IconButton title="Eraser" active={tool === "eraser"} onClick={() => setTool("eraser")}><Eraser size={17} /></IconButton>
           <Sep />
-          {rail(SHAPES)}
-          <IconButton title={settings.shapeSnap ? "Hold-to-snap shapes: ON (hold the pen still after drawing a line, circle or box)" : "Hold-to-snap shapes: off"} active={settings.shapeSnap} onClick={() => updateSettings({ shapeSnap: !settings.shapeSnap })}><Wand2 size={17} /></IconButton>
-          <IconButton title={settings.scribbleErase ? "Scribble to erase: ON (scribble back and forth over ink to delete it)" : "Scribble to erase: off"} active={settings.scribbleErase} onClick={() => updateSettings({ scribbleErase: !settings.scribbleErase })}><Waves size={17} /></IconButton>
-          <IconButton title={ruler ? "Hide ruler" : "Ruler — draw straight lines along its edge"} active={!!ruler} onClick={toggleRuler}><Ruler size={17} /></IconButton>
-          <IconButton title={protractor ? "Hide protractor" : "Protractor"} active={!!protractor} onClick={toggleProtractor}><Compass size={17} /></IconButton>
-          <Sep />
           {rail(SELECT)}
           <Sep />
-          <div className="flex gap-1 md:flex-col">
-            <IconButton title="Add a Python block (tap with the Blocks tool to place one)" onClick={() => addBlock("code")}><Code2 size={17} /></IconButton>
-            <IconButton title="Text tool — tap anywhere on the page and type" active={tool === "text"} onClick={() => setTool(tool === "text" ? "pen" : "text")}><Type size={17} /></IconButton>
-            <IconButton title="Add a maths (LaTeX) block" onClick={() => addBlock("math")}><Sigma size={17} /></IconButton>
-            <IconButton title="Add a graph block (type y = x^2, x^2 + y^2 = 25, z = sin(x)cos(y)…)" onClick={() => { count("graph.add"); addBlock("graph", undefined, "y = x^2"); }}><LineChart size={17} /></IconButton>
-            <IconButton title="Edit blocks (blocks take touch)" active={blockMode} onClick={() => setTool(blockMode ? "pen" : "block")}><Sparkles size={17} /></IconButton>
-            <IconButton title="Insert image" onClick={() => fileRef.current?.click()}><ImagePlus size={17} /></IconButton>
-          </div>
+          <RailMenu title="Insert" icon={<Plus size={17} />} side={railSide} active={(["line", "rect", "ellipse", "arrow", "text"] as Tool[]).includes(tool) || blockMode || !!ruler || !!protractor} items={[
+            { group: "Shapes", icon: <Minus size={17} />, label: "Line", active: tool === "line", onClick: () => setTool("line") },
+            { icon: <Square size={17} />, label: "Rectangle", active: tool === "rect", onClick: () => setTool("rect") },
+            { icon: <Circle size={17} />, label: "Ellipse", active: tool === "ellipse", onClick: () => setTool("ellipse") },
+            { icon: <ArrowUpRight size={17} />, label: "Arrow", hint: "Hold Shift to snap the angle", active: tool === "arrow", onClick: () => setTool("arrow") },
+            { group: "On the page", icon: <Type size={17} />, label: "Text", hint: "Tap anywhere on the page and type", active: tool === "text", onClick: () => setTool(tool === "text" ? "pen" : "text") },
+            { icon: <LineChart size={17} />, label: "Graph", hint: "y = x^2 · x^2 + y^2 = 25 · z = sin(x)cos(y)", onClick: () => { count("graph.add"); addBlock("graph", undefined, "y = x^2"); } },
+            { icon: <Sigma size={17} />, label: "Maths (LaTeX)", onClick: () => addBlock("math") },
+            { icon: <Code2 size={17} />, label: "Python", hint: "Runs code and plots graphs", onClick: () => addBlock("code") },
+            { icon: <ImagePlus size={17} />, label: "Image", onClick: () => fileRef.current?.click() },
+            { icon: <Grid3x3 size={17} />, label: "Template", hint: "Axes, unit circle, periodic table…", onClick: () => setTemplatesOpen(true) },
+            { group: "Drawing aids", icon: <Ruler size={17} />, label: ruler ? "Hide ruler" : "Ruler", hint: "Strokes snap to its edge", active: !!ruler, onClick: toggleRuler },
+            { icon: <Compass size={17} />, label: protractor ? "Hide protractor" : "Protractor", active: !!protractor, onClick: toggleProtractor },
+            { group: "Blocks", icon: <Sparkles size={17} />, label: "Edit blocks", hint: "Lets text, maths, graph and code blocks take touch", active: blockMode, onClick: () => setTool(blockMode ? "pen" : "block") },
+          ]} />
+          <RailMenu title="Pen assists" icon={<Wand2 size={17} />} side={railSide} active={settings.shapeSnap || settings.scribbleErase} items={[
+            { icon: <Wand2 size={17} />, label: settings.shapeSnap ? "Snap shapes: on" : "Snap shapes: off", hint: "Hold the pen still after a line, circle or box and it straightens", active: settings.shapeSnap, onClick: () => updateSettings({ shapeSnap: !settings.shapeSnap }) },
+            { icon: <Waves size={17} />, label: settings.scribbleErase ? "Scribble to erase: on" : "Scribble to erase: off", hint: "Scribble back and forth over ink to delete it", active: settings.scribbleErase, onClick: () => updateSettings({ scribbleErase: !settings.scribbleErase }) },
+          ]} />
+          <PresetsButton presets={settings.presets} side={railSide} onApply={applyPreset} onSave={savePreset} onDelete={(i) => updateSettings({ presets: settings.presets.filter((_, k) => k !== i) })} />
           <Sep />
           <div className="flex items-center gap-1.5 md:flex-col">
             {WIDTHS.map((w) => (
               <button key={w} onClick={() => setWidth(w)} title={`Width ${w}`}
-                className={`flex h-8 w-8 items-center justify-center rounded-lg ${width === w ? "bg-surface-secondary ring-1 ring-primary" : "hover:bg-surface-secondary"}`}>
+                className={`flex h-8 w-8 items-center justify-center rounded-lg [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:w-10 ${width === w ? "bg-surface-secondary ring-1 ring-primary" : "hover:bg-surface-secondary"}`}>
                 <span className="rounded-full bg-foreground" style={{ width: Math.min(w, 16), height: Math.min(w, 16) }} />
               </button>
             ))}
           </div>
           <Sep />
-          <PresetsButton presets={settings.presets} onApply={applyPreset} onSave={savePreset} onDelete={(i) => updateSettings({ presets: settings.presets.filter((_, k) => k !== i) })} />
-          <div className="flex items-center gap-1.5 md:grid md:grid-cols-2 md:gap-1.5">
+          <div className="flex items-center gap-1.5 md:grid md:grid-cols-2 md:gap-2">
             {(tool === "highlighter" ? HIGHLIGHTER_COLORS : COLORS).map((c) => (
-              <button key={c} title={c} onClick={() => (tool === "highlighter" ? setHlColor(c) : setColor(c))}
-                className={`h-6 w-6 rounded-full ${inkColor === c ? "ring-2 ring-primary ring-offset-2 ring-offset-surface" : ""}`} style={{ backgroundColor: c }} />
+              <button key={c} title={c} aria-label={`Colour ${c}`} onClick={() => (tool === "highlighter" ? setHlColor(c) : setColor(c))}
+                className={`h-6 w-6 rounded-full [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8 ${inkColor === c ? "ring-2 ring-primary ring-offset-2 ring-offset-surface" : ""}`} style={{ backgroundColor: c }} />
             ))}
             {settings.recentColors.map((c) => (
-              <button key={c} title={`Recent ${c}`} onClick={() => (tool === "highlighter" ? setHlColor(c) : setColor(c))}
-                className={`h-6 w-6 rounded-full ring-1 ring-border ${inkColor === c ? "ring-2 ring-primary ring-offset-2 ring-offset-surface" : ""}`} style={{ backgroundColor: c }} />
+              <button key={c} title={`Recent ${c}`} aria-label={`Recent colour ${c}`} onClick={() => (tool === "highlighter" ? setHlColor(c) : setColor(c))}
+                className={`h-6 w-6 rounded-full ring-1 ring-border [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8 ${inkColor === c ? "ring-2 ring-primary ring-offset-2 ring-offset-surface" : ""}`} style={{ backgroundColor: c }} />
             ))}
-            <label className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full ring-1 ring-border" title="Custom colour" style={{ background: "conic-gradient(red, yellow, lime, aqua, blue, magenta, red)" }}>
+            <label className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full ring-1 ring-border [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8" title="Custom colour" style={{ background: "conic-gradient(red, yellow, lime, aqua, blue, magenta, red)" }}>
               <input type="color" value={inkColor} onChange={(e) => { const v = e.target.value; (tool === "highlighter" ? setHlColor : setColor)(v); rememberColor(v); }} className="sr-only" />
             </label>
           </div>
@@ -977,7 +985,7 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
           <Sep />
           <div className="flex items-center gap-1 md:flex-col">
             <IconButton title="Zoom out" onClick={() => canvasRef.current?.zoomOut()}><ZoomOut size={17} /></IconButton>
-            <button title="Reset zoom" onClick={() => canvasRef.current?.zoomReset()} className="w-10 rounded-md py-0.5 text-center text-[11px] font-medium text-foreground-muted hover:bg-surface-secondary">{Math.round(zoom * 100)}%</button>
+            <button title="Reset zoom" onClick={() => canvasRef.current?.zoomReset()} className="w-10 rounded-md py-0.5 text-center text-[11px] font-medium text-foreground-muted hover:bg-surface-secondary [@media(pointer:coarse)]:py-2 [@media(pointer:coarse)]:text-xs">{Math.round(zoom * 100)}%</button>
             <IconButton title="Zoom in" onClick={() => canvasRef.current?.zoomIn()}><ZoomIn size={17} /></IconButton>
             <IconButton title="Fit to page" onClick={() => canvasRef.current?.zoomReset()}><Maximize2 size={17} /></IconButton>
           </div>
@@ -1148,7 +1156,7 @@ function MenuItem({ icon, label, onClick, danger }: { icon: React.ReactNode; lab
 }
 function SelBtn({ children, onClick, accent, danger }: { children: React.ReactNode; onClick: () => void; accent?: boolean; danger?: boolean }) {
   return (
-    <button onClick={onClick} className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 ${accent ? "bg-primary/10 font-medium text-primary hover:bg-primary/20" : danger ? "text-negative hover:bg-negative/10" : "hover:bg-surface-secondary"}`}>{children}</button>
+    <button onClick={onClick} className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:px-3.5 [@media(pointer:coarse)]:text-sm ${accent ? "bg-primary/10 font-medium text-primary hover:bg-primary/20" : danger ? "text-negative hover:bg-negative/10" : "hover:bg-surface-secondary"}`}>{children}</button>
   );
 }
 

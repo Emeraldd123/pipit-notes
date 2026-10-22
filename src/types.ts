@@ -24,6 +24,8 @@ export type NoteMeta = {
   imageCount: number;
   /** last time the note was opened (for the Recent view) */
   openedAt?: number;
+  /** set when the note was moved to "Recently deleted" (removed for good after 30 days) */
+  deletedAt?: number;
 };
 
 export type StrokeRec = StrokeInput & { id: string; noteId: string; ord: number };

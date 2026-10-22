@@ -126,7 +126,7 @@ export async function deleteNotebook(id: string): Promise<void> {
 
 // --- notes ---------------------------------------------------------------------
 export async function listNotes(): Promise<NoteMeta[]> {
-  const all = await (await db()).getAll("notes");
+  const all = (await (await db()).getAll("notes")).filter((n) => !n.deletedAt);   // notes in "Recently deleted" are invisible everywhere else
   return all.sort((a, b) => Number(b.isPinned) - Number(a.isPinned) || b.updatedAt - a.updatedAt);
 }
 export async function getNoteMeta(id: string): Promise<NoteMeta | undefined> {
@@ -142,6 +142,26 @@ export async function createNote(opts?: { title?: string; notebookId?: string | 
   await (await db()).put("notes", meta);
   return meta;
 }
+// --- recently deleted ---------------------------------------------------------------------------------
+const TRASH_DAYS = 30;
+export async function listDeletedNotes(): Promise<NoteMeta[]> {
+  return (await (await db()).getAll("notes")).filter((n) => n.deletedAt).sort((a, b) => (b.deletedAt ?? 0) - (a.deletedAt ?? 0));
+}
+export async function trashNotes(ids: string[]): Promise<void> {
+  const now = Date.now();
+  for (const id of ids) await patchNote(id, { deletedAt: now }, false);
+}
+export async function restoreNotes(ids: string[]): Promise<void> {
+  for (const id of ids) await patchNote(id, { deletedAt: undefined }, false);
+}
+/** Permanently remove notes that have been in "Recently deleted" longer than 30 days. */
+export async function purgeTrash(now = Date.now()): Promise<number> {
+  const old = (await listDeletedNotes()).filter((n) => now - (n.deletedAt ?? now) > TRASH_DAYS * 86_400_000);
+  for (const n of old) await deleteNote(n.id);
+  return old.length;
+}
+export const TRASH_RETENTION_DAYS = TRASH_DAYS;
+
 export async function patchNote(id: string, patch: Partial<NoteMeta>, touch = true): Promise<void> {
   const d = await db();
   const n = await d.get("notes", id);

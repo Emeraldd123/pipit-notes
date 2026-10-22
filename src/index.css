@@ -95,3 +95,8 @@ button:disabled { cursor: default; }
 @media (pointer: coarse) {
   input:not([type="checkbox"]):not([type="color"]):not([type="file"]), select { font-size: 16px; }
 }
+
+/* Respect "Reduce Motion": no confetti falling, no sliding — state changes still show, instantly. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
