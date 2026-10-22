@@ -4,15 +4,21 @@ import { RichText } from "@/components/blocks";
 import { FigureView } from "@/components/figure";
 import { InkPad } from "@/components/ink-pad";
 import { Button } from "@/components/ui";
-import { allParts, buildResult, type Exam, type ExamResult, type Part, type PartAnswer, type PartMark, type Question } from "@/lib/exam-core";
+import { allParts, buildResult, REPORT_REASONS, type Exam, type ExamResult, type Part, type PartAnswer, type PartMark, type Question, type ReportReason } from "@/lib/exam-core";
 
 const fmtClock = (s: number) => `${Math.floor(Math.abs(s) / 60)}:${String(Math.abs(s) % 60).padStart(2, "0")}`;
 
 // ---- taking the exam ----------------------------------------------------------------------------------------------------------
-export function ExamRunner({ exam, onSubmit, onExit }: {
+export function ExamRunner({ exam, onSubmit, onExit, onReport }: {
   exam: Exam; onSubmit: (answers: Record<string, PartAnswer>, seconds: number) => void; onExit: () => void;
+  onReport: (questionId: string, reason: ReportReason | null) => void;
 }) {
-  const flat = useMemo(() => exam.sections.flatMap((s, si) => s.questions.map((q, qi) => ({ q, section: s, first: qi === 0, si }))), [exam]);
+  // questions already reported on an earlier attempt are left out of a retake
+  const skipped = useRef(new Set(Object.keys(exam.reported ?? {})));
+  const flat = useMemo(() => {
+    const all = exam.sections.flatMap((s, si) => s.questions.filter((q) => !skipped.current.has(q.id)).map((q, qi) => ({ q, section: s, first: qi === 0, si })));
+    return all.length ? all : exam.sections.flatMap((s, si) => s.questions.map((q, qi) => ({ q, section: s, first: qi === 0, si })));
+  }, [exam]);
   const [qi, setQi] = useState(0);
   const [answers, setAnswers] = useState<Record<string, PartAnswer>>({});
   const [flags, setFlags] = useState<Set<string>>(new Set());
@@ -89,7 +95,7 @@ export function ExamRunner({ exam, onSubmit, onExit }: {
                   {(cur.section.instructions || (qi === 0 && exam.instructions)) && <p className="mt-1 text-sm text-foreground-muted"><RichText text={cur.section.instructions || exam.instructions || ""} /></p>}
                 </div>
               )}
-              <QuestionView n={qi + 1} q={cur.q} answers={answers} onAnswer={set} mode={mode} onMode={(pid, m) => setMode((x) => ({ ...x, [pid]: m }))} />
+              <QuestionView n={qi + 1} q={cur.q} answers={answers} onAnswer={set} mode={mode} onMode={(pid, m) => setMode((x) => ({ ...x, [pid]: m }))} reported={exam.reported?.[cur.q.id]} onReport={(r) => onReport(cur.q.id, r)} />
               <div className="mt-6 flex items-center justify-between">
                 <Button onClick={() => setQi(Math.max(0, qi - 1))} disabled={qi === 0}><ChevronLeft size={15} /> Previous</Button>
                 <button onClick={() => setFlags((f) => { const n = new Set(f); if (n.has(cur.q.id)) n.delete(cur.q.id); else n.add(cur.q.id); return n; })}
@@ -107,16 +113,18 @@ export function ExamRunner({ exam, onSubmit, onExit }: {
   );
 }
 
-function QuestionView({ n, q, answers, onAnswer, mode, onMode }: {
+function QuestionView({ n, q, answers, onAnswer, mode, onMode, reported, onReport }: {
   n: number; q: Question; answers: Record<string, PartAnswer>; onAnswer: (pid: string, patch: Partial<PartAnswer>) => void;
   mode: Record<string, "type" | "ink">; onMode: (pid: string, m: "type" | "ink") => void;
+  reported?: ReportReason; onReport: (r: ReportReason | null) => void;
 }) {
   return (
-    <article className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+    <article className={`rounded-2xl border bg-surface p-5 shadow-sm ${reported ? "border-amber-500/50" : "border-border"}`}>
       <div className="mb-3 flex items-baseline justify-between gap-3">
         <h3 className="text-lg font-bold">Question {n}</h3>
-        <span className="text-sm font-semibold text-foreground-muted">[{q.marks} mark{q.marks === 1 ? "" : "s"}]</span>
+        <span className="flex items-center gap-3"><ReportButton reason={reported} onReport={onReport} /><span className="text-sm font-semibold text-foreground-muted">[{q.marks} mark{q.marks === 1 ? "" : "s"}]</span></span>
       </div>
+      {reported && <p className="mb-3 rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">Reported — this question won&apos;t count toward your score. You can still answer it for practice.</p>}
       {q.topic && <p className="mb-2 text-xs uppercase tracking-wider text-foreground-muted">{q.topic}</p>}
       <div className="text-[17px] leading-relaxed"><RichText text={q.stem} /></div>
       {q.figure && <FigureView figure={q.figure} className="mt-4" />}
@@ -182,9 +190,10 @@ export function MarkingScreen({ message }: { message: string }) {
   return <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-background text-center"><Loader2 size={32} className="animate-spin text-primary" /><p className="text-lg font-semibold">Marking your paper…</p><p className="text-sm text-foreground-muted">{message}</p></div>;
 }
 
-export function ExamResults({ exam, answers, marks, seconds, onMarks, onRetake, onClose, onCards }: {
+export function ExamResults({ exam, answers, marks, seconds, onMarks, onRetake, onClose, onCards, onReport }: {
   exam: Exam; answers: Record<string, PartAnswer>; marks: PartMark[]; seconds: number;
   onMarks: (m: PartMark[]) => void; onRetake: () => void; onClose: () => void; onCards: (items: { q: Question; p: Part }[]) => void;
+  onReport: (questionId: string, reason: ReportReason | null) => void;
 }) {
   const result: ExamResult = useMemo(() => buildResult(exam, marks), [exam, marks]);
   const [onlyLost, setOnlyLost] = useState(false);
@@ -231,7 +240,8 @@ export function ExamResults({ exam, answers, marks, seconds, onMarks, onRetake, 
             if (!parts.length) return null;
             return (
               <article key={q.id} className="rounded-2xl border border-border bg-surface p-5">
-                <div className="mb-2 flex items-baseline justify-between"><h3 className="font-bold">Question {n + 1}{q.topic ? <span className="ml-2 text-xs font-normal uppercase tracking-wider text-foreground-muted">{q.topic}</span> : null}</h3></div>
+                <div className="mb-2 flex items-baseline justify-between gap-3"><h3 className="font-bold">Question {n + 1}{q.topic ? <span className="ml-2 text-xs font-normal uppercase tracking-wider text-foreground-muted">{q.topic}</span> : null}</h3><ReportButton reason={exam.reported?.[q.id]} onReport={(r) => onReport(q.id, r)} /></div>
+                {exam.reported?.[q.id] && <p className="mb-2 rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">Not counted in your score — you reported it ({REPORT_REASONS.find((r) => r.id === exam.reported?.[q.id])?.label.toLowerCase()}). It&apos;s skipped if you retake this exam.</p>}
                 <div className="leading-relaxed"><RichText text={q.stem} /></div>
                 {q.figure && <FigureView figure={q.figure} className="mt-3" />}
                 <div className="mt-4 space-y-4">
@@ -271,5 +281,24 @@ export function ExamResults({ exam, answers, marks, seconds, onMarks, onRetake, 
         </div>
       </div>
     </div>
+  );
+}
+
+/** "This question is broken": pick a reason; the question stops counting toward the score. */
+function ReportButton({ reason, onReport }: { reason?: ReportReason; onReport: (r: ReportReason | null) => void }) {
+  const [open, setOpen] = useState(false);
+  if (reason) return <button onClick={() => onReport(null)} className="flex items-center gap-1 text-xs font-medium text-amber-600 hover:underline" title="Count this question again"><Flag size={12} fill="currentColor" /> Reported · undo</button>;
+  return (
+    <span className="relative">
+      <button onClick={() => setOpen((v) => !v)} className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-foreground-muted hover:bg-surface-secondary hover:text-foreground [@media(pointer:coarse)]:min-h-9" title="Report a problem with this question"><Flag size={12} /> Report problem</button>
+      {open && (
+        <span className="absolute right-0 top-full z-20 mt-1 block w-64 rounded-xl border border-border bg-surface p-1.5 text-left shadow-xl">
+          <span className="block px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-foreground-muted">What&apos;s wrong with it?</span>
+          {REPORT_REASONS.map((r) => (
+            <button key={r.id} onClick={() => { onReport(r.id); setOpen(false); }} className="block w-full rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-secondary">{r.label}</button>
+          ))}
+        </span>
+      )}
+    </span>
   );
 }

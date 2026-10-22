@@ -16,10 +16,10 @@ A private, offline-first handwriting notebook. **No account, no server** — eve
   - *Search & ask* — instant local search; ask questions answered from your own notes with citations.
   - *Practice exams* generated from your notes.
 - **Study** (opt-in AI to *make* material; everything else runs on the device):
-  - *Flashcards* generated from your notes (or a lasso, an Explain answer, a review mistake) with spaced repetition (SM-2 style).
-  - *Lessons* Duolingo-style: short sessions mixing matching, multiple choice, typing, fill-in-the-blank, ordering steps and self-graded flashcards; wrong answers come round again; hearts, combo, XP, daily goal, streak, a skill path per topic with crowns, sound effects.
+  - *Flashcards* generated from your notes (or a lasso, an Explain answer, a review mistake) with spaced repetition (FSRS-5, the scheduler Anki uses).
+  - *Lessons* Duolingo-style: short sessions mixing matching, multiple choice, typing, fill-in-the-blank, ordering steps and self-graded flashcards; wrong answers come round again; hearts, combo, XP, daily goal, streak with streak freezes, a skill path per topic with crowns, sound effects.
   - *Quick quizzes* from your cards, scored at the end.
-  - *Practice exams* written from your notes in the style of real papers: structured multi-part questions with **graphs, data tables, charts, diagrams and pictures cut from your own PDFs**. Timed; multiple-choice and numeric parts are marked locally, written/handwritten answers are marked by AI against a marking scheme; results by topic, model answers, one-tap flashcards for what you missed.
+  - *Practice exams* written from your notes in the style of real papers: structured multi-part questions with **graphs, data tables, charts, diagrams and pictures cut from your own PDFs**. Timed; multiple-choice and numeric parts are marked locally, written/handwritten answers are marked by AI against a marking scheme; results by topic, model answers, one-tap flashcards for what you missed. **Report** a broken question and it stops counting toward your score (and is skipped on a retake).
   - *Concept maps*: the AI proposes a map of the ideas in a notebook or note (concepts, with labelled links like *causes* / *is part of* / *needed for*); you edit it. **Test me from memory** hides the map and has you recall the concepts, then the links. **Colour by knowledge** shades each concept by your flashcard progress and unresolved mistakes (tap a weak one → *Study this*). Also: *Expand* a concept with AI, ask the AI **how two concepts connect**, a suggested **study order**, **flashcards from the links**, pan/zoom/search, export to PNG or an outline.
   - *Mistake log*: every mistake found by Review for mistakes, grouped by type so you can see your patterns.
 - **Organise**: notebooks, multi-select (move / tag / export / delete), tags, a Recent view, batch PDF import, a pages panel (reorder, duplicate, insert, delete pages), split view, a note-links view (local TF-IDF, no AI), search hits highlighted on PDF pages.
@@ -107,14 +107,28 @@ Read-only — never modifies the database:
 
 This writes one `.zip` per notebook into `data/` (gitignored — it's your personal data). Get them onto the iPad (AirDrop / iCloud Drive) and restore them in the app. Only after you've confirmed everything is in Pipit Notes should you remove the notes module from Pipit.
 
-## Deploy
+## Deploy (without paying for test deploys)
 
-It's a static site; any host works.
+On Netlify's credit plans **every production deploy costs credits; draft/preview deploys are free**. So:
 
-- **Netlify:** `npm run build`, then drag `dist/` into Netlify Drop — or connect the repo (`netlify.toml` is included).
-- **Cloudflare Pages / GitHub Pages:** build command `npm run build`, output `dist`.
+1. **Try it on the iPad for free first** — same Wi-Fi as the PC:
 
-It must be served over **HTTPS** for install / offline / persistent storage to work.
+       npm run build
+       npm run preview:ipad        # prints a http://192.168.x.x:4173 address — open it in Safari on the iPad
+
+   Everything except install/offline (which need HTTPS) works there, including the Pencil.
+2. **Optional HTTPS check, still free** — a draft deploy gets its own private URL and isn't charged:
+
+       npm run deploy:test
+
+   (A draft URL is a different site to the browser, so its notes are separate — don't keep real notes there.)
+3. **Ship it once:**
+
+       npm run deploy:prod
+
+Both deploy scripts run the tests and a build first, so a broken build never reaches you (and failed deploys aren't charged anyway). The Netlify Function for problem reports is only deployed by the CLI scripts, not by drag-and-drop.
+
+Any static host works too (Cloudflare Pages / GitHub Pages: build `npm run build`, output `dist`), but the problem-report endpoint is a Netlify Function. It must be served over **HTTPS** for install / offline / persistent storage to work.
 
 ## Privacy
 

@@ -17,9 +17,9 @@ export function hashString(s: string): string {
   return `${h1.toString(36)}${h2.toString(36)}${s.length.toString(36)}`;
 }
 
-export async function cachedAi<T>(feature: string, input: string, compute: () => Promise<T>): Promise<{ value: T; cached: boolean }> {
+export async function cachedAi<T>(feature: string, input: string, compute: () => Promise<T>, force = false): Promise<{ value: T; cached: boolean }> {
   const key = `aic:${feature}:${hashString(input)}`;
-  try {
+  if (!force) try {
     const hit = await getMeta<{ t: number; v: T }>(key);
     if (hit && Date.now() - hit.t < TTL) return { value: hit.v, cached: true };
   } catch { /* a broken cache must never block the real call */ }

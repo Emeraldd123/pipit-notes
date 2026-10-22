@@ -66,6 +66,18 @@ export async function addAttempt(examId: string, attempt: ExamAttempt): Promise<
   if (!rec) return;
   await d.put("exams", { ...rec, attempts: [attempt, ...rec.attempts].slice(0, 8), updatedAt: Date.now() });
 }
+/** Save changes to an exam itself (e.g. questions reported as broken), keeping its attempts. */
+export async function updateExamDef(exam: Exam): Promise<void> {
+  const d = await db();
+  const rec = await d.get("exams", exam.id);
+  if (rec) await d.put("exams", { ...rec, exam, updatedAt: Date.now() });
+}
+/** Re-score the most recent attempt (after a question was reported on the results screen). */
+export async function rescoreLatestAttempt(examId: string, result: ExamAttempt["result"]): Promise<void> {
+  const d = await db();
+  const rec = await d.get("exams", examId);
+  if (rec?.attempts.length) await d.put("exams", { ...rec, attempts: [{ ...rec.attempts[0], result }, ...rec.attempts.slice(1)] });
+}
 export async function deleteExam(id: string): Promise<void> {
   await (await db()).delete("exams", id);
 }

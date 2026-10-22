@@ -22,7 +22,25 @@ export type Section = { title: string; instructions?: string; questions: Questio
 export type Exam = {
   id: string; title: string; subject?: string; durationMin: number; instructions?: string;
   sections: Section[]; totalMarks: number; createdAt: number;
+  /** questions the student reported as broken (question id -> reason); they don't count toward the score */
+  reported?: Record<string, ReportReason>;
 };
+
+export type ReportReason = "unanswerable" | "figure" | "wrong-answer" | "not-covered" | "other";
+export const REPORT_REASONS: { id: ReportReason; label: string }[] = [
+  { id: "unanswerable", label: "Can't be answered / information missing" },
+  { id: "figure", label: "The graph, table or diagram doesn't match" },
+  { id: "wrong-answer", label: "The answer or marking is wrong" },
+  { id: "not-covered", label: "Not in my notes / not my course" },
+  { id: "other", label: "Something else" },
+];
+
+/** Mark a question as reported (or clear it with reason = null). Returns a new exam. */
+export function reportQuestion(exam: Exam, questionId: string, reason: ReportReason | null): Exam {
+  const reported = { ...(exam.reported ?? {}) };
+  if (reason) reported[questionId] = reason; else delete reported[questionId];
+  return { ...exam, reported };
+}
 
 const s = (v: unknown, max = 1500): string => (typeof v === "string" ? v.trim().slice(0, max) : "");
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
@@ -145,6 +163,8 @@ export type TopicResult = { topic: string; got: number; max: number };
 export type ExamResult = {
   marks: PartMark[]; got: number; max: number; percent: number; band: string;
   byTopic: TopicResult[]; bySection: { title: string; got: number; max: number }[];
+  /** reported questions left out of the score */
+  excluded: string[];
 };
 export function band(percent: number): string {
   return percent >= 90 ? "A*" : percent >= 80 ? "A" : percent >= 70 ? "B" : percent >= 60 ? "C" : percent >= 50 ? "D" : percent >= 40 ? "E" : "U";
@@ -155,10 +175,12 @@ export function buildResult(exam: Exam, marksIn: PartMark[]): ExamResult {
   const topics = new Map<string, TopicResult>();
   const secs: { title: string; got: number; max: number }[] = exam.sections.map((x) => ({ title: x.title, got: 0, max: 0 }));
   let got = 0, max = 0;
+  const excluded = Object.keys(exam.reported ?? {});
   exam.sections.forEach((sec, si) => sec.questions.forEach((q) => q.parts.forEach((p) => {
     const m = by.get(p.id) ?? { partId: p.id, marks: 0, max: p.marks, auto: false, feedback: "Not marked." };
     const g = clampMark(m.marks, p.marks);
     marksOut.push({ ...m, marks: g, max: p.marks });
+    if (exam.reported?.[q.id]) return;   // a broken question shouldn't cost (or earn) marks
     got += g; max += p.marks;
     secs[si].got += g; secs[si].max += p.marks;
     const t = q.topic ?? "General";
@@ -167,5 +189,5 @@ export function buildResult(exam: Exam, marksIn: PartMark[]): ExamResult {
     topics.set(t, cur);
   })));
   const percent = max ? Math.round((got / max) * 100) : 0;
-  return { marks: marksOut, got, max, percent, band: band(percent), byTopic: [...topics.values()], bySection: secs };
+  return { marks: marksOut, got, max, percent, band: band(percent), byTopic: [...topics.values()].filter((t) => t.max > 0), bySection: secs, excluded };
 }

@@ -9,13 +9,13 @@ import { LessonRunner, type LessonResult } from "@/components/lesson";
 import { ExamResults, ExamRunner, MarkingScreen } from "@/components/exam-runner";
 import { listNotebooks, listNotes, type ExamRec, type MistakeRec } from "@/lib/db";
 import {
-  addAttempt, deleteCard, deleteExam, deleteMistake, getProgress, listCards, listExams, listMistakes, patchMistake, putCards, putProgress, saveExam,
+  addAttempt, deleteCard, deleteExam, rescoreLatestAttempt, updateExamDef, deleteMistake, getProgress, listCards, listExams, listMistakes, patchMistake, putCards, putProgress, saveExam,
 } from "@/lib/study-db";
 import {
   addXp, applyOutcomes, buildLesson, currentStreak, lastDays, makeCard, topicStats, xpToday, type Card, type Progress, type Exercise, shuffle,
 } from "@/lib/study-core";
 import { crownOf, isDue, isNew } from "@/lib/srs";
-import { allParts, buildResult, type Exam, type Part, type PartAnswer, type PartMark, type Question } from "@/lib/exam-core";
+import { allParts, buildResult, reportQuestion, type Exam, type Part, type PartAnswer, type PartMark, type Question, type ReportReason } from "@/lib/exam-core";
 import { generateExam, markWithAi } from "@/lib/ai-study";
 import { AiError } from "@/lib/ai";
 import { aiReady, getSettings, useSettings } from "@/lib/settings";
@@ -167,6 +167,21 @@ export function StudyPage({ view }: { view?: string }) {
     }
   }
 
+  /** A reported question stops counting (now and in this attempt's saved score) and is skipped on a retake. */
+  async function reportExamQuestion(qid: string, reason: ReportReason | null) {
+    const s = session;
+    if (!s || (s.kind !== "exam" && s.kind !== "results")) return;
+    const exam = reportQuestion(s.exam, qid, reason);
+    count(reason ? `report.exam.${reason}` : "report.exam.undo");
+    if (s.kind === "exam") setSession({ ...s, exam });
+    else setSession({ ...s, exam });
+    try {
+      await updateExamDef(exam);
+      if (s.kind === "results") await rescoreLatestAttempt(exam.id, buildResult(exam, s.marks));
+      await reload();
+    } catch (e) { logError("study", e); }
+  }
+
   async function examToCards(exam: Exam, items: { q: Question; p: Part }[]) {
     const fresh = items.map(({ q, p }) => ({
       ...makeCard({ front: (p.prompt ? `${q.stem}\n\n${p.prompt}` : q.stem).slice(0, 380), back: p.answer || p.options?.[p.correct ?? 0] || "—" }),
@@ -182,14 +197,14 @@ export function StudyPage({ view }: { view?: string }) {
     return <LessonRunner title={session.title} cards={cards} exercises={session.exercises} progress={progress} quiz={session.quiz} onFinish={(r) => void onLessonFinish(r)} onExit={() => setSession(null)}
       onFlagCard={(id) => { const c = cards.find((x) => x.id === id); if (c) { void putCards([{ ...c, suspended: true, updatedAt: Date.now() }]); count("study.card.flagged"); } }} />;
   }
-  if (session?.kind === "exam") return <ExamRunner exam={session.exam} onSubmit={(a, s) => void submitExam(session.exam, session.rec.id, a, s)} onExit={() => setSession(null)} />;
+  if (session?.kind === "exam") return <ExamRunner exam={session.exam} onSubmit={(a, s) => void submitExam(session.exam, session.rec.id, a, s)} onExit={() => setSession(null)} onReport={(qid, r) => void reportExamQuestion(qid, r)} />;
   if (session?.kind === "marking") return <MarkingScreen message={session.message} />;
   if (session?.kind === "results") {
     return (
       <ExamResults exam={session.exam} answers={session.answers} marks={session.marks} seconds={session.seconds}
         onMarks={(m) => setSession({ ...session, marks: m })}
         onRetake={() => { const rec = exams.find((e) => e.id === session.recId); if (rec) void runExam(session.exam, rec); }}
-        onClose={() => setSession(null)} onCards={(items) => void examToCards(session.exam, items)} />
+        onClose={() => setSession(null)} onCards={(items) => void examToCards(session.exam, items)} onReport={(qid, r) => void reportExamQuestion(qid, r)} />
     );
   }
 

@@ -296,12 +296,13 @@ const EXPLAIN_SYSTEM =
   "Use LaTeX in $...$ for maths. Return STRICT JSON only: " +
   '{"concept":"short name","explanation":"markdown-lite text","shortfalls":[{"what":"...","why":"...","fix":"..."}],"followups":["a natural next question","another"]}.';
 
-export async function explainRegion(region: string): Promise<Explanation> {
-  // circling the same thing again is free: the answer for an identical picture is remembered
-  return (await cachedAi("explain", region, () => explainRegionFresh(region))).value;
+export async function explainRegion(region: string, opts: { fresh?: boolean } = {}): Promise<Explanation> {
+  // circling the same thing again is free: the answer for an identical picture is remembered.
+  // "Not right? Ask again" (fresh) skips the remembered answer and thinks harder; the new answer replaces it.
+  return (await cachedAi("explain", region, () => explainRegionFresh(region, opts.fresh ? "high" : undefined), opts.fresh)).value;
 }
-async function explainRegionFresh(region: string): Promise<Explanation> {
-  const raw = await claude({ feature: "explain", maxTokens: 2200, system: EXPLAIN_SYSTEM, user: [imageBlock(region), text("Explain this, and tell me where my understanding fell short.")] });
+async function explainRegionFresh(region: string, effort?: Effort): Promise<Explanation> {
+  const raw = await claude({ feature: "explain", maxTokens: 2200, effort, system: EXPLAIN_SYSTEM, user: [imageBlock(region), text(effort === "high" ? "Explain this, and tell me where my understanding fell short. A previous explanation of this was judged wrong or unhelpful — read the image very carefully." : "Explain this, and tell me where my understanding fell short.")] });
   const j = extractJson<Partial<Explanation>>(raw);
   const s = (v: unknown) => (typeof v === "string" ? v : "");
   return {

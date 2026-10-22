@@ -18,6 +18,7 @@ import { getBootResult, updateSentinel, whenBooted } from "@/lib/health";
 import { count, logError, timer } from "@/lib/telemetry";
 import { go } from "@/router";
 import { Button, Card, Toast, Wordmark } from "@/components/ui";
+import { WhatsNew } from "@/components/whats-new";
 
 export function Library({ notebook, q }: { notebook: string | null; q: string }) {
   const [notes, setNotes] = useState<NoteMeta[] | null>(null);
@@ -387,6 +388,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
           </div>
         </div>
       )}
+      {notes && <WhatsNew hasNotes={notes.length > 0} />}
       {backup.modal}
       <Toast msg={toast} action={undo} />
     </div>

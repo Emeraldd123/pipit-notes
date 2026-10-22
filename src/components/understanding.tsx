@@ -50,7 +50,7 @@ export type ExplainState = {
   asking: boolean;
 };
 
-export function ExplainPanel({ state, onAsk, onClose, onPin, onCards }: { state: ExplainState; onAsk: (q: string) => void; onClose: () => void; onPin: () => void; onCards: () => void }) {
+export function ExplainPanel({ state, onAsk, onClose, onPin, onCards, onRetry }: { state: ExplainState; onAsk: (q: string) => void; onClose: () => void; onPin: () => void; onCards: () => void; onRetry: () => void }) {
   const [q, setQ] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => { endRef.current?.scrollIntoView({ block: "nearest" }); }, [state.turns.length, state.asking, state.status]);
@@ -86,6 +86,9 @@ export function ExplainPanel({ state, onAsk, onClose, onPin, onCards }: { state:
                 )}
               </div>
             </>
+          )}
+          {d && state.turns.length === 0 && (
+            <button onClick={onRetry} className="text-xs text-foreground-muted underline decoration-dotted hover:text-foreground">Not right? Ask again, more carefully</button>
           )}
           {state.turns.map((t, i) => (
             <div key={i} className={t.role === "user" ? "rounded-xl bg-primary/10 px-3 py-2 text-primary" : ""}><RichText text={t.content} /></div>

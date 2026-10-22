@@ -164,3 +164,26 @@ test("a lone part's figure is shown once, on the question", () => {
   assert.equal(b.parts[0].figure, undefined);
   assert.equal(b.parts[0].prompt, "");
 });
+
+import { reportQuestion } from "../src/lib/exam-core.ts";
+test("a reported question leaves the score (both marks and total), and can be un-reported", () => {
+  const e = normalizeExam(rawExam(), 1000, "e1");
+  const ps = allParts(e).map((x) => x.p);
+  const marks = [
+    { partId: ps[0].id, marks: 2, max: 2, auto: true, feedback: "" },
+    { partId: ps[1].id, marks: 0, max: 2, auto: false, feedback: "" },
+    { partId: ps[2].id, marks: 1, max: 1, auto: true, feedback: "" },
+  ];
+  const before = buildResult(e, marks);
+  assert.equal(before.max, 6);
+  const q1 = e.sections[0].questions[0].id;
+  const reported = reportQuestion(e, q1, "figure");
+  const after = buildResult(reported, marks);
+  assert.equal(after.max, 2);                                   // q1 (4 marks) left out
+  assert.equal(after.got, 1);
+  assert.deepEqual(after.excluded, [q1]);
+  assert.ok(!after.byTopic.some((t) => t.topic === "Kinematics"));
+  assert.equal(after.marks.length, before.marks.length);        // feedback for it is still shown
+  assert.equal(buildResult(reportQuestion(reported, q1, null), marks).max, 6);
+  assert.equal(e.reported, undefined);                          // the original is untouched
+});

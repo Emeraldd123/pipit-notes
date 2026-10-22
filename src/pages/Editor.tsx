@@ -700,14 +700,14 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
   }
 
   // --- explain: circle a concept -> explanation + where understanding fell short + follow-ups ----
-  async function explainRegionNow(dataUrl: string, bbox: { x: number; y: number; w: number; h: number }) {
+  async function explainRegionNow(dataUrl: string, bbox: { x: number; y: number; w: number; h: number }, fresh = false) {
     if (!ai) return flash("Turn on AI in Settings (and add your API key) to use Explain.");
     explainRegionImg.current = dataUrl;
     setExplainRect(bbox);
     setReview(null);
     setExplain({ status: "loading", turns: [], asking: false });
     try {
-      const data = await explainRegion(dataUrl);
+      const data = await explainRegion(dataUrl, { fresh });
       setExplain((s) => (s && explainRegionImg.current === dataUrl ? { ...s, status: "done", data } : s));
     } catch (e) {
       if (!(e instanceof AiError)) logError("ai", e);
@@ -786,6 +786,7 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [issueId]);
   const dismissIssue = (id: string) => setReview((r) => {
+    count("report.review.notMistake");   // content-free: how often review flags things that aren't mistakes
     if (!r) return r;
     const issues = r.issues.filter((x) => x.id !== id);
     return { ...r, issues, i: Math.min(r.i, Math.max(0, issues.length - 1)) };
@@ -1040,7 +1041,8 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
               onDelete={(p) => { if (confirm(`Delete page ${p + 1}? Its writing goes with it (version history can bring it back).`)) void applyPageOp(deleteMapping(pageCount, p), `Deleted page ${p + 1}.`); }}
               onClose={() => setPagesOpen(false)} />
           )}
-          {explain && <ExplainPanel state={explain} onAsk={askFollowUp} onClose={closeExplain} onPin={pinExplanation} onCards={explanationToCards} />}
+          {explain && <ExplainPanel state={explain} onAsk={askFollowUp} onClose={closeExplain} onPin={pinExplanation} onCards={explanationToCards}
+            onRetry={() => { if (explainRegionImg.current && explainRect) { count("report.explain"); void explainRegionNow(explainRegionImg.current, explainRect, true); } }} />}
           {review && <ReviewBar review={review} onGo={goIssue} onToggleFixed={toggleFixed} onDismiss={dismissIssue} onClose={() => setReview(null)} onCard={issueToCard} />}
 
           {scrub !== null && (
