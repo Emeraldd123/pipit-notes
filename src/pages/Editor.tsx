@@ -9,6 +9,8 @@ import { BlocksLayer, BLOCK_DEFAULTS, Latex } from "@/components/blocks";
 import { DrawingAids, type Cam, type ProtractorState } from "@/components/drawing-aids";
 import type { Segment } from "@/lib/guides";
 import { PX_PER_CM } from "@/lib/guides";
+import { findBoxes, boxToDoc } from "@/lib/search-core";
+import { PAGE_H, PAGE_W, PAGE_GAP } from "@/lib/page";
 import { TEMPLATES, renderTemplate, type TemplateId } from "@/lib/templates";
 import { PresetsButton } from "@/components/presets";
 import { PagesPanel } from "@/components/pages-panel";
@@ -99,7 +101,7 @@ function printImages(urls: string[]) {
   setTimeout(() => iframe.remove(), 60000);
 }
 
-export function EditorPage({ id, page, splitWith }: { id: string; page?: number; splitWith?: string }) {
+export function EditorPage({ id, page, hl, splitWith }: { id: string; page?: number; hl?: string; splitWith?: string }) {
   const [loaded, setLoaded] = useState<LoadedNote | null | undefined>(undefined);
   const [rk, setRk] = useState(0); // bumped after page operations to reload the note from disk
   useEffect(() => {
@@ -130,7 +132,7 @@ export function EditorPage({ id, page, splitWith }: { id: string; page?: number;
       <Button onClick={() => go({ name: "library", notebook: null, q: "" })}>Back to notes</Button>
     </div>
   );
-  return <Editor key={`${id}:${rk}`} note={loaded} startPage={page} splitWith={splitWith} onReload={() => setRk((k) => k + 1)} />;
+  return <Editor key={`${id}:${rk}`} note={loaded} startPage={page} hl={hl} splitWith={splitWith} onReload={() => setRk((k) => k + 1)} />;
 }
 
 type SaveState = "saved" | "saving" | "error";
@@ -139,7 +141,7 @@ type SaveState = "saved" | "saving" | "error";
 // pane you're using when two notes are open side by side.
 let activeEditor: string | null = null;
 
-function Editor({ note, startPage, splitWith, onReload }: { note: LoadedNote; startPage?: number; splitWith?: string; onReload: () => void }) {
+function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote; startPage?: number; hl?: string; splitWith?: string; onReload: () => void }) {
   const noteId = note.meta.id;
   const settings = useSettings();
   const ai = aiReady(settings);
@@ -181,6 +183,23 @@ function Editor({ note, startPage, splitWith, onReload }: { note: LoadedNote; st
   aidsOnRef.current = aidsOn;
   const aidsFrame = useRef(0);
   const [templatesOpen, setTemplatesOpen] = useState(false);
+  // search hit on a PDF page: highlight where the text is
+  const [findRects, setFindRects] = useState<Highlight[]>([]);
+  const [findTerm, setFindTerm] = useState(hl ?? "");
+  useEffect(() => {
+    setFindTerm(hl ?? "");
+    if (!hl || startPage == null) { setFindRects([]); return; }
+    let alive = true;
+    void getPageTexts(noteId).then((texts) => {
+      const rec = texts.find((t) => t.page === startPage && t.source === "pdf" && t.boxes?.length);
+      const img = note.images.find((i) => i.width >= PAGE_W * 0.5 && Math.floor((i.y + i.height / 2) / (PAGE_H + PAGE_GAP)) === startPage);
+      if (!alive || !rec?.boxes || !img) return;
+      const rects = findBoxes(hl, rec.boxes).map((b, k): Highlight => ({ id: `f${k}`, ...boxToDoc(b, img), tone: "find" }));
+      if (rects.length) { setFindRects(rects); count("search.hitHighlighted"); }
+    });
+    return () => { alive = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hl, startPage]);
   const [pagesOpen, setPagesOpen] = useState(false);
   const [pagesRev, setPagesRev] = useState(0);
   const [explain, setExplain] = useState<ExplainState | null>(null);
@@ -704,6 +723,7 @@ function Editor({ note, startPage, splitWith, onReload }: { note: LoadedNote; st
   });
   const highlights: Highlight[] = [
     ...(review ? review.issues.map((x, n): Highlight => ({ id: x.id, ...x.rect, tone: n === review.i ? "active" : "issue", label: n === review.i ? String(n + 1) : undefined })).filter((h) => !review.fixed.has(h.id) || h.tone === "active") : []),
+    ...findRects,
     ...(explainRect && explain ? [{ id: "explain", ...explainRect, tone: "explain" as const }] : []),
   ];
 
@@ -918,6 +938,11 @@ function Editor({ note, startPage, splitWith, onReload }: { note: LoadedNote; st
           />
           <BlocksLayer blocks={blocks} innerRef={blocksInner} interactive={blocksTakeTouch} scaleRef={scaleRef} running={running} onChange={onBlockChange} onDelete={onBlockDelete} onRun={onRunBlock} />
           <HighlightLayer rects={highlights} innerRef={highlightsInner} camRef={camRef} />
+          {findRects.length > 0 && (
+            <button onClick={() => { setFindRects([]); setFindTerm(""); }} className="absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-surface/95 px-3 py-1 text-xs shadow-md backdrop-blur" title="Clear highlights">
+              Matches for “{findTerm}” <span className="text-foreground-muted">✕</span>
+            </button>
+          )}
           {aidsOn && (
             <DrawingAids cam={aidsCam} ruler={ruler} protractor={protractor} onRuler={setRuler} onProtractor={setProtractor}
               onCloseRuler={() => setRuler(null)} onCloseProtractor={() => setProtractor(null)} />

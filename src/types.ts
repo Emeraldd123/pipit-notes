@@ -72,6 +72,8 @@ export type PageTextRec = {
   /** fingerprint of the page content when it was read (to skip unchanged pages) */
   hash: string;
   updatedAt: number;
+  /** PDF text runs with their position on the page (fractions) — lets a search hit be highlighted */
+  boxes?: { s: string; x: number; y: number; w: number; h: number }[];
 };
 
 // --- diagnostics ---------------------------------------------------------------

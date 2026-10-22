@@ -109,7 +109,7 @@ function SearchTab({ notes, onIndexed, ai }: { notes: NoteMeta[]; onIndexed: (n:
       <div className="mt-4 space-y-2.5">
         {q.trim() && hits.length === 0 && <p className="py-8 text-center text-sm text-foreground-muted">No matches. Handwriting is only searchable once it&apos;s been read — use “Read my handwriting” below.</p>}
         {hits.map((h, i) => (
-          <button key={`${h.noteId}-${h.page}-${h.source}-${i}`} onClick={() => go({ name: "note", id: h.noteId, page: h.page })}
+          <button key={`${h.noteId}-${h.page}-${h.source}-${i}`} onClick={() => go({ name: "note", id: h.noteId, page: h.page, hl: q.trim() || undefined })}
             className="block w-full rounded-2xl border border-border bg-surface px-4 py-3 text-left transition-colors hover:border-primary/60">
             <div className="flex items-center gap-2 text-xs text-foreground-muted">
               <FileText size={12} /> <span className="font-medium text-foreground">{h.noteTitle}</span>

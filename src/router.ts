@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 export type Route =
   | { name: "library"; notebook: string | null; q: string }
-  | { name: "note"; id: string; page?: number }
+  | { name: "note"; id: string; page?: number; hl?: string }
   | { name: "split"; a: string; b: string }
   | { name: "graph" }
   | { name: "search" }
@@ -18,7 +18,7 @@ export function parseHash(hash: string): Route {
   const sp = new URLSearchParams(query);
   if (parts[0] === "n" && parts[1]) {
     const pg = sp.get("p");
-    return { name: "note", id: decodeURIComponent(parts[1]), page: pg != null && /^\d+$/.test(pg) ? Number(pg) : undefined };
+    return { name: "note", id: decodeURIComponent(parts[1]), page: pg != null && /^\d+$/.test(pg) ? Number(pg) : undefined, hl: sp.get("hl") ?? undefined };
   }
   if (parts[0] === "split" && parts[1] && parts[2]) return { name: "split", a: decodeURIComponent(parts[1]), b: decodeURIComponent(parts[2]) };
   if (parts[0] === "graph") return { name: "graph" };
@@ -30,7 +30,13 @@ export function parseHash(hash: string): Route {
 
 export function href(r: Route): string {
   switch (r.name) {
-    case "note": return `#/n/${encodeURIComponent(r.id)}${r.page != null ? `?p=${r.page}` : ""}`;
+    case "note": {
+      const sp = new URLSearchParams();
+      if (r.page != null) sp.set("p", String(r.page));
+      if (r.hl) sp.set("hl", r.hl);
+      const qs = sp.toString();
+      return `#/n/${encodeURIComponent(r.id)}${qs ? `?${qs}` : ""}`;
+    }
     case "split": return `#/split/${encodeURIComponent(r.a)}/${encodeURIComponent(r.b)}`;
     case "graph": return "#/graph";
     case "search": return "#/search";

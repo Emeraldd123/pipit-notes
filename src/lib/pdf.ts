@@ -2,12 +2,13 @@
 // own text layer (free searchable text — no OCR needed for typed PDFs).
 // pdf.js is dynamically imported so its weight only loads when a PDF is imported.
 
+import type { TextBox } from "./search-core.ts";
 import { count, info, logError, timer, track } from "./telemetry";
 
 const TARGET_W = 1860; // 1.5× the canvas page width: stays crisp when zoomed
 const MAX_PAGES = 300;
 
-export type RenderedPdfPage = { blob: Blob; w: number; h: number; text: string };
+export type RenderedPdfPage = { blob: Blob; w: number; h: number; text: string; boxes: TextBox[] };
 
 export async function renderPdf(file: File, onProgress?: (done: number, total: number) => void): Promise<RenderedPdfPage[]> {
   const done = timer("pdf.import.ms");
@@ -46,14 +47,25 @@ async function renderPdfInner(file: File, onProgress?: (done: number, total: num
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     await page.render({ canvasContext: ctx, viewport }).promise;
     let text = "";
+    const boxes: TextBox[] = [];
     try {
       const tc = await page.getTextContent();
       text = tc.items.map((it) => ("str" in it ? it.str : "")).join(" ").replace(/\s+/g, " ").trim();
+      for (const it of tc.items) {
+        if (!("str" in it) || !it.str.trim() || boxes.length >= 1500) continue;
+        const tr = pdfjs.Util.transform(viewport.transform, it.transform);
+        const hpx = (it.height || Math.abs(it.transform[3])) * viewport.scale;
+        boxes.push({
+          s: it.str.slice(0, 80),
+          x: +(tr[4] / viewport.width).toFixed(4), y: +((tr[5] - hpx) / viewport.height).toFixed(4),
+          w: +((it.width * viewport.scale) / viewport.width).toFixed(4), h: +(hpx / viewport.height).toFixed(4),
+        });
+      }
     } catch {
       /* image-only page: no text layer */
     }
     const blob = await new Promise<Blob>((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error("encode failed"))), "image/jpeg", 0.85));
-    out.push({ blob, w: canvas.width, h: canvas.height, text });
+    out.push({ blob, w: canvas.width, h: canvas.height, text, boxes });
     page.cleanup();
     onProgress?.(i, total);
   }

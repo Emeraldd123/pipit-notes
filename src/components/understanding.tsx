@@ -7,7 +7,7 @@ import type { Issue } from "@/lib/review-core";
 
 // --- highlight overlay (document coordinates, follows the camera like the blocks layer) ---------------
 
-export type Highlight = { id: string; x: number; y: number; w: number; h: number; tone: "issue" | "active" | "explain"; label?: string };
+export type Highlight = { id: string; x: number; y: number; w: number; h: number; tone: "issue" | "active" | "explain" | "find"; label?: string };
 
 export function HighlightLayer({ rects, innerRef, camRef }: {
   rects: Highlight[]; innerRef: React.RefObject<HTMLDivElement | null>;
@@ -22,12 +22,12 @@ export function HighlightLayer({ rects, innerRef, camRef }: {
     <div className="pointer-events-none absolute inset-0 z-[11] overflow-hidden">
       <div ref={innerRef} className="absolute left-0 top-0" style={{ transformOrigin: "0 0" }}>
         {rects.map((r) => {
-          const color = r.tone === "explain" ? "37 99 235" : "220 38 38";
-          const active = r.tone !== "issue";
+          const color = r.tone === "explain" ? "37 99 235" : r.tone === "find" ? "234 179 8" : "220 38 38";
+          const active = r.tone === "active" || r.tone === "explain" || r.tone === "find";
           return (
             <div key={r.id} className="absolute rounded-md" style={{
               left: r.x, top: r.y, width: r.w, height: r.h,
-              background: `rgb(${color} / ${active ? 0.14 : 0.07})`,
+              background: `rgb(${color} / ${r.tone === "find" ? 0.38 : active ? 0.14 : 0.07})`,
               outline: `${active ? 4 : 2}px ${active ? "solid" : "dashed"} rgb(${color} / ${active ? 0.9 : 0.5})`,
               outlineOffset: 2,
             }}>

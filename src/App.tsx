@@ -15,7 +15,7 @@ export function App() {
   useEffect(() => { applyTheme(getSettings().theme); }, []);
 
   switch (route.name) {
-    case "note": return <EditorPage id={route.id} page={route.page} />;
+    case "note": return <EditorPage id={route.id} page={route.page} hl={route.hl} />;
     case "split":
       return (
         <div className="flex h-full">

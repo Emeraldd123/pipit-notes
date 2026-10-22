@@ -65,3 +65,22 @@ export function snippetFor(query: string, text: string, radius = 90): string {
   return (a > 0 ? "…" : "") + text.slice(a, b).replace(/\s+/g, " ") + (b < text.length ? "…" : "");
 }
 
+
+// --- locating a search hit on a PDF page ---------------------------------------------------------------
+export type TextBox = { s: string; x: number; y: number; w: number; h: number }; // fractions of the PDF page (0..1)
+
+/** Boxes (text runs) on a PDF page that contain the query, or — failing that — any of its words. */
+export function findBoxes(query: string, boxes: TextBox[]): TextBox[] {
+  const q = query.trim().toLowerCase();
+  if (!q || !boxes.length) return [];
+  const whole = boxes.filter((b) => b.s.toLowerCase().includes(q));
+  if (whole.length) return whole.slice(0, 40);
+  const toks = words(q).filter((w) => w.length > 2);
+  if (!toks.length) return [];
+  return boxes.filter((b) => { const s = b.s.toLowerCase(); return toks.some((t) => s.includes(t)); }).slice(0, 60);
+}
+
+/** Map a fractional box into document space, given where the PDF page image sits. */
+export function boxToDoc(b: TextBox, img: { x: number; y: number; width: number; height: number }): { x: number; y: number; w: number; h: number } {
+  return { x: img.x + b.x * img.width - 3, y: img.y + b.y * img.height - 2, w: b.w * img.width + 6, h: b.h * img.height + 4 };
+}

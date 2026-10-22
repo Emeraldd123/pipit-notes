@@ -108,7 +108,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
       const w = pg.w * fit;
       const h = pg.h * fit;
       await addImage(note.id, pg.blob, { x: (PAGE_W - w) / 2, y: pageTop(i) + (PAGE_H - h) / 2, width: w, height: h, zIndex: i });
-      if (pg.text) await putPageText({ key: `${note.id}:${i}:pdf`, noteId: note.id, page: i, source: "pdf", text: pg.text, hash: "pdf", updatedAt: Date.now() });
+      if (pg.text) await putPageText({ key: `${note.id}:${i}:pdf`, noteId: note.id, page: i, source: "pdf", text: pg.text, hash: "pdf", updatedAt: Date.now(), boxes: pg.boxes });
     }
     return note.id;
   }

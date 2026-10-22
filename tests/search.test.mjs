@@ -29,3 +29,20 @@ test("page fingerprints change only for the edited page", () => {
   assert.notEqual(a[1].hash, b[1].hash);
   assert.deepEqual([a[0].strokes, a[1].strokes, b[1].strokes], [1, 1, 2]);
 });
+
+import { findBoxes, boxToDoc } from "../src/lib/search-core.ts";
+test("locating a hit on a PDF page", () => {
+  const boxes = [
+    { s: "Newton's second law", x: 0.1, y: 0.1, w: 0.3, h: 0.02 },
+    { s: "F = ma", x: 0.1, y: 0.2, w: 0.1, h: 0.02 },
+    { s: "momentum", x: 0.5, y: 0.5, w: 0.1, h: 0.02 },
+  ];
+  assert.equal(findBoxes("second law", boxes).length, 1);
+  assert.equal(findBoxes("f = ma", boxes)[0].y, 0.2);
+  assert.equal(findBoxes("momentum forces", boxes)[0].s, "momentum");   // falls back to individual words
+  assert.deepEqual(findBoxes("zzz", boxes), []);
+  assert.deepEqual(findBoxes("", boxes), []);
+  const d = boxToDoc(boxes[1], { x: 100, y: 1000, width: 1000, height: 1400 });
+  assert.equal(d.x, 100 + 100 - 3);
+  assert.equal(d.y, 1000 + 280 - 2);
+});
