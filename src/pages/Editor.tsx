@@ -756,7 +756,7 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
       const p = pages[k];
       setBusy(`Reviewing page ${p + 1} (${k + 1}/${pages.length})…`);
       try {
-        const img = canvasRef.current?.previewPage(p, 1500);
+        const img = canvasRef.current?.previewPage(p, 1110)   // the API shrinks anything over ~1568px on the long edge anyway: send what it will use;
         if (!img) throw new Error("page image unavailable");
         results.push({ page: p, issues: await reviewPage(img, p) });
       } catch (e) {

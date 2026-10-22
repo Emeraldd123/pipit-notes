@@ -6,7 +6,7 @@ import { count, error as logErr, track, warn } from "./telemetry";
 import { JsonReplyError, parseModelJson } from "./json-repair.ts";
 import { effortFor, maxTokensFor, modelFor, type Effort } from "./ai-cost.ts";
 import { recordUsage, spentThisMonth } from "./ai-ledger";
-import { cachedAi } from "./ai-cache";
+import { cachedAi, hashString } from "./ai-cache";
 import { normalizeIssues, type Issue } from "./review-core.ts";
 
 export class AiError extends Error {}
@@ -26,7 +26,7 @@ const RETRY_STATUS = new Set([429, 500, 502, 503, 529]);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const usd = (v: number) => `$${v.toFixed(2)}`;
 
-export async function claude(opts: {
+async function claudeOnce(opts: {
   system?: string;
   user: Content[] | string;
   maxTokens?: number;
@@ -129,6 +129,20 @@ export async function claude(opts: {
   }
   if (data?.stop_reason === "max_tokens") warn("ai", "reply was cut off at the token limit", { feature, maxTokens: opts.maxTokens ?? 2000, model });
   return (data.content ?? []).filter((b: { type: string }) => b.type === "text").map((b: { text: string }) => b.text).join("");
+}
+
+const inflight = new Map<string, Promise<string>>();
+/**
+ * Every AI call goes through here. An identical request that is already running (a double tap on "Write my exam",
+ * two quick taps on Explain) shares the one in flight instead of being sent — and billed — twice.
+ */
+export function claude(opts: Parameters<typeof claudeOnce>[0]): Promise<string> {
+  const key = hashString(`${opts.feature ?? ""}|${opts.model ?? ""}|${opts.system ?? ""}|${typeof opts.user === "string" ? opts.user : JSON.stringify(opts.user)}`);
+  const running = inflight.get(key);
+  if (running) { count("ai.dedup"); return running; }
+  const p = claudeOnce(opts).finally(() => inflight.delete(key));
+  inflight.set(key, p);
+  return p;
 }
 
 /** Pull the first JSON object/array out of a model reply (tolerates fences, chatter, LaTeX backslashes, cut-off replies). */

@@ -80,7 +80,11 @@ export function db(): Promise<IDBPDatabase<Schema>> {
         }
       },
       blocked() { onDbEvent({ level: "warn", msg: "database upgrade blocked by another open tab" }); },
-      blocking() { onDbEvent({ level: "warn", msg: "this tab is blocking a database upgrade in another tab" }); },
+      blocking() {
+        onDbEvent({ level: "warn", msg: "this tab is blocking a database upgrade in another tab" });
+        // an updated copy of the app (another tab / the home-screen app) can't finish updating until this one lets go
+        try { window.dispatchEvent(new Event("pipit:db-blocking")); } catch { /* */ }
+      },
       terminated() { onDbEvent({ level: "error", msg: "database connection was terminated by the browser" }); dbp = null; },
     }).catch((e) => {
       dbp = null; // allow a later retry

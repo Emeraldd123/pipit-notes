@@ -35,7 +35,7 @@ export async function indexNote(
       if (prev && prev.hash === fps[i].hash && !opts.force) { skipped++; continue; }
       const [img] = await renderNotePages(
         { title: meta.title, paper: meta.paper, pageCount: meta.pageCount, strokes: loaded.strokes, images: loaded.images },
-        { pages: [i], mime: "image/jpeg", quality: 0.8, scale: 1.4 }
+        { pages: [i], mime: "image/jpeg", quality: 0.8, scale: 0.9 }   // ≈1568px on the long edge: more would be shrunk server-side (same cost, slower upload)
       );
       const stop = timer("index.page.ms");
       const text = (await transcribePage(img.dataUrl)).trim();

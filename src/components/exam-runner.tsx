@@ -35,8 +35,11 @@ export function ExamRunner({ exam, onSubmit, onExit }: {
   const answered = (q: Question) => q.parts.some((p) => { const a = answers[p.id]; return a && (a.choice !== undefined || a.text?.trim() || a.ink); });
   const unanswered = flat.filter((f) => !answered(f.q)).length;
 
+  const sent = useRef(false);   // a second tap on Submit must not start a second (paid) marking run
   const submit = () => {
+    if (sent.current) return;
     if (unanswered > 0 && !confirm(`${unanswered} question${unanswered === 1 ? " is" : "s are"} unanswered. Submit anyway?`)) return;
+    sent.current = true;
     onSubmit(answers, elapsed);
   };
 
