@@ -6,7 +6,7 @@ export type Route =
   | { name: "library"; notebook: string | null; q: string }
   | { name: "note"; id: string; page?: number; hl?: string }
   | { name: "split"; a: string; b: string }
-  | { name: "graph" }
+  | { name: "graph"; map?: string }
   | { name: "search" }
   | { name: "settings" }
   | { name: "study"; view?: string };
@@ -21,7 +21,7 @@ export function parseHash(hash: string): Route {
     return { name: "note", id: decodeURIComponent(parts[1]), page: pg != null && /^\d+$/.test(pg) ? Number(pg) : undefined, hl: sp.get("hl") ?? undefined };
   }
   if (parts[0] === "split" && parts[1] && parts[2]) return { name: "split", a: decodeURIComponent(parts[1]), b: decodeURIComponent(parts[2]) };
-  if (parts[0] === "graph") return { name: "graph" };
+  if (parts[0] === "graph") return { name: "graph", map: parts[1] ? decodeURIComponent(parts[1]) : undefined };
   if (parts[0] === "search") return { name: "search" };
   if (parts[0] === "settings") return { name: "settings" };
   if (parts[0] === "study") return { name: "study", view: parts[1] ? decodeURIComponent(parts[1]) : undefined };
@@ -38,7 +38,7 @@ export function href(r: Route): string {
       return `#/n/${encodeURIComponent(r.id)}${qs ? `?${qs}` : ""}`;
     }
     case "split": return `#/split/${encodeURIComponent(r.a)}/${encodeURIComponent(r.b)}`;
-    case "graph": return "#/graph";
+    case "graph": return `#/graph${r.map ? `/${encodeURIComponent(r.map)}` : ""}`;
     case "search": return "#/search";
     case "settings": return "#/settings";
     case "study": return `#/study${r.view ? `/${encodeURIComponent(r.view)}` : ""}`;

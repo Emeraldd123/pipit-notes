@@ -80,7 +80,7 @@ export async function searchNotes(query: string, limit = 40): Promise<Hit[]> {
 /** Best-matching pages, shaped as numbered excerpts for the model. */
 export async function excerptsFor(question: string, k = 6): Promise<Excerpt[]> {
   const hits = (await searchNotes(question, 30)).filter((h) => h.source !== "title");
-  return hits.slice(0, k).map((h, i) => ({ n: i + 1, noteTitle: h.noteTitle, page: h.page, text: h.text.slice(0, 3500) }));
+  return hits.slice(0, k).map((h, i) => ({ n: i + 1, noteTitle: h.noteTitle, page: h.page, text: h.text.slice(0, 3500), noteId: h.noteId }));
 }
 
 /** Pages of the given notes (or all notes) as excerpts, capped by total size — for practice exams. */

@@ -11,6 +11,7 @@ test("study data (cards, mistakes, exams, progress) survives a backup round trip
     mistakes: [{ id: "m1", noteId: "n1", page: 0, problem: "sign" }],
     exams: [{ id: "e1", exam: { title: "T", sections: [] }, attempts: [] }],
     progress: { xp: 120, streak: 4 },
+    maps: [{ id: "m1", title: "Map", nodes: [], edges: [], updatedAt: 9 }],
   };
   const back = readBundle(zip(bundleFiles({ notebooks: [], notes: [], study })));
   assert.deepEqual(back.study, study);

@@ -65,6 +65,20 @@ export function StudyPage({ view }: { view?: string }) {
   }, []);
   useEffect(() => { void reload(); }, [reload]);
 
+  // coming from a concept map: "Study this" on a node starts a lesson on that concept's cards
+  useEffect(() => {
+    if (!progress || !cards.length) return;
+    let raw: string | null = null;
+    try { raw = sessionStorage.getItem("pipit.studyFocus"); sessionStorage.removeItem("pipit.studyFocus"); } catch { /* */ }
+    if (!raw) return;
+    try {
+      const f = JSON.parse(raw) as { ids: string[]; title: string };
+      const pool = cards.filter((c) => f.ids.includes(c.id));
+      if (pool.length) startLesson({ title: f.title, pool, size: Math.min(10, Math.max(4, pool.length)) });
+    } catch { /* ignore a malformed hand-off */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [progress, cards.length]);
+
   const scoped = useMemo(() => (nb === "all" ? cards : cards.filter((c) => c.notebookId === (nb === "none" ? null : nb))), [cards, nb]);
   const now = Date.now();
   const dueCount = scoped.filter((c) => !c.suspended && isDue(c, now)).length;

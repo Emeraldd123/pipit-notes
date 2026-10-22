@@ -8,6 +8,7 @@ import type {
 import { newId } from "./ids";
 import { pageOfY, remapItems, type PageMapping } from "./page-ops.ts";
 import type { Card } from "./study-core.ts";
+import type { ConceptMap } from "./map-core.ts";
 import type { Exam, ExamResult, PartAnswer } from "./exam-core.ts";
 
 interface Schema extends DBSchema {
@@ -23,6 +24,7 @@ interface Schema extends DBSchema {
   cards: { key: string; value: Card; indexes: { notebookId: string; noteId: string } };
   mistakes: { key: string; value: MistakeRec; indexes: { noteId: string } };
   exams: { key: string; value: ExamRec };
+  maps: { key: string; value: ConceptMap };
 }
 
 /** A mistake found by "Review for mistakes" (kept so patterns can be studied later). */
@@ -34,7 +36,7 @@ export type ExamAttempt = { id: string; at: number; seconds: number; answers: Re
 export type ExamRec = { id: string; exam: Exam; attempts: ExamAttempt[]; createdAt: number; updatedAt: number };
 
 const DB_NAME = "pipit-notes";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const VERSION_KEEP = 6;
 const VERSION_THROTTLE_MS = 10 * 60_000;
 
@@ -72,6 +74,9 @@ export function db(): Promise<IDBPDatabase<Schema>> {
           cards.createIndex("noteId", "noteId");
           d.createObjectStore("mistakes", { keyPath: "id" }).createIndex("noteId", "noteId");
           d.createObjectStore("exams", { keyPath: "id" });
+        }
+        if (oldVersion < 4) {
+          d.createObjectStore("maps", { keyPath: "id" });
         }
       },
       blocked() { onDbEvent({ level: "warn", msg: "database upgrade blocked by another open tab" }); },

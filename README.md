@@ -20,8 +20,9 @@ A private, offline-first handwriting notebook. **No account, no server** — eve
   - *Lessons* Duolingo-style: short sessions mixing matching, multiple choice, typing, fill-in-the-blank, ordering steps and self-graded flashcards; wrong answers come round again; hearts, combo, XP, daily goal, streak, a skill path per topic with crowns, sound effects.
   - *Quick quizzes* from your cards, scored at the end.
   - *Practice exams* written from your notes in the style of real papers: structured multi-part questions with **graphs, data tables, charts, diagrams and pictures cut from your own PDFs**. Timed; multiple-choice and numeric parts are marked locally, written/handwritten answers are marked by AI against a marking scheme; results by topic, model answers, one-tap flashcards for what you missed.
+  - *Concept maps*: the AI proposes a map of the ideas in a notebook or note (concepts, with labelled links like *causes* / *is part of* / *needed for*); you edit it. **Test me from memory** hides the map and has you recall the concepts, then the links. **Colour by knowledge** shades each concept by your flashcard progress and unresolved mistakes (tap a weak one → *Study this*). Also: *Expand* a concept with AI, ask the AI **how two concepts connect**, a suggested **study order**, **flashcards from the links**, pan/zoom/search, export to PNG or an outline.
   - *Mistake log*: every mistake found by Review for mistakes, grouped by type so you can see your patterns.
-- **Organise**: notebooks, multi-select (move / tag / export / delete), tags, a Recent view, batch PDF import, a pages panel (reorder, duplicate, insert, delete pages), split view, a knowledge map (local TF-IDF, no AI), search hits highlighted on PDF pages.
+- **Organise**: notebooks, multi-select (move / tag / export / delete), tags, a Recent view, batch PDF import, a pages panel (reorder, duplicate, insert, delete pages), split view, a note-links view (local TF-IDF, no AI), search hits highlighted on PDF pages.
 - **Draw**: ruler (strokes snap to its edge) and protractor, pen presets + recent colours, a text tool, page templates (axes, number line, unit circle, periodic table, tables), optional scribble-to-erase, share a note as a PDF.
 - **Export**: PDF, PNG, SVG, LaTeX, whole notebook as a ZIP of PDFs.
 - **Safe**: installable PWA, persistent storage, one-tap backup to iCloud Drive (share sheet), restore/merge on any device.
@@ -126,7 +127,7 @@ Notes never leave the device unless you export or back them up. AI features send
     src/lib/bundle-format.ts         backup format (shared with tools/)
     src/lib/{chem,stepcheck,py,ai,search,related,latex,svg}.ts
     src/lib/{mathexpr,graph-render,review-core}.ts   graphing + mistake review (pure, tested)
-    src/lib/{srs,study-core,exam-core,figure-core}.ts  study engine + exams + figure geometry (pure, tested)
+    src/lib/{srs,study-core,exam-core,figure-core,map-core}.ts  study engine + exams + figures + concept maps (pure, tested)
     src/lib/{ai-study,study-actions,study-db}.ts       study AI prompts, glue, persistence
     src/pages/StudyPage.tsx, src/components/{lesson,exam-runner,figure,ink-pad}.tsx
     src/lib/{telemetry,telemetry-core,health,report}.ts   monitoring

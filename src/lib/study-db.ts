@@ -2,6 +2,7 @@
 import { db, getMeta, setMeta, type ExamAttempt, type ExamRec, type MistakeRec } from "./db";
 import { newProgress, type Card, type Progress } from "./study-core";
 import type { Exam } from "./exam-core";
+import type { ConceptMap } from "./map-core";
 import { newId } from "./ids";
 
 // --- cards -----------------------------------------------------------------------------------------------------
@@ -75,4 +76,15 @@ export async function getProgress(): Promise<Progress> {
 }
 export async function putProgress(p: Progress): Promise<void> {
   await setMeta("study:progress", p);
+}
+
+// --- concept maps -----------------------------------------------------------------------------------------------------
+export async function listMaps(): Promise<ConceptMap[]> {
+  return (await (await db()).getAll("maps")).sort((a, b) => b.updatedAt - a.updatedAt);
+}
+export async function putMap(m: ConceptMap): Promise<void> {
+  await (await db()).put("maps", { ...m, updatedAt: Date.now() });
+}
+export async function deleteMap(id: string): Promise<void> {
+  await (await db()).delete("maps", id);
 }

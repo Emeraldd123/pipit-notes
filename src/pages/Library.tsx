@@ -253,7 +253,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
         <div className="mt-auto space-y-0.5 pt-6 text-sm">
           <button onClick={() => go({ name: "study" })} className="flex w-full items-center gap-2 rounded-lg bg-primary/10 px-2.5 py-1.5 font-medium text-primary hover:bg-primary/20"><GraduationCap size={15} /> Study</button>
           <button onClick={() => go({ name: "search" })} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-foreground-muted hover:bg-surface-secondary"><Search size={15} /> Search &amp; ask</button>
-          <button onClick={() => go({ name: "graph" })} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-foreground-muted hover:bg-surface-secondary"><Network size={15} /> Knowledge map</button>
+          <button onClick={() => go({ name: "graph" })} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-foreground-muted hover:bg-surface-secondary"><Network size={15} /> Concept maps</button>
           <button onClick={() => go({ name: "settings" })} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-foreground-muted hover:bg-surface-secondary"><SettingsIcon size={15} /> Settings &amp; backup</button>
         </div>
       </aside>
@@ -288,7 +288,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
             <Chip onClick={newNotebook}>+ Notebook</Chip>
             <Chip active={notebook === "recent"} onClick={() => go({ name: "library", notebook: "recent", q: "" })}>Recent</Chip>
             <Chip onClick={() => go({ name: "study" })}>Study</Chip>
-            <Chip onClick={() => go({ name: "graph" })}>Map</Chip>
+            <Chip onClick={() => go({ name: "graph" })}>Maps</Chip>
           </div>
 
           {allTags.length > 0 && notebook !== "recent" && (

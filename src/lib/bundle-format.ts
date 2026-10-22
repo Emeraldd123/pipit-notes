@@ -26,7 +26,7 @@ export type BundleNote = {
   images: BundleImage[];
 };
 /** Study data (flashcards, mistake log, saved exams, XP/streak) — opaque JSON to the bundle layer. */
-export type BundleStudy = { cards: unknown[]; mistakes: unknown[]; exams: unknown[]; progress: unknown | null };
+export type BundleStudy = { cards: unknown[]; mistakes: unknown[]; exams: unknown[]; progress: unknown | null; maps?: unknown[] };
 export type Bundle = { notebooks: NotebookRec[]; notes: BundleNote[]; study?: BundleStudy };
 
 const EXT: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" };
@@ -85,7 +85,7 @@ export function readBundle(files: Record<string, Uint8Array>): Bundle {
   if (files["study.json"]) {
     try {
       const raw = JSON.parse(strFromU8(files["study.json"]));
-      study = { cards: raw.cards ?? [], mistakes: raw.mistakes ?? [], exams: raw.exams ?? [], progress: raw.progress ?? null };
+      study = { cards: raw.cards ?? [], mistakes: raw.mistakes ?? [], exams: raw.exams ?? [], progress: raw.progress ?? null, maps: raw.maps ?? [] };
     } catch { /* a damaged study file must not block restoring notes */ }
   }
   return { notebooks: lib.notebooks ?? [], notes, study };

@@ -23,7 +23,7 @@ export function App() {
           <div className="min-w-0 flex-1"><EditorPage id={route.b} splitWith={route.a} /></div>
         </div>
       );
-    case "graph": return <GraphPage />;
+    case "graph": return <GraphPage mapId={route.map} />;
     case "search": return <SearchPage />;
     case "settings": return <SettingsPage />;
     case "study": return <StudyPage view={route.view} />;

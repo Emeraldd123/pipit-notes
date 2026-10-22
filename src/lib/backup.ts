@@ -46,7 +46,7 @@ export async function collectBundle(noteIds?: string[]): Promise<Bundle> {
   }
   // study data rides along with a full backup (not with a per-note export)
   const study = noteIds ? undefined : {
-    cards: await d.getAll("cards"), mistakes: await d.getAll("mistakes"), exams: await d.getAll("exams"),
+    cards: await d.getAll("cards"), mistakes: await d.getAll("mistakes"), exams: await d.getAll("exams"), maps: await d.getAll("maps"),
     progress: (await d.get("meta", "study:progress")) ?? null,
   };
   return { notebooks, notes, study };
@@ -144,6 +144,10 @@ export async function importBackups(files: File[], onProgress?: (msg: string) =>
         for (const e of st.exams as { id: string; updatedAt?: number }[]) {
           const have = await d.get("exams", e.id);
           if (!have || (have.updatedAt ?? 0) < (e.updatedAt ?? 0)) await d.put("exams", e as never);
+        }
+        for (const m of (st.maps ?? []) as { id: string; updatedAt?: number }[]) {
+          const have = await d.get("maps", m.id);
+          if (!have || (have.updatedAt ?? 0) < (m.updatedAt ?? 0)) await d.put("maps", m as never);
         }
         const mine = (await d.get("meta", "study:progress")) as { xp?: number } | undefined;
         const theirs = st.progress as { xp?: number } | null;
