@@ -25,13 +25,68 @@ A private, offline-first handwriting notebook. **No account, no server** — eve
 5. Back up regularly: **Back up now** → Save to Files → iCloud Drive.
 6. (Optional) Settings → AI features → add your API key and switch it on. Settings → **Pen test** shows what your stylus reports (rate, pressure, tilt).
 
+## Setup checklist (everything you need to provide)
+
+**To run it locally (development)** — nothing but Node 22+:
+
+    npm install
+    npm run dev            # http://localhost:5173
+
+**To use it on the iPad** — three things:
+
+1. **A static host with HTTPS.** Netlify is simplest (you already use it): `npm run build`, then drag the `dist/` folder onto https://app.netlify.com/drop — or connect this repo and Netlify builds it (`netlify.toml` is set up). *Needed:* a Netlify account (free).
+2. **Install it on the iPad:** open the site in Safari → Share → **Add to Home Screen**. *This matters:* installed apps get protected storage.
+3. **Import your notes:** Settings → Restore from backup → pick the `.zip` files from `data/` (AirDrop / iCloud Drive them across first).
+
+**Optional extras**
+
+| Feature | What you provide | Where |
+|---|---|---|
+| AI (maths recognition, working check, search, ask, practice exams) | An **Anthropic API key** (console.anthropic.com, needs billing) | App → Settings → AI features (stored only on the device) |
+| Remote problem reports | A **`DIAG_READ_TOKEN`** (any long random string you invent) | Netlify → Site configuration → Environment variables |
+| Backups | Nothing — tap "Back up now" and save to iCloud Drive | App → Settings |
+
+Nothing else: no database, no accounts, no other keys.
+
 ## Develop
 
     npm install
     npm run dev          # http://localhost:5173
     npm run build        # static site in dist/
     npm run typecheck
-    npm test             # 46 tests; step-checker tests need python + sympy (skipped otherwise)
+    npm test             # 63 tests; step-checker tests need python + sympy (skipped otherwise)
+
+## Monitoring (so problems can be found and fixed)
+
+Everything that has a decent chance of breaking is watched, **content-free** (counts, timings, error messages, device info — never notes, titles, PDFs, code, AI questions/answers, or your API key).
+
+| Area | What's recorded |
+|---|---|
+| Crashes | Uncaught errors, unhandled promise rejections, React render crashes (with a recovery screen) |
+| Saving | Every local save's duration; slow saves; failures; "storage full" |
+| Data loss tripwires | The browser **wiping the app's storage** (detected via a copy of the note count outside IndexedDB) and a session that **ended with unsaved edits** — both show a banner on the next launch |
+| Opening notes | Load time per open; slow opens with stroke/image/page counts |
+| Pen input | Per ~300 events: event rate (Hz), coalescing, stalls >32/64 ms, handler cost, pressure range |
+| Backup / restore | Build time and size, share-sheet outcome (shared / fell back to download / cancelled), restore results |
+| PDF import | Duration, page count, pages without a text layer, failures |
+| Python & step-check | Runtime load time (network trouble), run time, how many lines SymPy could verify |
+| AI | Latency, token usage, HTTP status and failure type per feature (offline vs rejected key vs rate limit) |
+| Exports / search indexing / thumbnails | Durations and failures |
+| Environment | App version + commit, device/browser, installed vs tab, storage quota/persistence, offline-cache state, connectivity changes |
+| Usage | Which tools and features are used, and how often |
+
+**Where it goes.** A ring-buffered log lives on the device (Settings → Health & diagnostics → *View recent events*). Three ways to get it to whoever is fixing things:
+
+1. **Automatic** (on by default, can be turned off): when an error happens, and about once a day, the app POSTs a report (~5 KB) to `/.netlify/functions/diag` on the same site. Reports are validated, re-scrubbed and size-capped server-side and stored in Netlify Blobs.
+2. **Manual:** Settings → *Share a diagnostics report* saves a `.json` you can AirDrop / send.
+3. **From the crash screen:** *Save a problem report*.
+
+**Reading reports** (needs `DIAG_READ_TOKEN` set in Netlify):
+
+    npm run diag -- --url https://YOUR-SITE/.netlify/functions/diag --token YOUR_TOKEN --hours 48
+    npm run diag -- path/to/pipit-notes-diagnostics-….json
+
+This prints each report's health, errors, flagged problems (slow saves, input stalls, flat pressure, …), plus a rollup of the most frequent errors.
 
 ## Migrate your notes from Pipit (Supabase)
 
@@ -60,5 +115,7 @@ Notes never leave the device unless you export or back them up. AI features send
     src/lib/db.ts                    IndexedDB store
     src/lib/bundle-format.ts         backup format (shared with tools/)
     src/lib/{chem,stepcheck,py,ai,search,related,latex,svg}.ts
+    src/lib/{telemetry,telemetry-core,health,report}.ts   monitoring
+    netlify/                         diagnostics endpoint (Function + handler)
     src/pages/                       Library, Editor, Search, Graph, Settings
-    tools/                           icon generator, Supabase export
+    tools/                           icon generator, Supabase export, diag-report

@@ -27,6 +27,8 @@ import { buildPageSvg } from "@/lib/svg";
 import { relatedTo } from "@/lib/related";
 import { aiReady, getSettings, updateSettings, useSettings } from "@/lib/settings";
 import { timeAgo } from "@/lib/format";
+import { clearDirty, markDirty } from "@/lib/health";
+import { count, error as logErrorEntry, logError, recordInputSample, timer, track, warn } from "@/lib/telemetry";
 import { go } from "@/router";
 
 const COLORS = ["#111827", "#2563eb", "#dc2626", "#16a34a", "#d97706", "#7c3aed", "#0891b2", "#db2777"];
@@ -90,7 +92,17 @@ export function EditorPage({ id, page, splitWith }: { id: string; page?: number;
   useEffect(() => {
     let alive = true;
     setLoaded(undefined);
-    void loadNote(id).then((n) => { if (alive) setLoaded(n); });
+    const stop = timer("open.ms");
+    void loadNote(id)
+      .then((n) => {
+        const ms = stop();
+        if (n) {
+          count("note.open");
+          if (ms > 2500) warn("open", "slow note open", { ms: Math.round(ms), strokes: n.strokes.length, images: n.images.length, pages: n.meta.pageCount });
+        } else warn("open", "note not found", {});
+        if (alive) setLoaded(n);
+      })
+      .catch((e) => { logError("open", e); if (alive) setLoaded(null); });
     return () => { alive = false; };
   }, [id]);
   // Image object URLs live exactly as long as the loaded note. (Revoking them in
@@ -155,6 +167,11 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
   const scrubX = useRef(0);
   const scrubPage = useRef(0);
 
+  // Unexpected failures are logged; expected AI errors (bad key, offline) were already logged where they happen.
+  const failed = (area: string, e: unknown, fallback: string) => {
+    if (!(e instanceof AiError)) logError(area, e);
+    flash(e instanceof AiError ? e.message : `${fallback}: ${(e as Error).message}`);
+  };
   const flash = useCallback((m: string) => { setToast(m); setTimeout(() => setToast((t) => (t === m ? null : t)), 3400); }, []);
 
   // --- persistence: local, incremental, instant -----------------------------------
@@ -182,19 +199,27 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
     const snapshot = current.slice();
     const { upserts, deletes, next } = computeDelta(snapshot, lastSaved.current);
     pending.current = null;
-    if (!upserts.length && !deletes.length) { setSaveState("saved"); return; }
+    if (!upserts.length && !deletes.length) { setSaveState("saved"); clearDirty(); return; }
     saving.current = true;
     setSaveState("saving");
     let failed = false;
+    const stopSave = timer("save.ms");
     try {
       await syncStrokes(noteId, upserts.map((s) => ({ id: s.id!, tool: s.tool, color: s.color, width: s.width, points: s.points })), deletes, snapshot.length);
+      const saveMs = stopSave();
+      if (saveMs > 1000) warn("save", "slow save", { ms: Math.round(saveMs), up: upserts.length, del: deletes.length, strokes: snapshot.length });
       lastSaved.current = next;
+      if (!pending.current) clearDirty(); // nothing newer waiting: this write covers everything
       setSaveState("saved");
       if (await snapshotDue(noteId)) await maybeSnapshot(noteId, snapshot);
       scheduleThumb();
     } catch (e) {
       failed = true;
-      console.error("[notes] local save failed", e);
+      logError("save", e, { up: upserts.length, del: deletes.length, strokes: snapshot.length });
+      if ((e as DOMException)?.name === "QuotaExceededError") {
+        logErrorEntry("storage", "storage quota exceeded while saving", {});
+        flash("This device is out of storage — back up your notes and free some space. Your latest ink is still on screen.");
+      }
       pending.current = snapshot;
       setSaveState("error");
       setTimeout(() => void flushRef.current(), 2500);
@@ -207,10 +232,11 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
 
   const onCommit = useCallback((strokes: Stroke[]) => {
     pending.current = strokes;
+    markDirty(noteId); // cleared once the write lands — if the app dies first, the next launch notices
     setSaveState("saving");
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => void flushRef.current(), 350);
-  }, []);
+  }, [noteId]);
 
   useEffect(() => {
     const onHide = () => { if (document.visibilityState === "hidden" || document.visibilityState === undefined) void flushRef.current(); };
@@ -257,6 +283,8 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [noteId]);
+
+  useEffect(() => { count(`tool.${tool}`); }, [tool]);
 
   // --- camera → blocks overlay (direct DOM, no React state per frame) ------------------
   const onCameraChange = useCallback((c: { scale: number; camX: number; camY: number }) => {
@@ -305,6 +333,7 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
       setBlocks((prev) => prev.map((x) => (x.id === b.id ? { ...x, output: next.output, images: next.images } : x)));
       void putBlock({ ...(blocksRef.current.find((x) => x.id === b.id) ?? b), output: next.output, images: next.images });
     } catch (e) {
+      logError("python", e, { stage: "run-block" });
       flash("Couldn't start Python: " + (e as Error).message + " (it needs a connection the first time).");
     } finally {
       setRunning(null);
@@ -370,6 +399,8 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
   // --- export ----------------------------------------------------------------------------------------
   async function exportPdf() {
     setMenu(false); setBusy("Building PDF…");
+    count("export.pdf");
+    const stop = timer("export.pdf.ms");
     try {
       await flush();
       const l = await loadExportNote(noteId);
@@ -377,14 +408,16 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
       const bytes = await buildNotePdf(l.note);
       l.release();
       triggerDownload(new Blob([bytes.slice()], { type: "application/pdf" }), `${safeName(title, "Note")}.pdf`);
-    } catch (e) { flash("PDF export failed: " + (e as Error).message); } finally { setBusy(null); }
+      stop();
+    } catch (e) { failed("export", e, "PDF export failed"); } finally { setBusy(null); }
   }
   function exportPng() {
     setMenu(false);
+    count("export.png");
     const url = canvasRef.current?.exportPng();
     if (url) { const a = document.createElement("a"); a.href = url; a.download = `${safeName(title, "Note")}.png`; document.body.appendChild(a); a.click(); a.remove(); }
   }
-  function doPrint() { setMenu(false); printImages(canvasRef.current?.exportPages() ?? []); }
+  function doPrint() { setMenu(false); count("export.print"); printImages(canvasRef.current?.exportPages() ?? []); }
   async function openHistory() { setMenu(false); setVersions(await listVersions(noteId)); }
   async function onRestore(vid: string) {
     if (!confirm("Restore this version? Your current ink is saved as a version first, so you can come back.")) return;
@@ -405,6 +438,7 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
   }
   async function exportSvg() {
     setMenu(false); setBusy("Building SVG…");
+    count("export.svg");
     try {
       await flush();
       const l = await loadExportNote(noteId);
@@ -413,7 +447,7 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
       const svg = buildPageSvg(currentPage, l.note.strokes, imgs);
       l.release();
       triggerDownload(new Blob([svg], { type: "image/svg+xml" }), `${safeName(title, "Note")}-page-${currentPage + 1}.svg`);
-    } catch (e) { flash("SVG export failed: " + (e as Error).message); } finally { setBusy(null); }
+    } catch (e) { failed("export", e, "SVG export failed"); } finally { setBusy(null); }
   }
   async function exportLatex() {
     setMenu(false);
@@ -430,7 +464,7 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
       });
       triggerDownload(new Blob([buildLatexDocument(title, pages)], { type: "application/x-tex" }), `${safeName(title, "Note")}.tex`);
       flash("LaTeX exported — compile with pdflatex or paste into Overleaf.");
-    } catch (e) { flash(e instanceof AiError ? e.message : "LaTeX export failed: " + (e as Error).message); } finally { setBusy(null); }
+    } catch (e) { failed("ai", e, "LaTeX export failed"); } finally { setBusy(null); }
   }
   async function showRelated() {
     setMenu(false);
@@ -448,7 +482,7 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
       await flush();
       const r = await indexNote(noteId, (p) => setBusy(`Reading page ${p.page + 1}/${p.total}…`));
       flash(r.read ? `Indexed ${r.read} page${r.read === 1 ? "" : "s"} for search.` : "Search is already up to date for this note.");
-    } catch (e) { flash(e instanceof AiError ? e.message : "Indexing failed: " + (e as Error).message); } finally { setBusy(null); }
+    } catch (e) { failed("ai", e, "Indexing failed"); } finally { setBusy(null); }
   }
 
   // --- AI: recognise maths / check working on the selection ----------------------------------
@@ -461,7 +495,7 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
       const latex = await recognizeMath(sel.dataUrl);
       addBlock("math", { x: sel.bbox.x, y: sel.bbox.y + sel.bbox.h + 28 }, latex);
       flash("Recognised — edit the LaTeX if anything's off.");
-    } catch (e) { flash(e instanceof AiError ? e.message : "Couldn't recognise that: " + (e as Error).message); } finally { setBusy(null); }
+    } catch (e) { failed("ai", e, "Couldn't recognise that"); } finally { setBusy(null); }
   }
   async function convertSelectionToText() {
     if (!ai) return flash("Turn on AI in Settings to convert handwriting.");
@@ -473,7 +507,7 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
       if (!t) return flash("I couldn't read any text there.");
       addBlock("text", { x: sel.bbox.x, y: sel.bbox.y + sel.bbox.h + 28 }, t);
       flash("Added as a text block below your handwriting.");
-    } catch (e) { flash(e instanceof AiError ? e.message : "Couldn't convert that: " + (e as Error).message); } finally { setBusy(null); }
+    } catch (e) { failed("ai", e, "Couldn't convert that"); } finally { setBusy(null); }
   }
   async function checkChemistry() {
     if (!ai) return flash("Turn on AI in Settings to read equations.");
@@ -483,8 +517,11 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
     try {
       const eqs = await readChemistry(sel.dataUrl);
       if (!eqs.length) return flash("I couldn't find a chemical equation in that selection.");
-      setChem(eqs.map((eq) => ({ eq, report: checkEquation(eq) })));
-    } catch (e) { flash(e instanceof AiError ? e.message : "Couldn't check that: " + (e as Error).message); } finally { setBusy(null); }
+      const checked = eqs.map((eq) => ({ eq, report: checkEquation(eq) }));
+      track("chem.equations", checked.length);
+      track("chem.formulaErrors", checked.reduce((a, c) => a + c.report.errors.length, 0));
+      setChem(checked);
+    } catch (e) { failed("ai", e, "Couldn't check that"); } finally { setBusy(null); }
   }
   async function checkSelection() {
     if (!ai) return flash("Turn on AI in Settings to check working.");
@@ -497,7 +534,7 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
       setBusy("Verifying each step (SymPy)…");
       const results = await verifyWorking(lines, (m) => setBusy(m));
       setCheck({ lines, results });
-    } catch (e) { flash(e instanceof AiError ? e.message : "Couldn't check that: " + (e as Error).message); } finally { setBusy(null); }
+    } catch (e) { failed("ai", e, "Couldn't check that"); } finally { setBusy(null); }
   }
 
   const activeTool: Tool = tool;
@@ -629,6 +666,7 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
             onCameraChange={onCameraChange}
             onTapDoc={(p) => { addBlock("code", { x: p.x, y: p.y }); setTool("pen"); }}
             shapeSnap={settings.shapeSnap}
+            onInputSample={settings.diagnostics ? recordInputSample : undefined}
             onPageChange={(p) => setCurrentPage(p)}
             onSelectionChange={setHasSel}
             onSnipRegion={onSnipRegion}

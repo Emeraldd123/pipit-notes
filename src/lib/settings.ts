@@ -14,6 +14,12 @@ export type Settings = {
   autoIndex: boolean;
   /** Hold the pen still to snap rough lines/circles/rectangles into clean shapes. */
   shapeSnap: boolean;
+  /** Keep a local, content-free diagnostics log (errors, timings, health). Never contains note content. */
+  diagnostics: boolean;
+  /** Also send content-free reports to the reporting endpoint so problems can be fixed. */
+  reportEnabled: boolean;
+  /** Reporting endpoint; empty = this site's own /.netlify/functions/diag. */
+  reportUrl: string;
 };
 
 const KEY = "pipit-notes.settings.v1";
@@ -24,6 +30,9 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: "system",
   autoIndex: false,
   shapeSnap: false,
+  diagnostics: true,
+  reportEnabled: true,
+  reportUrl: "",
 };
 
 let cache: Settings | null = null;

@@ -8,6 +8,7 @@ import { renderNotePages } from "./export";
 import { pageTop } from "./page";
 import { pageFingerprints, scorePage, snippetFor } from "./search-core";
 import { transcribePage, type Excerpt } from "./ai";
+import { count, logError, timer } from "./telemetry";
 import type { NoteMeta, PageTextRec } from "@/types";
 
 export type IndexProgress = { page: number; total: number; note: string };
@@ -36,11 +37,17 @@ export async function indexNote(
         { title: meta.title, paper: meta.paper, pageCount: meta.pageCount, strokes: loaded.strokes, images: loaded.images },
         { pages: [i], mime: "image/jpeg", quality: 0.8, scale: 1.4 }
       );
+      const stop = timer("index.page.ms");
       const text = (await transcribePage(img.dataUrl)).trim();
+      stop();
+      count("index.page");
       await putPageText({ key: `${noteId}:${i}:ink`, noteId, page: i, source: "ink", text, hash: fps[i].hash, updatedAt: Date.now() });
       read++;
     }
     return { read, skipped };
+  } catch (e) {
+    logError("index", e, { pages: meta.pageCount });
+    throw e;
   } finally {
     loaded.images.forEach((i) => URL.revokeObjectURL(i.data));
   }

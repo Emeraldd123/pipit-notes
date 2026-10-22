@@ -71,3 +71,16 @@ export type PageTextRec = {
   hash: string;
   updatedAt: number;
 };
+
+// --- diagnostics ---------------------------------------------------------------
+export type LogLevel = "info" | "warn" | "error";
+/** One diagnostics event. Never contains note content, titles, or credentials. */
+export type LogEntry = {
+  id?: number;
+  t: number;
+  session: string;
+  level: LogLevel;
+  area: string;
+  msg: string;
+  data?: Record<string, unknown>;
+};

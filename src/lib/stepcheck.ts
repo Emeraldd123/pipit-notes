@@ -4,6 +4,7 @@
 // verified, not a model's opinion.
 import { evalPyJson, type Status } from "./py";
 import type { WorkingLine } from "./ai";
+import { count, track, warn } from "./telemetry";
 
 export type StepStatus = "start" | "ok" | "ok-extra" | "error" | "unchecked" | "unparsed" | "skip";
 export type StepResult = {
@@ -143,7 +144,18 @@ json.dumps(res)
 `;
 
 export async function verifyWorking(lines: WorkingLine[], onStatus?: Status): Promise<StepResult[]> {
-  return evalPyJson<StepResult[]>(VERIFY, { _pn_lines: JSON.stringify(lines) }, ["sympy"], onStatus);
+  count("stepcheck.run");
+  const results = await evalPyJson<StepResult[]>(VERIFY, { _pn_lines: JSON.stringify(lines) }, ["sympy"], onStatus);
+  // How often can we actually verify what the AI read? A high "unparsed" rate means the
+  // reader's SymPy output is unreliable (a quality signal, not a crash).
+  const maths = results.filter((r) => r.status !== "skip");
+  const unparsed = maths.filter((r) => r.status === "unparsed").length;
+  const unchecked = maths.filter((r) => r.status === "unchecked").length;
+  track("stepcheck.lines", maths.length);
+  track("stepcheck.unparsed", unparsed);
+  track("stepcheck.unchecked", unchecked);
+  if (maths.length && (unparsed + unchecked) / maths.length > 0.5) warn("stepcheck", "most lines could not be verified automatically", { lines: maths.length, unparsed, unchecked });
+  return results;
 }
 
 /** Index of the first line that is verifiably wrong, or -1. */

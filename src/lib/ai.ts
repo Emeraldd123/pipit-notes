@@ -2,6 +2,7 @@
 // stored in Settings. Nothing is sent unless AI is switched on AND the user takes
 // an action that needs it (read a page, ask a question, check working, …).
 import { aiReady, getSettings } from "./settings";
+import { count, error as logErr, track, warn } from "./telemetry";
 
 export class AiError extends Error {}
 
@@ -22,27 +23,40 @@ export async function claude(opts: {
   maxTokens?: number;
   model?: string;
   signal?: AbortSignal;
+  /** which feature is calling — used only to label metrics (never content) */
+  feature?: string;
 }): Promise<string> {
   const s = getSettings();
   if (!aiReady(s)) throw new AiError("AI features are off. Turn them on and add an API key in Settings.");
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    signal: opts.signal,
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": s.apiKey.trim(),
-      "anthropic-version": "2023-06-01",
-      // Required for calls made directly from a browser (this is a single-user,
-      // on-device app using its owner's own key).
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
-    body: JSON.stringify({
-      model: opts.model ?? s.model,
-      max_tokens: opts.maxTokens ?? 2000,
-      ...(opts.system ? { system: opts.system } : {}),
-      messages: [{ role: "user", content: typeof opts.user === "string" ? opts.user : opts.user }],
-    }),
-  });
+  const feature = opts.feature ?? "other";
+  const t0 = performance.now();
+  count(`ai.${feature}`);
+  let res: Response;
+  try {
+    res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      signal: opts.signal,
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": s.apiKey.trim(),
+        "anthropic-version": "2023-06-01",
+        // Required for calls made directly from a browser (this is a single-user,
+        // on-device app using its owner's own key).
+        "anthropic-dangerous-direct-browser-access": "true",
+      },
+      body: JSON.stringify({
+        model: opts.model ?? s.model,
+        max_tokens: opts.maxTokens ?? 2000,
+        ...(opts.system ? { system: opts.system } : {}),
+        messages: [{ role: "user", content: typeof opts.user === "string" ? opts.user : opts.user }],
+      }),
+    });
+  } catch (e) {
+    // network failure / offline / blocked — distinct from the API rejecting the call
+    if ((e as Error)?.name !== "AbortError") logErr("ai", "request could not be sent", { feature, err: String((e as Error)?.message ?? e).slice(0, 120), online: navigator.onLine });
+    throw new AiError(navigator.onLine === false ? "You're offline — AI features need a connection." : "Couldn't reach the AI service. Check your connection and try again.");
+  }
+  const ms = performance.now() - t0;
   if (!res.ok) {
     let detail = "";
     try {
@@ -50,11 +64,16 @@ export async function claude(opts: {
     } catch {
       /* ignore */
     }
+    logErr("ai", `request failed (${res.status})`, { feature, status: res.status, model: opts.model ?? s.model, ms: Math.round(ms), detail: detail.slice(0, 160) });
     if (res.status === 401) throw new AiError("The API key was rejected. Check it in Settings.");
     if (res.status === 429) throw new AiError("Rate limited — wait a moment and try again.");
     throw new AiError(`AI request failed (${res.status}) ${detail}`.trim());
   }
   const data = await res.json();
+  track("ai.ms", ms);
+  track(`ai.${feature}.ms`, ms);
+  if (data?.usage) { track("ai.inputTokens", data.usage.input_tokens ?? 0); track("ai.outputTokens", data.usage.output_tokens ?? 0); }
+  if (data?.stop_reason === "max_tokens") warn("ai", "reply was cut off at the token limit", { feature, maxTokens: opts.maxTokens ?? 2000 });
   return (data.content ?? []).filter((b: { type: string }) => b.type === "text").map((b: { text: string }) => b.text).join("");
 }
 
@@ -77,6 +96,7 @@ export function extractJson<T>(raw: string): T {
 
 export async function transcribePage(pageImage: string): Promise<string> {
   return claude({
+    feature: "transcribe",
     maxTokens: 2500,
     system:
       "You transcribe a student's handwritten notes from an image. Output the text only, preserving line breaks and structure " +
@@ -89,6 +109,7 @@ export async function transcribePage(pageImage: string): Promise<string> {
 
 export async function recognizeMath(region: string): Promise<string> {
   const raw = await claude({
+    feature: "math",
     maxTokens: 600,
     system: "You convert handwritten mathematics in an image to LaTeX. Reply with ONLY the LaTeX source — no $ delimiters, no code fences, no explanation.",
     user: [imageBlock(region), text("Convert to LaTeX.")],
@@ -100,6 +121,7 @@ export type WorkingLine = { latex: string; sympy: string; kind: "expr" | "eq" | 
 
 export async function readWorking(region: string): Promise<WorkingLine[]> {
   const raw = await claude({
+    feature: "working",
     maxTokens: 2500,
     system:
       "You read handwritten maths working from an image, one step per line top to bottom, and return STRICT JSON only: " +
@@ -121,6 +143,7 @@ export type Excerpt = { n: number; noteTitle: string; page: number; text: string
 export async function askNotes(question: string, excerpts: Excerpt[]): Promise<string> {
   const ctx = excerpts.map((e) => `[${e.n}] ${e.noteTitle} — page ${e.page + 1}\n${e.text}`).join("\n\n");
   return claude({
+    feature: "ask",
     maxTokens: 1500,
     system:
       "You answer a student's question using ONLY their own note excerpts below. Cite sources inline like [1] or [2][3]. " +
@@ -134,6 +157,7 @@ export type PracticeQuestion = { q: string; answer: string; steps?: string[]; to
 export async function practiceQuestions(excerpts: Excerpt[], count: number, difficulty: "same" | "harder"): Promise<PracticeQuestion[]> {
   const ctx = excerpts.map((e) => `[${e.n}] ${e.noteTitle} — page ${e.page + 1}\n${e.text}`).join("\n\n");
   const raw = await claude({
+    feature: "practice",
     maxTokens: 4000,
     system:
       "You write practice exam questions from a student's own notes. Return STRICT JSON only: " +
@@ -150,6 +174,7 @@ export type ReadEquation = { reactants: { coef: number; formula: string }[]; pro
 /** Read chemical equations off a handwritten region. Only transcribes — balancing is checked locally (chem.ts). */
 export async function readChemistry(region: string): Promise<ReadEquation[]> {
   const raw = await claude({
+    feature: "chem",
     maxTokens: 2000,
     system:
       "You read handwritten chemical equations from an image and return STRICT JSON only: " +
@@ -169,6 +194,7 @@ export async function readChemistry(region: string): Promise<ReadEquation[]> {
 /** Transcribe a lassoed region of handwriting to plain text (maths as $LaTeX$). */
 export async function transcribeRegion(region: string): Promise<string> {
   const raw = await claude({
+    feature: "text",
     maxTokens: 1500,
     system:
       "You transcribe handwriting from an image. Output the text only, preserving line breaks. Write mathematics as LaTeX inside $...$ and chemical formulas as written. " +

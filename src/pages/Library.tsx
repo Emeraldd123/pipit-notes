@@ -14,6 +14,8 @@ import { backupIsOverdue, importBackups } from "@/lib/backup";
 import { useBackupFlow } from "@/components/backup-flow";
 import { ensureThumb } from "@/lib/thumbs";
 import { timeAgo } from "@/lib/format";
+import { getBootResult, updateSentinel, whenBooted } from "@/lib/health";
+import { count, logError, timer } from "@/lib/telemetry";
 import { go } from "@/router";
 import { Button, Card, Toast, Wordmark } from "@/components/ui";
 
@@ -24,6 +26,11 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [overdue, setOverdue] = useState(false);
+  const [bootDismissed, setBootDismissed] = useState(false);
+  // The startup checks finish a moment after first paint, so the result must be reactive —
+  // otherwise a data-loss warning detected after the first render would never be shown.
+  const [boot, setBoot] = useState(getBootResult());
+  useEffect(() => { void whenBooted().then((b) => setBoot({ ...b })); }, []);
   const backup = useBackupFlow((m) => { flash(m); setOverdue(false); });
   const pdfRef = useRef<HTMLInputElement>(null);
   const restoreRef = useRef<HTMLInputElement>(null);
@@ -31,6 +38,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
   const reload = useCallback(async () => {
     const [n, nb] = await Promise.all([listNotes(), listNotebooks()]);
     setNotes(n);
+    updateSentinel(n.length); // a copy of the note count outside IndexedDB, to detect a wiped database
     setNotebooks(nb);
     setOverdue(await backupIsOverdue());
   }, []);
@@ -54,6 +62,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
   }, [notes]);
 
   async function newNote() {
+    count("library.newNote");
     const nb = notebook && notebook !== "none" ? notebook : null;
     const n = await createNote({ notebookId: nb });
     go({ name: "note", id: n.id });
@@ -78,6 +87,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+    count("library.importPdf");
     setBusy("Reading PDF…");
     try {
       const pages = await renderPdf(file, (d, t) => setBusy(`Rendering page ${d}/${t}…`));
@@ -94,7 +104,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
       }
       go({ name: "note", id: note.id });
     } catch (err) {
-      console.error(err);
+      logError("pdf-import", err, { bytes: file.size });
       alert("Couldn't import that PDF: " + (err as Error).message);
     } finally {
       setBusy(null);
@@ -105,6 +115,8 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
     const list = (notes ?? []).filter((n) => (id === null ? n.notebookId === null : n.notebookId === id));
     if (!list.length) return flash(`"${name}" has no notes to export.`);
     setBusy("Preparing…");
+    count("export.zip");
+    const stopZip = timer("export.zip.ms");
     try {
       const loaded: { id: string; note: NonNullable<Awaited<ReturnType<typeof loadExportNote>>>["note"] }[] = [];
       const releases: (() => void)[] = [];
@@ -115,9 +127,10 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
       }
       await downloadNotebookZip(name, loaded, (d, t) => setBusy(`Building PDFs ${d}/${t}…`));
       releases.forEach((r) => r());
+      stopZip();
       flash("Done — check your downloads.");
     } catch (err) {
-      console.error(err);
+      logError("export", err, { kind: "notebook-zip", notes: list.length });
       alert("Export failed: " + (err as Error).message);
     } finally {
       setBusy(null);
@@ -128,6 +141,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
     const files = Array.from(e.target.files ?? []);
     e.target.value = "";
     if (!files.length) return;
+    count("library.restore");
     setBusy("Restoring…");
     try {
       const r = await importBackups(files, setBusy);
@@ -201,6 +215,18 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
             <Chip onClick={() => go({ name: "graph" })}>Map</Chip>
           </div>
 
+          {boot.evicted && !bootDismissed && (
+            <Card className="mb-5 border-negative/50 bg-negative/10 px-4 py-3">
+              <p className="text-sm"><strong>Your notes were cleared from this device.</strong> The browser wiped this app&apos;s storage{boot.notesBefore ? ` (you had ${boot.notesBefore} note${boot.notesBefore === 1 ? "" : "s"})` : ""}. Restore from your latest backup: Settings → Restore from backup. To prevent this, add the app to your Home Screen and keep backing up.</p>
+              <div className="mt-2 flex gap-2"><Button variant="primary" onClick={() => go({ name: "settings" })}>Open Settings</Button><Button onClick={() => setBootDismissed(true)}>Dismiss</Button></div>
+            </Card>
+          )}
+          {boot.uncleanExit && !boot.evicted && !bootDismissed && (
+            <Card className="mb-5 border-amber-500/40 bg-amber-500/10 px-4 py-3">
+              <p className="text-sm"><strong>The app closed unexpectedly last time</strong> and some of your latest writing may not have been saved. Check the note you were working on. (A problem report was logged.)</p>
+              <div className="mt-2"><Button onClick={() => setBootDismissed(true)}>Got it</Button></div>
+            </Card>
+          )}
           {overdue && (
             <Card className="mb-5 flex flex-wrap items-center justify-between gap-3 border-amber-500/40 bg-amber-500/10 px-4 py-3">
               <p className="text-sm"><strong>Back up your notes.</strong> Everything lives on this device — a backup in iCloud Drive protects you if the browser ever clears its storage.</p>

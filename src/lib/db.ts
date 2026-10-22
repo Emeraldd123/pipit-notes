@@ -3,7 +3,7 @@
 // can't fail from the network). See lib/backup.ts for the durability story.
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import type {
-  BlockRec, ImageRec, NoteMeta, NotePaper, NotebookRec, PageTextRec, StrokeInput, StrokeRec, VersionRec,
+  BlockRec, ImageRec, LogEntry, NoteMeta, NotePaper, NotebookRec, PageTextRec, StrokeInput, StrokeRec, VersionRec,
 } from "@/types";
 import { newId } from "./ids";
 
@@ -16,29 +16,50 @@ interface Schema extends DBSchema {
   versions: { key: string; value: VersionRec; indexes: { noteId: string } };
   pageText: { key: string; value: PageTextRec; indexes: { noteId: string } };
   meta: { key: string; value: unknown };
+  diag: { key: number; value: LogEntry };
 }
 
 const DB_NAME = "pipit-notes";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const VERSION_KEEP = 6;
 const VERSION_THROTTLE_MS = 10 * 60_000;
+
+// The DB layer can't import the logger (the logger stores into this DB), so it
+// reports lifecycle problems through an injectable hook that main.tsx wires up.
+type DbEvent = { level: "info" | "warn" | "error"; msg: string; data?: Record<string, unknown> };
+let onDbEvent: (e: DbEvent) => void = () => {};
+export function setDbEventHandler(fn: (e: DbEvent) => void): void { onDbEvent = fn; }
 
 let dbp: Promise<IDBPDatabase<Schema>> | null = null;
 export function db(): Promise<IDBPDatabase<Schema>> {
   if (!dbp) {
     dbp = openDB<Schema>(DB_NAME, DB_VERSION, {
-      upgrade(d) {
-        d.createObjectStore("notebooks", { keyPath: "id" });
-        const notes = d.createObjectStore("notes", { keyPath: "id" });
-        notes.createIndex("notebookId", "notebookId");
-        notes.createIndex("updatedAt", "updatedAt");
-        d.createObjectStore("strokes", { keyPath: "id" }).createIndex("noteId", "noteId");
-        d.createObjectStore("images", { keyPath: "id" }).createIndex("noteId", "noteId");
-        d.createObjectStore("blocks", { keyPath: "id" }).createIndex("noteId", "noteId");
-        d.createObjectStore("versions", { keyPath: "id" }).createIndex("noteId", "noteId");
-        d.createObjectStore("pageText", { keyPath: "key" }).createIndex("noteId", "noteId");
-        d.createObjectStore("meta");
+      upgrade(d, oldVersion) {
+        // Each step is guarded by the version it was introduced in, so upgrading an
+        // existing database never tries to re-create a store that's already there.
+        if (oldVersion < 1) {
+          d.createObjectStore("notebooks", { keyPath: "id" });
+          const notes = d.createObjectStore("notes", { keyPath: "id" });
+          notes.createIndex("notebookId", "notebookId");
+          notes.createIndex("updatedAt", "updatedAt");
+          d.createObjectStore("strokes", { keyPath: "id" }).createIndex("noteId", "noteId");
+          d.createObjectStore("images", { keyPath: "id" }).createIndex("noteId", "noteId");
+          d.createObjectStore("blocks", { keyPath: "id" }).createIndex("noteId", "noteId");
+          d.createObjectStore("versions", { keyPath: "id" }).createIndex("noteId", "noteId");
+          d.createObjectStore("pageText", { keyPath: "key" }).createIndex("noteId", "noteId");
+          d.createObjectStore("meta");
+        }
+        if (oldVersion < 2) {
+          d.createObjectStore("diag", { keyPath: "id", autoIncrement: true });
+        }
       },
+      blocked() { onDbEvent({ level: "warn", msg: "database upgrade blocked by another open tab" }); },
+      blocking() { onDbEvent({ level: "warn", msg: "this tab is blocking a database upgrade in another tab" }); },
+      terminated() { onDbEvent({ level: "error", msg: "database connection was terminated by the browser" }); dbp = null; },
+    }).catch((e) => {
+      dbp = null; // allow a later retry
+      onDbEvent({ level: "error", msg: "database failed to open", data: { err: String((e as Error)?.message ?? e), name: (e as Error)?.name } });
+      throw e;
     });
   }
   return dbp;

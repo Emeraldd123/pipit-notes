@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Check, Database, Download, HardDrive, KeyRound, Loader2, Pencil, ShieldCheck, Upload } from "lucide-react";
+import { Activity, ArrowLeft, Check, Database, Download, HardDrive, KeyRound, Loader2, Pencil, ShieldCheck, Upload } from "lucide-react";
 import { go } from "@/router";
 import { importBackups, lastBackupAt } from "@/lib/backup";
 import { useBackupFlow } from "@/components/backup-flow";
@@ -7,8 +7,14 @@ import { requestPersistentStorage } from "@/lib/db";
 import { formatBytes, timeAgo } from "@/lib/format";
 import { aiReady, updateSettings, useSettings } from "@/lib/settings";
 import { claude } from "@/lib/ai";
-import { Button, Card, Toast } from "@/components/ui";
+import { Button, Card, Modal, Toast } from "@/components/ui";
 import { PenTest } from "@/components/pentest";
+import { useDiagFlow } from "@/components/diag-flow";
+import { runHealthChecks } from "@/lib/health";
+import { sendReport } from "@/lib/report";
+import { APP, clearLog, getRecent } from "@/lib/telemetry";
+import type { HealthItem } from "@/lib/telemetry-core";
+import type { LogEntry } from "@/types";
 
 const MODELS = [
   { id: "claude-sonnet-5", label: "Claude Sonnet 5 (recommended)" },
@@ -24,11 +30,17 @@ export function SettingsPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [penTest, setPenTest] = useState(false);
+  const [health, setHealth] = useState<HealthItem[] | null>(null);
+  const [events, setEvents] = useState<LogEntry[] | null>(null);
+  const [onlyProblems, setOnlyProblems] = useState(true);
+  const [sending, setSending] = useState(false);
+  const diag = useDiagFlow((m) => flash(m));
   const restoreRef = useRef<HTMLInputElement>(null);
   const backup = useBackupFlow((m) => { flash(m); setLast(Date.now()); });
   const standalone = typeof window !== "undefined" && (window.matchMedia("(display-mode: standalone)").matches || (navigator as Navigator & { standalone?: boolean }).standalone === true);
 
-  useEffect(() => { void requestPersistentStorage().then(setStorage); void lastBackupAt().then(setLast); }, []);
+  useEffect(() => { void requestPersistentStorage().then(setStorage); void lastBackupAt().then(setLast); void runHealthChecks().then(setHealth); }, []);
+  useEffect(() => { if (events) void getRecent(200, onlyProblems).then(setEvents); }, [onlyProblems]); // eslint-disable-line react-hooks/exhaustive-deps
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast((t) => (t === m ? null : t)), 3500); };
 
   async function onRestore(e: React.ChangeEvent<HTMLInputElement>) {
@@ -43,7 +55,7 @@ export function SettingsPage() {
   }
   async function testKey() {
     setTesting(true);
-    try { await claude({ user: "Reply with the single word: ok", maxTokens: 8 }); flash("Connected — the key works."); }
+    try { await claude({ user: "Reply with the single word: ok", maxTokens: 8, feature: "test" }); flash("Connected — the key works."); }
     catch (e) { flash((e as Error).message); } finally { setTesting(false); }
   }
 
@@ -102,6 +114,37 @@ export function SettingsPage() {
           </div>
         </Section>
 
+        <Section icon={<Activity size={16} />} title="Health & diagnostics">
+          <p className="text-sm text-foreground-muted">A live check of the things that can quietly go wrong, plus a content-free log so problems can be found and fixed.</p>
+          <ul className="mt-3 space-y-2">
+            {health === null ? <li className="text-sm text-foreground-muted">Checking…</li> : health.map((h) => (
+              <li key={h.id} className="flex gap-3 text-sm">
+                <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] text-white ${h.status === "ok" ? "bg-positive" : h.status === "bad" ? "bg-negative" : h.status === "warn" ? "bg-amber-500" : "bg-foreground-muted/60"}`}>{h.status === "ok" ? "✓" : h.status === "bad" ? "✗" : h.status === "warn" ? "!" : "i"}</span>
+                <span className="min-w-0"><strong>{h.label}.</strong> <span className="text-foreground-muted">{h.detail}</span></span>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button onClick={() => { setHealth(null); void runHealthChecks().then(setHealth); }}>Re-check</Button>
+            <Button variant="primary" onClick={diag.start} disabled={diag.building}>{diag.building ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {diag.building ? "Building…" : "Share a diagnostics report"}</Button>
+            <Button onClick={async () => { setEvents(await getRecent(200, true)); setOnlyProblems(true); }}>View recent events</Button>
+            <Button disabled={sending} onClick={async () => { setSending(true); const r = await sendReport("manual", true); setSending(false); flash(r.ok ? "Report sent." : r.status ? `Couldn't send (server said ${r.status}). Is the reporting endpoint deployed?` : `Couldn't send${r.skipped ? ` (${r.skipped})` : ""}.`); }}>{sending ? "Sending…" : "Send a report now"}</Button>
+          </div>
+          <label className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-border px-4 py-3 text-sm">
+            <span><strong>Keep a diagnostics log on this device</strong><span className="block text-xs text-foreground-muted">Errors, timings (saves, opening notes, pen input quality), and which features you use. Counts and timings only.</span></span>
+            <input type="checkbox" checked={s.diagnostics} onChange={(e) => updateSettings({ diagnostics: e.target.checked })} className="h-5 w-5 accent-[var(--primary)]" />
+          </label>
+          <label className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-border px-4 py-3 text-sm">
+            <span><strong>Send reports automatically</strong><span className="block text-xs text-foreground-muted">When something breaks (and about once a day), a content-free report goes to this site&apos;s reporting endpoint. Off = nothing leaves the device unless you share a report yourself.</span></span>
+            <input type="checkbox" checked={s.reportEnabled} disabled={!s.diagnostics} onChange={(e) => updateSettings({ reportEnabled: e.target.checked })} className="h-5 w-5 accent-[var(--primary)]" />
+          </label>
+          <label className="mt-3 block text-xs text-foreground-muted">Reporting endpoint (leave empty for this site&apos;s own)
+            <input value={s.reportUrl} onChange={(e) => updateSettings({ reportUrl: e.target.value })} placeholder="/.netlify/functions/diag" autoCapitalize="off" autoCorrect="off" spellCheck={false}
+              className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2.5 font-mono text-sm text-foreground outline-none focus:border-primary" />
+          </label>
+          <p className="mt-3 text-xs text-foreground-muted"><strong>Never collected:</strong> your notes, handwriting, note titles, PDF contents, code you run, AI questions or answers, or your API key. <strong>Collected:</strong> counts (notes, strokes), timings, error messages, device/browser model, storage status, and which features were used. Version {APP.version} · build {APP.commit}.</p>
+        </Section>
+
         <Section icon={<Pencil size={16} />} title="Pen test">
           <p className="text-sm text-foreground-muted">See exactly what your stylus reports on this device — sample rate, pressure, tilt, and stalls. Handy for checking a new iPad or Pencil.</p>
           <div className="mt-3"><Button onClick={() => setPenTest(true)}>Open pen test</Button></div>
@@ -119,6 +162,29 @@ export function SettingsPage() {
       </div>
       {backup.modal}
       {penTest && <PenTest onClose={() => setPenTest(false)} />}
+      {diag.modal}
+      {events && (
+        <Modal title="Recent events" onClose={() => setEvents(null)} wide>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={onlyProblems} onChange={(e) => setOnlyProblems(e.target.checked)} className="accent-[var(--primary)]" /> Only warnings and errors</label>
+            <Button onClick={async () => { if (confirm("Clear the diagnostics log on this device?")) { await clearLog(); setEvents([]); } }}>Clear log</Button>
+          </div>
+          {events.length === 0 ? <p className="text-sm text-foreground-muted">Nothing logged{onlyProblems ? " — no warnings or errors." : "."}</p> : (
+            <ul className="space-y-1.5">
+              {events.map((e, i) => (
+                <li key={e.id ?? i} className="rounded-lg border border-border px-3 py-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className={`rounded px-1.5 py-0.5 font-semibold uppercase ${e.level === "error" ? "bg-negative/15 text-negative" : e.level === "warn" ? "bg-amber-500/15 text-amber-600" : "bg-surface-secondary text-foreground-muted"}`}>{e.level}</span>
+                    <span className="font-medium">{e.area}</span><span className="text-foreground-muted">{new Date(e.t).toLocaleString()}</span>
+                  </div>
+                  <p className="mt-1 break-words">{e.msg}</p>
+                  {e.data && Object.keys(e.data).length > 0 && <p className="mt-0.5 break-words font-mono text-[11px] text-foreground-muted">{JSON.stringify(e.data)}</p>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Modal>
+      )}
       <Toast msg={toast} />
     </div>
   );

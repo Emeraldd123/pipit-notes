@@ -4,6 +4,7 @@
 // with huge notes.
 import { getMeta, loadNote, setMeta } from "./db";
 import { renderThumbnail } from "./export";
+import { warn } from "./telemetry";
 
 type ThumbRec = { blob: Blob; at: number };
 const key = (id: string) => `thumb:${id}`;
@@ -42,7 +43,8 @@ export function ensureThumb(noteId: string): Promise<Blob | null> {
       if (!blob) return null;
       await saveThumb(noteId, blob);
       return blob;
-    } catch {
+    } catch (e) {
+      warn("thumb", "thumbnail generation failed", { err: String((e as Error)?.message ?? e).slice(0, 120) });
       return null;
     } finally {
       inflight.delete(noteId);

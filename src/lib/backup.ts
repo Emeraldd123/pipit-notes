@@ -4,6 +4,7 @@
 import { zip, unzipSync } from "fflate";
 import { db, getMeta, setMeta } from "./db";
 import { bundleFiles, readBundle, type Bundle, type BundleNote } from "./bundle-format";
+import { count, info, logError, timer, track, warn } from "./telemetry";
 
 const LAST_BACKUP_KEY = "lastBackupAt";
 const BACKUP_NAG_MS = 7 * 24 * 60 * 60 * 1000;
@@ -62,26 +63,36 @@ function stamp(): string {
 
 /** Step 1: build the backup file (can take seconds on a big library — do this BEFORE asking the user to tap Save). */
 export async function buildBackupFile(): Promise<File> {
-  const bytes = await buildBackupZip();
-  return new File([bytes.slice()], `pipit-notes-${stamp()}.pipitnotes.zip`, { type: "application/zip" });
+  const done = timer("backup.ms");
+  try {
+    const bytes = await buildBackupZip();
+    const ms = done();
+    track("backup.bytes", bytes.length);
+    info("backup", "built", { bytes: bytes.length, ms: Math.round(ms) });
+    return new File([bytes.slice()], `pipit-notes-${stamp()}.pipitnotes.zip`, { type: "application/zip" });
+  } catch (e) {
+    logError("backup", e, { stage: "build" });
+    throw e;
+  }
 }
 
 /**
- * Step 2: hand the file to the user — the share sheet (→ Files / iCloud Drive) when
+ * Hand a file to the user — the share sheet (→ Files / iCloud Drive / AirDrop) when
  * available, otherwise a download. Call this DIRECTLY from a tap handler: Safari only
  * allows navigator.share() shortly after a user gesture, which a multi-second build in
  * between would have used up.
  */
-export async function saveBackupFile(file: File): Promise<"shared" | "downloaded" | "cancelled"> {
+export async function shareOrDownload(file: File, title: string): Promise<"shared" | "downloaded" | "cancelled"> {
   const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
   if (nav.canShare?.({ files: [file] })) {
     try {
-      await nav.share({ files: [file], title: "Pipit Notes backup" });
-      await setMeta(LAST_BACKUP_KEY, Date.now());
+      await nav.share({ files: [file], title });
       return "shared";
     } catch (e) {
       if ((e as DOMException)?.name === "AbortError") return "cancelled";
-      // fall through to a plain download
+      // The share sheet failed (commonly: the tap was too long ago, or the file is too big
+      // for the target). Fall back to a download, but record it — it's a real signal.
+      warn("backup", "share sheet failed; falling back to download", { err: String((e as Error)?.name ?? e), bytes: file.size });
     }
   }
   const url = URL.createObjectURL(file);
@@ -92,8 +103,15 @@ export async function saveBackupFile(file: File): Promise<"shared" | "downloaded
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
-  await setMeta(LAST_BACKUP_KEY, Date.now());
   return "downloaded";
+}
+
+/** Step 2 of a backup: share/download the built file and record the time. */
+export async function saveBackupFile(file: File): Promise<"shared" | "downloaded" | "cancelled"> {
+  const how = await shareOrDownload(file, "Pipit Notes backup");
+  count(`backup.${how}`);
+  if (how !== "cancelled") await setMeta(LAST_BACKUP_KEY, Date.now());
+  return how;
 }
 
 export type ImportReport = { notebooks: number; imported: number; skipped: number; replaced: number; errors: string[] };
@@ -102,6 +120,7 @@ export type ImportReport = { notebooks: number; imported: number; skipped: numbe
 export async function importBackups(files: File[], onProgress?: (msg: string) => void): Promise<ImportReport> {
   const report: ImportReport = { notebooks: 0, imported: 0, skipped: 0, replaced: 0, errors: [] };
   const d = await db();
+  const done = timer("restore.ms");
   for (const f of files) {
     try {
       onProgress?.(`Reading ${f.name}…`);
@@ -137,7 +156,10 @@ export async function importBackups(files: File[], onProgress?: (msg: string) =>
       }
     } catch (e) {
       report.errors.push(`${f.name}: ${(e as Error).message}`);
+      logError("restore", e, { bytes: f.size });
     }
   }
+  const ms = done();
+  info("restore", "finished", { files: files.length, imported: report.imported, replaced: report.replaced, skipped: report.skipped, errors: report.errors.length, ms: Math.round(ms) });
   return report;
 }

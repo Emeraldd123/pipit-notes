@@ -9,6 +9,8 @@ import { applyTheme, getSettings } from "./lib/settings";
 
 export function App() {
   const route = useRoute();
+  // Dev-only hook to exercise the crash screen (compiled out of production builds).
+  if (import.meta.env.DEV && location.hash === "#/__crash") throw new Error("test crash (dev only)");
   useEffect(() => { applyTheme(getSettings().theme); }, []);
 
   switch (route.name) {

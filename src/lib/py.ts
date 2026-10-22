@@ -3,6 +3,8 @@
 // service worker caches it so code blocks and the step-checker then work offline.
 // Everything runs on-device — nothing is sent anywhere.
 
+import { count, error as logErr, info, logError, track, warn } from "./telemetry";
+
 const VERSION = "0.29.5";
 const BASE = `https://cdn.jsdelivr.net/pyodide/v${VERSION}/full/`;
 
@@ -49,11 +51,14 @@ export function runPython(code: string, onStatus?: Status): Promise<RunResult> {
 
 async function runNow(code: string, onStatus?: Status): Promise<RunResult> {
   const py = await loadPy(onStatus);
+  const t0 = performance.now();
+  count("python.run");
   const out: string[] = [];
   let error: string | undefined;
   try {
     await py.loadPackagesFromImports(code, { messageCallback: onStatus });
   } catch (e) {
+    warn("python", "a package failed to load", { err: String((e as Error)?.message ?? e).slice(0, 120), online: navigator.onLine });
     onStatus?.(`Couldn't load a package: ${(e as Error).message}`);
   }
   py.setStdout({ batched: (s) => out.push(s) });
