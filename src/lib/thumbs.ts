@@ -12,21 +12,22 @@ export async function saveThumb(noteId: string, blob: Blob): Promise<void> {
   await setMeta(key(noteId), { blob, at: Date.now() } satisfies ThumbRec);
 }
 
-export async function getThumbUrl(noteId: string): Promise<string | null> {
+export async function getThumbBlob(noteId: string): Promise<Blob | null> {
   const rec = await getMeta<ThumbRec>(key(noteId));
-  return rec ? URL.createObjectURL(rec.blob) : null;
+  return rec ? rec.blob : null;
 }
 
 // Serialise generation so a library of 50 notes doesn't decode 50 notes at once.
 let chain: Promise<unknown> = Promise.resolve();
-const inflight = new Map<string, Promise<string | null>>();
+const inflight = new Map<string, Promise<Blob | null>>();
 
-export function ensureThumb(noteId: string): Promise<string | null> {
+/** The thumbnail blob (generated in the background if missing). Callers make their own object URL. */
+export function ensureThumb(noteId: string): Promise<Blob | null> {
   const running = inflight.get(noteId);
   if (running) return running;
   const p = (chain = chain.then(async () => {
     try {
-      const existing = await getThumbUrl(noteId);
+      const existing = await getThumbBlob(noteId);
       if (existing) return existing;
       const loaded = await loadNote(noteId);
       if (!loaded) return null;
@@ -40,13 +41,13 @@ export function ensureThumb(noteId: string): Promise<string | null> {
       loaded.images.forEach((i) => URL.revokeObjectURL(i.data));
       if (!blob) return null;
       await saveThumb(noteId, blob);
-      return URL.createObjectURL(blob);
+      return blob;
     } catch {
       return null;
     } finally {
       inflight.delete(noteId);
     }
-  })) as Promise<string | null>;
+  })) as Promise<Blob | null>;
   inflight.set(noteId, p);
   return p;
 }

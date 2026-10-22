@@ -282,7 +282,11 @@ function NoteTile({ note, notebook, onChange, flash }: { note: NoteMeta; noteboo
   useEffect(() => {
     let alive = true;
     let url: string | null = null;
-    void ensureThumb(note.id).then((u) => { if (alive) { url = u; setThumb(u); } else if (u) URL.revokeObjectURL(u); });
+    void ensureThumb(note.id).then((b) => {
+      if (!alive || !b) return;
+      url = URL.createObjectURL(b); // our own URL — safe to revoke on cleanup
+      setThumb(url);
+    });
     return () => { alive = false; if (url) URL.revokeObjectURL(url); };
   }, [note.id, note.updatedAt]);
 
