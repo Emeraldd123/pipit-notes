@@ -1,5 +1,5 @@
 export type NoteTool = "pencil" | "pen" | "highlighter" | "marker";
-export type NotePaper = "blank" | "ruled" | "grid" | "dotted";
+export type NotePaper = "blank" | "ruled" | "grid" | "dotted" | "cornell";
 
 export type StrokeInput = {
   tool: NoteTool;

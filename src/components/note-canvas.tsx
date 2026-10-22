@@ -451,6 +451,27 @@ export function NoteCanvas({
         ctx.lineTo(PAGE_W, y);
         ctx.stroke();
       }
+    } else if (p === "cornell") {
+      // Cornell layout: header, a cue column on the left, notes area, and a summary strip.
+      const cue = 330, headY = top + GRID * 2.5, sumY = bottom - GRID * 5.5;
+      for (let y = headY + GRID; y < sumY; y += GRID) {
+        ctx.beginPath();
+        ctx.moveTo(cue, y);
+        ctx.lineTo(PAGE_W, y);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = "rgba(60,64,90,0.34)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(0, headY); ctx.lineTo(PAGE_W, headY);
+      ctx.moveTo(cue, headY); ctx.lineTo(cue, sumY);
+      ctx.moveTo(0, sumY); ctx.lineTo(PAGE_W, sumY);
+      ctx.stroke();
+      ctx.font = "22px sans-serif";
+      ctx.fillStyle = "rgba(60,64,90,0.38)";
+      ctx.fillText("Cues", 24, headY + 34);
+      ctx.fillText("Notes", cue + 24, headY + 34);
+      ctx.fillText("Summary", 24, sumY + 34);
     } else if (p === "grid") {
       for (let x = GRID; x < PAGE_W; x += GRID) {
         ctx.beginPath();

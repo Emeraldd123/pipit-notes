@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, ArrowUpRight, Check, CheckCheck, Circle, Code2, Copy, Download, Eraser, FilePlus2, FileText,
   Hand, Highlighter, History, ImagePlus, Lasso, Loader2, Maximize2, Minus, MoreHorizontal, MousePointer2, Paintbrush, Pen,
-  Pencil, Printer, Redo2, Columns2, FileCode2, FlaskConical, Network, Shapes, Scissors, ScanText, Sigma, Square, Trash, Trash2, Type, Undo2, ZoomIn, ZoomOut, Sparkles,
+  Pencil, Printer, Redo2, Columns2, FileCode2, FlaskConical, Network, Shapes, TextCursorInput, Scissors, ScanText, Sigma, Square, Trash, Trash2, Type, Undo2, ZoomIn, ZoomOut, Sparkles,
 } from "lucide-react";
 import { NoteCanvas, type CanvasImage, type NoteCanvasHandle, type Stroke, type Tool } from "@/components/note-canvas";
 import { BlocksLayer, BLOCK_DEFAULTS, Latex } from "@/components/blocks";
@@ -18,7 +18,7 @@ import { saveThumb } from "@/lib/thumbs";
 import { buildNotePdf, safeName, triggerDownload } from "@/lib/export";
 import { loadExportNote } from "@/lib/note-io";
 import { runPython } from "@/lib/py";
-import { AiError, readChemistry, readWorking, recognizeMath, type ReadEquation, type WorkingLine } from "@/lib/ai";
+import { AiError, readChemistry, readWorking, recognizeMath, transcribeRegion, type ReadEquation, type WorkingLine } from "@/lib/ai";
 import { checkEquation, formatEquation, molarMass, type BalanceReport } from "@/lib/chem";
 import { verifyWorking, type StepResult } from "@/lib/stepcheck";
 import { indexNote } from "@/lib/search";
@@ -33,7 +33,7 @@ const COLORS = ["#111827", "#2563eb", "#dc2626", "#16a34a", "#d97706", "#7c3aed"
 const HIGHLIGHTER_COLORS = ["#fde047", "#fca5a5", "#86efac", "#93c5fd", "#f0abfc", "#fdba74"];
 const WIDTHS = [2, 4, 7, 12];
 const PAPERS: { id: NotePaper; label: string }[] = [
-  { id: "blank", label: "Blank" }, { id: "ruled", label: "Ruled" }, { id: "grid", label: "Grid" }, { id: "dotted", label: "Dotted" },
+  { id: "blank", label: "Blank" }, { id: "ruled", label: "Ruled" }, { id: "grid", label: "Grid" }, { id: "dotted", label: "Dotted" }, { id: "cornell", label: "Cornell" },
 ];
 
 type ToolDef = { id: Tool; label: string; icon: React.ReactNode };
@@ -463,6 +463,18 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
       flash("Recognised — edit the LaTeX if anything's off.");
     } catch (e) { flash(e instanceof AiError ? e.message : "Couldn't recognise that: " + (e as Error).message); } finally { setBusy(null); }
   }
+  async function convertSelectionToText() {
+    if (!ai) return flash("Turn on AI in Settings to convert handwriting.");
+    const sel = canvasRef.current?.selectionImage();
+    if (!sel) return flash("Select some handwriting with the lasso first.");
+    setBusy("Reading handwriting…");
+    try {
+      const t = await transcribeRegion(sel.dataUrl);
+      if (!t) return flash("I couldn't read any text there.");
+      addBlock("text", { x: sel.bbox.x, y: sel.bbox.y + sel.bbox.h + 28 }, t);
+      flash("Added as a text block below your handwriting.");
+    } catch (e) { flash(e instanceof AiError ? e.message : "Couldn't convert that: " + (e as Error).message); } finally { setBusy(null); }
+  }
   async function checkChemistry() {
     if (!ai) return flash("Turn on AI in Settings to read equations.");
     const sel = canvasRef.current?.selectionImage();
@@ -542,6 +554,7 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
           <span className="mr-1 font-medium text-foreground-muted">Selection</span>
           <SelBtn onClick={() => canvasRef.current?.recolorSelection(color)}><Paintbrush size={13} /> Recolor</SelBtn>
           <SelBtn onClick={() => canvasRef.current?.duplicateSelection()}><Copy size={13} /> Duplicate</SelBtn>
+          <SelBtn onClick={convertSelectionToText} accent><TextCursorInput size={13} /> To text</SelBtn>
           <SelBtn onClick={recognizeSelection} accent><Sigma size={13} /> Recognise maths</SelBtn>
           <SelBtn onClick={checkSelection} accent><CheckCheck size={13} /> Check working</SelBtn>
           <SelBtn onClick={checkChemistry} accent><FlaskConical size={13} /> Check equation</SelBtn>

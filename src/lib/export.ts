@@ -8,7 +8,7 @@
 // (toolStyle / catmullSeg / tracePath / page + stroke painting). Keep them in
 // sync if the on-screen rendering changes, so exports look like the canvas.
 
-export type NotePaper = "blank" | "ruled" | "grid" | "dotted";
+export type NotePaper = "blank" | "ruled" | "grid" | "dotted" | "cornell";
 export type ExportPoint = { x: number; y: number; p?: number };
 export type ExportStroke = { tool: string; color: string; width: number; points: ExportPoint[] };
 export type ExportImage = { id?: string; data: string; x: number; y: number; width: number; height: number; rotation: number; zIndex: number };
@@ -96,6 +96,24 @@ function paintPaper(ctx: CanvasRenderingContext2D, top: number, paper: NotePaper
   ctx.lineWidth = 1;
   if (paper === "ruled") {
     for (let y = top + GRID * 2; y < bottom; y += GRID) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(PAGE_W, y); ctx.stroke(); }
+    } else if (paper === "cornell") {
+      // Cornell layout: header, a cue column on the left, notes area, and a summary strip.
+      const cue = 330, headY = top + GRID * 2.5, sumY = bottom - GRID * 5.5;
+      for (let y = headY + GRID; y < sumY; y += GRID) {
+        ctx.beginPath(); ctx.moveTo(cue, y); ctx.lineTo(PAGE_W, y); ctx.stroke();
+      }
+      ctx.strokeStyle = "rgba(60,64,90,0.34)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(0, headY); ctx.lineTo(PAGE_W, headY);
+      ctx.moveTo(cue, headY); ctx.lineTo(cue, sumY);
+      ctx.moveTo(0, sumY); ctx.lineTo(PAGE_W, sumY);
+      ctx.stroke();
+      ctx.font = "22px sans-serif";
+      ctx.fillStyle = "rgba(60,64,90,0.38)";
+      ctx.fillText("Cues", 24, headY + 34);
+      ctx.fillText("Notes", cue + 24, headY + 34);
+      ctx.fillText("Summary", 24, sumY + 34);
   } else if (paper === "grid") {
     for (let x = GRID; x < PAGE_W; x += GRID) { ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke(); }
     for (let y = top + GRID; y < bottom; y += GRID) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(PAGE_W, y); ctx.stroke(); }

@@ -165,3 +165,15 @@ export async function readChemistry(region: string): Promise<ReadEquation[]> {
     products: e.products.map((r) => ({ coef: Number(r.coef) || 1, formula: String(r.formula) })),
   }));
 }
+
+/** Transcribe a lassoed region of handwriting to plain text (maths as $LaTeX$). */
+export async function transcribeRegion(region: string): Promise<string> {
+  const raw = await claude({
+    maxTokens: 1500,
+    system:
+      "You transcribe handwriting from an image. Output the text only, preserving line breaks. Write mathematics as LaTeX inside $...$ and chemical formulas as written. " +
+      "No commentary, no code fences.",
+    user: [imageBlock(region), text("Transcribe this.")],
+  });
+  return raw.replace(/^```\w*\s*|\s*```$/g, "").trim();
+}
