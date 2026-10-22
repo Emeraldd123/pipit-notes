@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Download, FileUp, Folder, FolderPlus, Loader2, Network, NotebookPen, Pencil, Pin, Plus, Search, Settings as SettingsIcon, Trash2, Upload,
+  Download, FileUp, Folder, FolderInput, FolderPlus, Loader2, Network, NotebookPen, Pencil, Pin, Plus, Search, Settings as SettingsIcon, Trash2, Upload,
 } from "lucide-react";
 import type { NoteMeta, NotebookRec } from "@/types";
 import {
@@ -247,7 +247,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
           ) : (
             <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4">
               {visible.map((n) => (
-                <NoteTile key={n.id} note={n} notebook={notebooks.find((b) => b.id === n.notebookId)} onChange={reload} flash={flash} />
+                <NoteTile key={n.id} note={n} notebook={notebooks.find((b) => b.id === n.notebookId)} notebooks={notebooks} onChange={reload} flash={flash} />
               ))}
             </div>
           )}
@@ -296,7 +296,7 @@ function Empty({ onNew, onPdf, onRestore, hasAny }: { onNew: () => void; onPdf: 
   );
 }
 
-function NoteTile({ note, notebook, onChange, flash }: { note: NoteMeta; notebook?: NotebookRec; onChange: () => void; flash: (m: string) => void }) {
+function NoteTile({ note, notebook, notebooks, onChange, flash }: { note: NoteMeta; notebook?: NotebookRec; notebooks: NotebookRec[]; onChange: () => void; flash: (m: string) => void }) {
   const [thumb, setThumb] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
@@ -319,10 +319,12 @@ function NoteTile({ note, notebook, onChange, flash }: { note: NoteMeta; noteboo
     flash("Note deleted.");
     onChange();
   }
+  const [moving, setMoving] = useState(false);
+  async function moveTo(id: string | null) { setMoving(false); if (id !== note.notebookId) { await patchNote(note.id, { notebookId: id }, false); flash(id ? "Moved to notebook." : "Moved to Unfiled."); onChange(); } }
   async function togglePin() { await patchNote(note.id, { isPinned: !note.isPinned }, false); onChange(); }
 
   return (
-    <div className="group">
+    <div className="group relative">
       <div className="relative">
         <button onClick={() => go({ name: "note", id: note.id })}
           className="block aspect-[1240/1754] w-full overflow-hidden rounded-xl border border-border bg-white shadow-sm transition-shadow hover:shadow-md">
@@ -330,10 +332,22 @@ function NoteTile({ note, notebook, onChange, flash }: { note: NoteMeta; noteboo
         </button>
         <div className="absolute right-1.5 top-1.5 flex gap-1 opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100">
           <Mini title={note.isPinned ? "Unpin" : "Pin"} onClick={togglePin} active={note.isPinned}><Pin size={12} /></Mini>
+          <Mini title="Move to notebook" onClick={() => setMoving((v) => !v)} active={moving}><FolderInput size={12} /></Mini>
           <Mini title="Rename" onClick={rename}><Pencil size={12} /></Mini>
           <Mini title="Delete" onClick={remove} danger><Trash2 size={12} /></Mini>
         </div>
       </div>
+      {moving && (
+        <div className="absolute left-1.5 top-10 z-20 max-h-56 w-44 overflow-auto rounded-xl border border-border bg-surface p-1 text-sm shadow-xl">
+          <p className="px-2 py-1 text-xs text-foreground-muted">Move to…</p>
+          {[{ id: null as string | null, name: "Unfiled", color: "" }, ...notebooks].map((b) => (
+            <button key={b.id ?? "none"} onClick={() => moveTo(b.id)} className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-surface-secondary ${b.id === note.notebookId ? "font-semibold" : ""}`}>
+              {b.color ? <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: b.color }} /> : <span className="h-2 w-2" />}
+              <span className="truncate">{b.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
       <div className="mt-2 px-0.5">
         <p className="truncate text-sm font-medium">{note.title}</p>
         <p className="flex items-center gap-1.5 truncate text-xs text-foreground-muted">

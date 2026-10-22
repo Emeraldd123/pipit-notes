@@ -5,7 +5,7 @@ import { DEFAULT_VIEW, DEFAULT_VIEW3D, GRAPH_COLORS, drawGraph2D, drawSurface, i
 const HEIGHT = 300;
 
 /** Plots the expression rows of a graph block. Drag pans (2D) / rotates (3D); pinch or +/- zooms. */
-export function GraphCanvas({ text, width, interactive }: { text: string; width: number; interactive: boolean }) {
+export function GraphCanvas({ text, width, interactive, onEdit }: { text: string; width: number; interactive: boolean; onEdit?: () => void }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const rows = useMemo(() => parseRows(text), [text]);
   const three = is3D(rows);
@@ -67,7 +67,7 @@ export function GraphCanvas({ text, width, interactive }: { text: string; width:
         </div>
       </div>
       {rows.length > 0 && (
-        <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border/70 px-4 py-2" style={{ fontSize: 15 }}>
+        <div className="flex cursor-text flex-wrap gap-x-4 gap-y-1 border-t border-border/70 px-4 py-2" style={{ fontSize: 15, pointerEvents: "auto" }} onClick={onEdit} title="Tap to edit the equations">
           {rows.map((r, i) => (
             <span key={i} className={r.error ? "text-negative" : "text-foreground-muted"}>
               <span style={{ color: r.error ? undefined : GRAPH_COLORS[i % GRAPH_COLORS.length] }}>●</span> {r.src}{r.error ? ` — ${r.error}` : ""}

@@ -72,7 +72,7 @@ function BlockView({
   b: BlockRec; interactive: boolean; scaleRef: React.RefObject<number>; running: boolean;
   onChange: (b: BlockRec) => void; onDelete: (id: string) => void; onRun: (b: BlockRec) => void;
 }) {
-  const [editing, setEditing] = useState((b.kind !== "math" && b.kind !== "graph") || !b.text);
+  const [editing, setEditing] = useState((b.kind !== "math" && b.kind !== "graph") || !b.text || (b.kind === "graph" && Date.now() - b.createdAt < 5000));
   const drag = useRef<{ sx: number; sy: number; x: number; y: number } | null>(null);
   const size = useRef<{ sx: number; sy: number; w: number; h: number } | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -159,10 +159,10 @@ function BlockView({
             autoCorrect="off"
             placeholder={b.kind === "graph" ? "y = x^2 + 3x   (one equation per line)" : b.kind === "code" ? "# python — sympy, numpy, matplotlib available" : b.kind === "math" ? "LaTeX, e.g. \\frac{dy}{dx} = 2x + 3" : "Type here…"}
             className={`block w-full resize-none bg-transparent px-4 py-3 outline-none ${b.kind === "code" || b.kind === "graph" ? "font-mono" : ""}`}
-            style={{ minHeight: 64, fontSize: fontPx, lineHeight: 1.45, userSelect: "text", WebkitUserSelect: "text", pointerEvents: pe, fontFamily: b.kind === "code" ? "ui-monospace, SFMono-Regular, Menlo, monospace" : undefined }}
+            style={{ minHeight: 64, fontSize: fontPx, lineHeight: 1.45, userSelect: "text", WebkitUserSelect: "text", pointerEvents: b.kind === "graph" ? "auto" : pe, fontFamily: b.kind === "code" ? "ui-monospace, SFMono-Regular, Menlo, monospace" : undefined }}
           />
         )}
-        {b.kind === "graph" && <GraphCanvas text={b.text} width={b.width} interactive={interactive} />}
+        {b.kind === "graph" && <GraphCanvas text={b.text} width={b.width} interactive={interactive} onEdit={() => setEditing(true)} />}
         {b.kind === "math" && editing && b.text && (
           <div className="overflow-x-auto border-t border-border/70 px-4 py-2 text-foreground-muted" style={{ fontSize: 22 }}><Latex source={b.text} /></div>
         )}
