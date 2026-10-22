@@ -16,3 +16,9 @@
   for = "/sw.js"
   [headers.values]
     Cache-Control = "no-cache"
+
+# Serve the PWA manifest with its proper type (Netlify defaults .webmanifest to octet-stream).
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Content-Type = "application/manifest+json"
