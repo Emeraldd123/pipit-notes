@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Check, Database, Download, HardDrive, KeyRound, Loader2, ShieldCheck, Upload } from "lucide-react";
 import { go } from "@/router";
-import { backupNow, importBackups, lastBackupAt } from "@/lib/backup";
+import { importBackups, lastBackupAt } from "@/lib/backup";
+import { useBackupFlow } from "@/components/backup-flow";
 import { requestPersistentStorage } from "@/lib/db";
 import { formatBytes, timeAgo } from "@/lib/format";
 import { aiReady, updateSettings, useSettings } from "@/lib/settings";
@@ -22,18 +23,12 @@ export function SettingsPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const restoreRef = useRef<HTMLInputElement>(null);
+  const backup = useBackupFlow((m) => { flash(m); setLast(Date.now()); });
   const standalone = typeof window !== "undefined" && (window.matchMedia("(display-mode: standalone)").matches || (navigator as Navigator & { standalone?: boolean }).standalone === true);
 
   useEffect(() => { void requestPersistentStorage().then(setStorage); void lastBackupAt().then(setLast); }, []);
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast((t) => (t === m ? null : t)), 3500); };
 
-  async function doBackup() {
-    setBusy("Building backup…");
-    try {
-      const r = await backupNow();
-      if (r.ok) { flash(`Backup ${r.how === "shared" ? "saved" : "downloaded"} (${formatBytes(r.bytes)}).`); setLast(Date.now()); }
-    } catch (e) { flash("Backup failed: " + (e as Error).message); } finally { setBusy(null); }
-  }
   async function onRestore(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
     e.target.value = "";
@@ -71,7 +66,7 @@ export function SettingsPage() {
             </Step>
           </ol>
           <div className="mt-4 flex flex-wrap gap-2">
-            <Button variant="primary" onClick={doBackup} disabled={!!busy}><Upload size={14} /> Back up now</Button>
+            <Button variant="primary" onClick={backup.start} disabled={!!busy || backup.building}>{backup.building ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {backup.building ? "Building…" : "Back up now"}</Button>
             <Button onClick={() => restoreRef.current?.click()} disabled={!!busy}><Download size={14} /> Restore from backup</Button>
           </div>
           {busy && <p className="mt-3 flex items-center gap-2 text-xs text-foreground-muted"><Loader2 size={12} className="animate-spin" /> {busy}</p>}
@@ -115,6 +110,7 @@ export function SettingsPage() {
           <p className="text-sm text-foreground-muted">Pipit Notes is a private, offline-first notebook. There is no account and no server: everything is stored on this device. Code blocks and step-checking run locally (Python in WebAssembly).</p>
         </Section>
       </div>
+      {backup.modal}
       <Toast msg={toast} />
     </div>
   );

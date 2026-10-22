@@ -10,7 +10,8 @@ import { renderPdf } from "@/lib/pdf";
 import { PAGE_H, PAGE_W, pageTop } from "@/lib/page";
 import { downloadNotebookZip } from "@/lib/export";
 import { loadExportNote } from "@/lib/note-io";
-import { backupIsOverdue, backupNow, importBackups } from "@/lib/backup";
+import { backupIsOverdue, importBackups } from "@/lib/backup";
+import { useBackupFlow } from "@/components/backup-flow";
 import { ensureThumb } from "@/lib/thumbs";
 import { timeAgo } from "@/lib/format";
 import { go } from "@/router";
@@ -23,6 +24,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [overdue, setOverdue] = useState(false);
+  const backup = useBackupFlow((m) => { flash(m); setOverdue(false); });
   const pdfRef = useRef<HTMLInputElement>(null);
   const restoreRef = useRef<HTMLInputElement>(null);
 
@@ -139,18 +141,6 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
     }
   }
 
-  async function doBackup() {
-    setBusy("Building backup…");
-    try {
-      const r = await backupNow();
-      if (r.ok) { flash(r.how === "shared" ? "Backup saved." : "Backup downloaded — keep it somewhere safe."); setOverdue(false); }
-    } catch (err) {
-      alert("Backup failed: " + (err as Error).message);
-    } finally {
-      setBusy(null);
-    }
-  }
-
   const activeName = notebook === "none" ? "Unfiled" : notebook ? notebooks.find((n) => n.id === notebook)?.name ?? "Notebook" : "All notes";
 
   return (
@@ -214,7 +204,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
           {overdue && (
             <Card className="mb-5 flex flex-wrap items-center justify-between gap-3 border-amber-500/40 bg-amber-500/10 px-4 py-3">
               <p className="text-sm"><strong>Back up your notes.</strong> Everything lives on this device — a backup in iCloud Drive protects you if the browser ever clears its storage.</p>
-              <Button onClick={doBackup} variant="primary"><Upload size={14} /> Back up now</Button>
+              <Button onClick={backup.start} disabled={backup.building} variant="primary">{backup.building ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {backup.building ? "Building…" : "Back up now"}</Button>
             </Card>
           )}
 
@@ -240,6 +230,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
 
       <input ref={pdfRef} type="file" accept="application/pdf" hidden onChange={onImportPdf} />
       <input ref={restoreRef} type="file" accept=".zip,application/zip" multiple hidden onChange={onRestore} />
+      {backup.modal}
       <Toast msg={toast} />
     </div>
   );

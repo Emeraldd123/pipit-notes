@@ -60,33 +60,40 @@ function stamp(): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-/** Save the backup: the iOS share sheet (→ Files / iCloud Drive) when available, else a download. */
-export async function backupNow(): Promise<{ ok: boolean; how: "shared" | "downloaded" | "cancelled"; bytes: number }> {
+/** Step 1: build the backup file (can take seconds on a big library — do this BEFORE asking the user to tap Save). */
+export async function buildBackupFile(): Promise<File> {
   const bytes = await buildBackupZip();
-  const name = `pipit-notes-${stamp()}.pipitnotes.zip`;
-  const blob = new Blob([bytes.slice()], { type: "application/zip" });
-  const file = new File([blob], name, { type: "application/zip" });
+  return new File([bytes.slice()], `pipit-notes-${stamp()}.pipitnotes.zip`, { type: "application/zip" });
+}
+
+/**
+ * Step 2: hand the file to the user — the share sheet (→ Files / iCloud Drive) when
+ * available, otherwise a download. Call this DIRECTLY from a tap handler: Safari only
+ * allows navigator.share() shortly after a user gesture, which a multi-second build in
+ * between would have used up.
+ */
+export async function saveBackupFile(file: File): Promise<"shared" | "downloaded" | "cancelled"> {
   const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
   if (nav.canShare?.({ files: [file] })) {
     try {
       await nav.share({ files: [file], title: "Pipit Notes backup" });
       await setMeta(LAST_BACKUP_KEY, Date.now());
-      return { ok: true, how: "shared", bytes: bytes.length };
+      return "shared";
     } catch (e) {
-      if ((e as DOMException)?.name === "AbortError") return { ok: false, how: "cancelled", bytes: bytes.length };
+      if ((e as DOMException)?.name === "AbortError") return "cancelled";
       // fall through to a plain download
     }
   }
-  const url = URL.createObjectURL(blob);
+  const url = URL.createObjectURL(file);
   const a = document.createElement("a");
   a.href = url;
-  a.download = name;
+  a.download = file.name;
   document.body.appendChild(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
   await setMeta(LAST_BACKUP_KEY, Date.now());
-  return { ok: true, how: "downloaded", bytes: bytes.length };
+  return "downloaded";
 }
 
 export type ImportReport = { notebooks: number; imported: number; skipped: number; replaced: number; errors: string[] };

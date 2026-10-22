@@ -90,3 +90,8 @@ button:disabled { cursor: default; }
 }
 
 ::selection { background: color-mix(in srgb, var(--primary) 28%, transparent); }
+
+/* iOS Safari zooms the whole page when a focused input's font is under 16px. */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="color"]):not([type="file"]), select { font-size: 16px; }
+}
