@@ -4,11 +4,12 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview",
-    "typecheck": "tsc -b --noEmit",
-    "test": "node --test \"tests/*.test.mjs\""
+    "dev": "node node_modules/vite/bin/vite.js",
+    "build": "node node_modules/typescript/bin/tsc --noEmit && node node_modules/vite/bin/vite.js build",
+    "preview": "node node_modules/vite/bin/vite.js preview",
+    "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
+    "test": "node --test \"tests/*.test.mjs\"",
+    "icons": "node tools/make-icons.mjs"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",
