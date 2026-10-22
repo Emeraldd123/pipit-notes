@@ -26,7 +26,7 @@ export function App() {
     case "graph": return <GraphPage />;
     case "search": return <SearchPage />;
     case "settings": return <SettingsPage />;
-    case "study": return <StudyPage />;
+    case "study": return <StudyPage view={route.view} />;
     default: return <Library notebook={route.notebook} q={route.q} />;
   }
 }

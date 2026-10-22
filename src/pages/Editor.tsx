@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, ArrowLeftRight, ArrowUpRight, Check, CheckCheck, Circle, Code2, Copy, Download, Eraser, FilePlus2, FileText,
-  Compass, Grid3x3, Hand, Share2, Highlighter, History, Layers, Ruler, Waves, Lightbulb, LineChart, ListChecks, ImagePlus, Lasso, Loader2, Maximize2, Minus, MoreHorizontal, MousePointer2, Paintbrush, Pen,
+  Compass, GraduationCap, Grid3x3, Hand, Layers as LayersIcon, Share2, Highlighter, History, Layers, Ruler, Waves, Lightbulb, LineChart, ListChecks, ImagePlus, Lasso, Loader2, Maximize2, Minus, MoreHorizontal, MousePointer2, Paintbrush, Pen,
   Pencil, Printer, Redo2, Columns2, FileCode2, FlaskConical, Network, Shapes, TextCursorInput, Wand2, Scissors, ScanText, Sigma, Square, Trash, Trash2, Type, Undo2, ZoomIn, ZoomOut, Sparkles,
 } from "lucide-react";
 import { NoteCanvas, type CanvasImage, type NoteCanvasHandle, type Stroke, type Tool } from "@/components/note-canvas";
@@ -33,6 +33,9 @@ import { checkEquation, formatEquation, molarMass, type BalanceReport } from "@/
 import { verifyWorking, type StepResult } from "@/lib/stepcheck";
 import { indexNote } from "@/lib/search";
 import { deleteMapping, duplicateMapping, insertBlankMapping, moveMapping, type PageMapping } from "@/lib/page-ops";
+import { addMistakes, putCards } from "@/lib/study-db";
+import { cardFromMistake, makeCardsFromExplanation, makeCardsFromRegion } from "@/lib/study-actions";
+import { plainMath } from "@/lib/plain-math";
 import { mergeReview, summarize, type Issue } from "@/lib/review-core";
 import { buildLatexDocument } from "@/lib/latex";
 import { buildPageSvg } from "@/lib/svg";
@@ -637,6 +640,47 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // --- study hooks: flashcards, pinned explanations ------------------------------------------------------------------
+  const pageOfRect = (y: number) => Math.max(0, Math.min(pageCount - 1, Math.floor(y / (PAGE_H + PAGE_GAP))));
+  async function cardsFromSelection() {
+    if (!ai) return flash("Turn on AI in Settings to make flashcards.");
+    const sel = canvasRef.current?.selectionImage();
+    if (!sel) return flash("Select some handwriting with the lasso first.");
+    setBusy("Writing flashcards…");
+    try {
+      const n = await makeCardsFromRegion(sel.dataUrl, { notebookId: note.meta.notebookId, noteId, page: pageOfRect(sel.bbox.y) });
+      flash(n ? `Added ${n} flashcard${n === 1 ? "" : "s"} — find them in Study.` : "No new flashcards from that (you may already have them).");
+    } catch (e) { failed("ai", e, "Couldn't make flashcards"); } finally { setBusy(null); }
+  }
+  function pinExplanation() {
+    const d = explain?.data;
+    if (!d || !explainRect) return;
+    const lines = [d.concept.toUpperCase(), plainMath(d.explanation)];
+    if (d.shortfalls.length) lines.push("", "Where I went wrong:", ...d.shortfalls.map((s) => `• ${plainMath(s.what)}${s.fix ? ` → ${plainMath(s.fix)}` : ""}`));
+    for (const t of explain!.turns) lines.push("", `${t.role === "user" ? "Q: " : "A: "}${plainMath(t.content)}`);
+    addBlock("text", { x: Math.max(20, explainRect.x), y: explainRect.y + explainRect.h + 24 }, lines.join("\n"));
+    count("explain.pinned");
+    flash("Pinned below what you circled — edit or move it like any text block.");
+  }
+  async function explanationToCards() {
+    const d = explain?.data;
+    if (!d || !explainRect) return;
+    if (!ai) return flash("Turn on AI in Settings to make flashcards.");
+    setBusy("Writing flashcards…");
+    try {
+      const body = [d.explanation, ...d.shortfalls.map((s) => `${s.what} ${s.fix}`)].join("\n");
+      const n = await makeCardsFromExplanation(d.concept, body, { notebookId: note.meta.notebookId, noteId, page: pageOfRect(explainRect.y) });
+      flash(n ? `Added ${n} flashcard${n === 1 ? "" : "s"} — find them in Study.` : "You already have cards like these.");
+    } catch (e) { failed("ai", e, "Couldn't make flashcards"); } finally { setBusy(null); }
+  }
+  async function issueToCard(i: Issue) {
+    try {
+      await putCards([cardFromMistake({ read: i.read, problem: i.problem, fix: i.fix, why: i.why, noteId, page: i.page, kind: i.kind }, note.meta.notebookId)]);
+      count("review.card");
+      flash("Flashcard added to Study.");
+    } catch (e) { failed("study", e, "Couldn't add the flashcard"); }
+  }
+
   // --- graph it: read handwritten equations, drop a graph block beside them ---------------------
   async function graphSelection() {
     if (!ai) return flash("Turn on AI in Settings to read handwritten equations.");
@@ -717,7 +761,8 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
       flash(failedPages.length ? `Couldn't review page${failedPages.length === 1 ? "" : "s"} ${failedPages.map((x) => x + 1).join(", ")} — try again.` : `No mistakes found on ${pages.length} page${pages.length === 1 ? "" : "s"}.`);
       return;
     }
-    flash(summarize(issues));
+    flash(`${summarize(issues)} — saved to your mistake log`);
+    void addMistakes(issues.map((x) => ({ noteId, page: x.page, kind: x.kind, read: x.read, problem: x.problem, why: x.why, fix: x.fix }))).catch((e) => logError("study", e));
     setReview({ issues, i: 0, fixed: new Set(), failedPages });
     setTool("hand");
   }
@@ -861,6 +906,7 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
           <SelBtn onClick={convertSelectionToText} accent><TextCursorInput size={13} /> To text</SelBtn>
           <SelBtn onClick={recognizeSelection} accent><Sigma size={13} /> Recognise maths</SelBtn>
           <SelBtn onClick={checkSelection} accent><CheckCheck size={13} /> Check working</SelBtn>
+          <SelBtn onClick={cardsFromSelection} accent><LayersIcon size={13} /> Flashcards</SelBtn>
           <SelBtn onClick={explainSelection} accent><Lightbulb size={13} /> Explain</SelBtn>
           <SelBtn onClick={graphSelection} accent><LineChart size={13} /> Graph it</SelBtn>
           <SelBtn onClick={checkChemistry} accent><FlaskConical size={13} /> Check equation</SelBtn>
@@ -976,8 +1022,8 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
               onDelete={(p) => { if (confirm(`Delete page ${p + 1}? Its writing goes with it (version history can bring it back).`)) void applyPageOp(deleteMapping(pageCount, p), `Deleted page ${p + 1}.`); }}
               onClose={() => setPagesOpen(false)} />
           )}
-          {explain && <ExplainPanel state={explain} onAsk={askFollowUp} onClose={closeExplain} />}
-          {review && <ReviewBar review={review} onGo={goIssue} onToggleFixed={toggleFixed} onDismiss={dismissIssue} onClose={() => setReview(null)} />}
+          {explain && <ExplainPanel state={explain} onAsk={askFollowUp} onClose={closeExplain} onPin={pinExplanation} onCards={explanationToCards} />}
+          {review && <ReviewBar review={review} onGo={goIssue} onToggleFixed={toggleFixed} onDismiss={dismissIssue} onClose={() => setReview(null)} onCard={issueToCard} />}
 
           {scrub !== null && (
             <div className="absolute bottom-16 left-1/2 z-20 flex -translate-x-1/2 flex-col items-center gap-1.5 rounded-xl border border-border bg-surface/95 p-2 shadow-xl backdrop-blur">

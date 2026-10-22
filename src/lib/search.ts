@@ -93,7 +93,7 @@ export async function corpusExcerpts(noteIds: string[] | null, maxChars = 26000)
   for (const t of (texts as PageTextRec[]).filter((x) => allowed.has(x.noteId) && x.text.trim().length > 40).sort((a, b) => a.noteId.localeCompare(b.noteId) || a.page - b.page)) {
     if (used + t.text.length > maxChars) break;
     used += t.text.length;
-    out.push({ n: out.length + 1, noteTitle: title.get(t.noteId) ?? "Note", page: t.page, text: t.text });
+    out.push({ n: out.length + 1, noteTitle: title.get(t.noteId) ?? "Note", page: t.page, text: t.text, noteId: t.noteId });
   }
   return out;
 }

@@ -139,7 +139,7 @@ export async function readWorking(region: string): Promise<WorkingLine[]> {
   return (parsed.lines ?? []).map((l) => ({ latex: l.latex ?? "", sympy: l.sympy ?? "", kind: l.kind ?? "text" }));
 }
 
-export type Excerpt = { n: number; noteTitle: string; page: number; text: string };
+export type Excerpt = { n: number; noteTitle: string; page: number; text: string; noteId?: string };
 
 export async function askNotes(question: string, excerpts: Excerpt[]): Promise<string> {
   const ctx = excerpts.map((e) => `[${e.n}] ${e.noteTitle} — page ${e.page + 1}\n${e.text}`).join("\n\n");

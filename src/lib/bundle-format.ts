@@ -25,7 +25,9 @@ export type BundleNote = {
   pageText: PageTextRec[];
   images: BundleImage[];
 };
-export type Bundle = { notebooks: NotebookRec[]; notes: BundleNote[] };
+/** Study data (flashcards, mistake log, saved exams, XP/streak) — opaque JSON to the bundle layer. */
+export type BundleStudy = { cards: unknown[]; mistakes: unknown[]; exams: unknown[]; progress: unknown | null };
+export type Bundle = { notebooks: NotebookRec[]; notes: BundleNote[]; study?: BundleStudy };
 
 const EXT: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" };
 const MIME: Record<string, string> = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif" };
@@ -50,6 +52,7 @@ export function bundleFiles(bundle: Bundle): Record<string, Uint8Array> {
     for (const im of n.images) files[`images/${n.meta.id}/${im.id}.${EXT[im.mime] ?? "bin"}`] = im.bytes;
   }
   files["library.json"] = json({ notebooks: bundle.notebooks });
+  if (bundle.study) files["study.json"] = json(bundle.study);
   files["manifest.json"] = json({
     format: BUNDLE_FORMAT, version: BUNDLE_VERSION, exportedAt: Date.now(),
     notebooks: bundle.notebooks.length, notes: bundle.notes.length, strokes, images,
@@ -78,5 +81,12 @@ export function readBundle(files: Record<string, Uint8Array>): Bundle {
     }
     notes.push({ meta: raw.meta, strokes: raw.strokes ?? [], blocks: raw.blocks ?? [], pageText: raw.pageText ?? [], images });
   }
-  return { notebooks: lib.notebooks ?? [], notes };
+  let study: BundleStudy | undefined;
+  if (files["study.json"]) {
+    try {
+      const raw = JSON.parse(strFromU8(files["study.json"]));
+      study = { cards: raw.cards ?? [], mistakes: raw.mistakes ?? [], exams: raw.exams ?? [], progress: raw.progress ?? null };
+    } catch { /* a damaged study file must not block restoring notes */ }
+  }
+  return { notebooks: lib.notebooks ?? [], notes, study };
 }

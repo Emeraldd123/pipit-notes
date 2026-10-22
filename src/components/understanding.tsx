@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Check, ListChecks, Loader2, Send, X } from "lucide-react";
+import { BookmarkPlus, ChevronLeft, ChevronRight, Check, Layers, ListChecks, Loader2, Pin, Send, X } from "lucide-react";
 import { Button, Modal } from "@/components/ui";
 import { RichText } from "@/components/blocks";
 import type { Explanation } from "@/lib/ai";
@@ -50,7 +50,7 @@ export type ExplainState = {
   asking: boolean;
 };
 
-export function ExplainPanel({ state, onAsk, onClose }: { state: ExplainState; onAsk: (q: string) => void; onClose: () => void }) {
+export function ExplainPanel({ state, onAsk, onClose, onPin, onCards }: { state: ExplainState; onAsk: (q: string) => void; onClose: () => void; onPin: () => void; onCards: () => void }) {
   const [q, setQ] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => { endRef.current?.scrollIntoView({ block: "nearest" }); }, [state.turns.length, state.asking, state.status]);
@@ -60,7 +60,9 @@ export function ExplainPanel({ state, onAsk, onClose }: { state: ExplainState; o
     <div className="absolute inset-x-0 bottom-0 z-30 flex max-h-[58%] justify-center px-3 pb-3">
       <div className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl">
         <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
-          <h3 className="text-sm font-semibold">{d ? d.concept : "Explaining…"}</h3>
+          <h3 className="min-w-0 flex-1 truncate text-sm font-semibold">{d ? d.concept : "Explaining…"}</h3>
+          {d && <button onClick={onPin} className="mr-1 flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-primary hover:bg-primary/10" title="Keep this explanation on the page next to your writing"><Pin size={13} /> Pin to note</button>}
+          {d && <button onClick={onCards} className="mr-2 flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-primary hover:bg-primary/10" title="Turn this into flashcards"><Layers size={13} /> Flashcards</button>}
           <button onClick={onClose} className="rounded-md p-1 text-foreground-muted hover:bg-surface-secondary" title="Close"><X size={16} /></button>
         </div>
         <div className="min-h-0 flex-1 space-y-3 overflow-auto px-4 py-3 text-sm leading-relaxed">
@@ -150,8 +152,8 @@ export function ReviewSetup({ pageCount, currentPage, thumb, onStart, onClose }:
 
 export type ReviewState = { issues: Issue[]; i: number; fixed: Set<string>; failedPages: number[] };
 
-export function ReviewBar({ review, onGo, onToggleFixed, onDismiss, onClose }: {
-  review: ReviewState; onGo: (i: number) => void; onToggleFixed: (id: string) => void; onDismiss: (id: string) => void; onClose: () => void;
+export function ReviewBar({ review, onGo, onToggleFixed, onDismiss, onClose, onCard }: {
+  review: ReviewState; onGo: (i: number) => void; onToggleFixed: (id: string) => void; onDismiss: (id: string) => void; onClose: () => void; onCard: (i: Issue) => void;
 }) {
   const [list, setList] = useState(false);
   const { issues, i } = review;
@@ -202,6 +204,7 @@ export function ReviewBar({ review, onGo, onToggleFixed, onDismiss, onClose }: {
           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-3 py-2">
             <div className="flex gap-1.5">
               <Button onClick={() => onToggleFixed(it.id)}><Check size={14} /> {fixed ? "Unmark" : "Mark fixed"}</Button>
+              <Button variant="ghost" onClick={() => onCard(it)} title="Add a flashcard so you remember this one"><BookmarkPlus size={14} /> Flashcard</Button>
               <Button variant="ghost" onClick={() => onDismiss(it.id)} title="Remove this one if I got it wrong">Not a mistake</Button>
             </div>
             <Button variant="primary" onClick={() => (i < issues.length - 1 ? onGo(i + 1) : onClose())}>{i < issues.length - 1 ? "Next" : "Finish"} <ChevronRight size={14} /></Button>

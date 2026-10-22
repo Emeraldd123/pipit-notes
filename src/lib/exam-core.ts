@@ -50,10 +50,10 @@ function normalizePart(raw: unknown, i: number, qid: string, single: boolean): P
     if (value === null || value === undefined || !Number.isFinite(value)) type = "short";
     else numeric = { value, tol: isNum(nv?.tol) && nv!.tol > 0 && nv!.tol < 0.5 ? nv!.tol : 0.02, unit: s(nv?.unit, 20) || undefined };
   }
-  const figure = r.figure ? normalizeFigure(r.figure) ?? undefined : undefined;
+  const figure = !single && r.figure ? normalizeFigure(r.figure) ?? undefined : undefined;   // a single-part question keeps its figure on the question
   const scheme = (Array.isArray(r.scheme) ? (r.scheme as unknown[]) : []).map((x) => s(x, 300)).filter(Boolean).slice(0, 8);
   return {
-    id: `${qid}.${i}`, label: single ? "" : s(r.label, 4) || String.fromCharCode(97 + i), prompt: prompt || "Answer the question above.",
+    id: `${qid}.${i}`, label: single ? "" : s(r.label, 4) || String.fromCharCode(97 + i), prompt: prompt || (single ? "" : "Answer the question above."),
     type, marks: marks(r.marks, type === "working" ? 3 : 1), options, correct,
     answer: s(r.answer, 1200) || (options && correct !== undefined && type === "mcq" ? options[correct] : ""),
     numeric, scheme, figure,
@@ -75,7 +75,9 @@ export function normalizeExam(raw: unknown, now = Date.now(), id = `exam-${now}`
       const single = rawParts.length === 1;
       const parts = rawParts.map((p, i) => normalizePart(p, i, qid, single)).filter((p): p is Part => !!p);
       if (!parts.length || (!stem && !parts[0].prompt)) { qn--; continue; }
-      const figure = rq?.figure ? normalizeFigure(rq.figure) ?? undefined : undefined;
+      // a lone part's figure is lifted to the question so it is shown once, above the answer box
+      const lone = single && rawParts[0] !== rq ? (rawParts[0] as Record<string, unknown> | null)?.figure : undefined;
+      const figure: Figure | undefined = (rq?.figure ? normalizeFigure(rq.figure) : null) ?? (lone ? normalizeFigure(lone) : null) ?? undefined;
       questions.push({ id: qid, topic: s(rq?.topic, 40) || undefined, stem: stem || parts[0].prompt, figure, parts, marks: parts.reduce((a, p) => a + p.marks, 0) });
       if (single && stem && parts[0].prompt === stem) parts[0].prompt = "";
     }

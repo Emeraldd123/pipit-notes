@@ -286,7 +286,7 @@ export function drawChart(f: ChartFigure, W = 520, H = 340): Drawing {
       });
     }
   }
-  if (f.series.length > 1 || (f.series[0].name && f.kind !== "pie")) {
+  if (f.series.length > 1 || f.series[0].name) {
     f.series.forEach((s, i) => { if (s.name) prims.push({ t: "text", x: L + 10, y: T + 14 + i * 16, s: `■ ${s.name}`, size: 12, fill: PALETTE[i % PALETTE.length], bold: true }); });
   }
   return { w: W, h: H, prims };

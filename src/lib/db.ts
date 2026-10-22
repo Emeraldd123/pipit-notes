@@ -7,6 +7,8 @@ import type {
 } from "@/types";
 import { newId } from "./ids";
 import { pageOfY, remapItems, type PageMapping } from "./page-ops.ts";
+import type { Card } from "./study-core.ts";
+import type { Exam, ExamResult, PartAnswer } from "./exam-core.ts";
 
 interface Schema extends DBSchema {
   notebooks: { key: string; value: NotebookRec };
@@ -18,10 +20,21 @@ interface Schema extends DBSchema {
   pageText: { key: string; value: PageTextRec; indexes: { noteId: string } };
   meta: { key: string; value: unknown };
   diag: { key: number; value: LogEntry };
+  cards: { key: string; value: Card; indexes: { notebookId: string; noteId: string } };
+  mistakes: { key: string; value: MistakeRec; indexes: { noteId: string } };
+  exams: { key: string; value: ExamRec };
 }
 
+/** A mistake found by "Review for mistakes" (kept so patterns can be studied later). */
+export type MistakeRec = {
+  id: string; noteId: string; page: number; kind: string; read: string; problem: string; why: string; fix: string;
+  createdAt: number; resolved?: boolean; cardId?: string; topic?: string;
+};
+export type ExamAttempt = { id: string; at: number; seconds: number; answers: Record<string, Omit<PartAnswer, "ink">>; result: ExamResult };
+export type ExamRec = { id: string; exam: Exam; attempts: ExamAttempt[]; createdAt: number; updatedAt: number };
+
 const DB_NAME = "pipit-notes";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const VERSION_KEEP = 6;
 const VERSION_THROTTLE_MS = 10 * 60_000;
 
@@ -52,6 +65,13 @@ export function db(): Promise<IDBPDatabase<Schema>> {
         }
         if (oldVersion < 2) {
           d.createObjectStore("diag", { keyPath: "id", autoIncrement: true });
+        }
+        if (oldVersion < 3) {
+          const cards = d.createObjectStore("cards", { keyPath: "id" });
+          cards.createIndex("notebookId", "notebookId");
+          cards.createIndex("noteId", "noteId");
+          d.createObjectStore("mistakes", { keyPath: "id" }).createIndex("noteId", "noteId");
+          d.createObjectStore("exams", { keyPath: "id" });
         }
       },
       blocked() { onDbEvent({ level: "warn", msg: "database upgrade blocked by another open tab" }); },
@@ -125,8 +145,8 @@ export async function patchNote(id: string, patch: Partial<NoteMeta>, touch = tr
 }
 export async function deleteNote(id: string): Promise<void> {
   const d = await db();
-  const tx = d.transaction(["notes", "strokes", "images", "blocks", "versions", "pageText"], "readwrite");
-  for (const store of ["strokes", "images", "blocks", "versions", "pageText"] as const) {
+  const tx = d.transaction(["notes", "strokes", "images", "blocks", "versions", "pageText", "mistakes"], "readwrite");
+  for (const store of ["strokes", "images", "blocks", "versions", "pageText", "mistakes"] as const) {
     const keys = await tx.objectStore(store).index("noteId").getAllKeys(id);
     for (const k of keys) await tx.objectStore(store).delete(k as string);
   }

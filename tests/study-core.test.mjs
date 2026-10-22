@@ -125,7 +125,7 @@ test("lesson XP rewards accuracy and combos", () => {
   const messy = lessonXp({ total: 8, correctFirstTry: 4, maxCombo: 2, completed: true });
   const quit = lessonXp({ total: 8, correctFirstTry: 4, maxCombo: 2, completed: false });
   assert.ok(perfect > messy && messy > quit);
-  assert.equal(quit, 40);
+  assert.equal(quit, 20);
 });
 
 test("topics group cards for the skill path", () => {

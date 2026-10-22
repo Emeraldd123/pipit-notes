@@ -151,3 +151,16 @@ test("results roll up by section and topic, clamp AI marks, and band", () => {
   assert.equal(r.marks.find((m) => m.partId === ps[3].id).feedback, "Not marked.");      // unmarked parts are zero, not crashes
   assert.deepEqual([95, 82, 71, 65, 55, 45, 10].map(band), ["A*", "A", "B", "C", "D", "E", "U"]);
 });
+
+test("a lone part's figure is shown once, on the question", () => {
+  const e = normalizeExam({ sections: [{ questions: [
+    { stem: "Read the table.", parts: [{ prompt: "Which is largest?", type: "short", marks: 1, answer: "B", figure: { type: "table", rows: [[1, 2]] } }] },
+    { stem: "Use the graph.", figure: { type: "graph", x: [0, 1], curves: [{ expr: "x" }] }, type: "short", marks: 1, answer: "1" },
+  ] }] });
+  const [a, b] = e.sections[0].questions;
+  assert.equal(a.figure.type, "table");
+  assert.equal(a.parts[0].figure, undefined);
+  assert.equal(b.figure.type, "graph");
+  assert.equal(b.parts[0].figure, undefined);
+  assert.equal(b.parts[0].prompt, "");
+});

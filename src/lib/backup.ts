@@ -44,7 +44,12 @@ export async function collectBundle(noteIds?: string[]): Promise<Bundle> {
       ),
     });
   }
-  return { notebooks, notes };
+  // study data rides along with a full backup (not with a per-note export)
+  const study = noteIds ? undefined : {
+    cards: await d.getAll("cards"), mistakes: await d.getAll("mistakes"), exams: await d.getAll("exams"),
+    progress: (await d.get("meta", "study:progress")) ?? null,
+  };
+  return { notebooks, notes, study };
 }
 
 export async function buildBackupZip(noteIds?: string[]): Promise<Uint8Array> {
@@ -128,6 +133,21 @@ export async function importBackups(files: File[], onProgress?: (msg: string) =>
       const bundle = readBundle(unzipSync(raw));
       for (const nb of bundle.notebooks) {
         if (!(await d.get("notebooks", nb.id))) { await d.put("notebooks", nb); report.notebooks++; }
+      }
+      if (bundle.study) {
+        const st = bundle.study;
+        for (const c of st.cards as { id: string; updatedAt?: number }[]) {
+          const have = await d.get("cards", c.id);
+          if (!have || (have.updatedAt ?? 0) < (c.updatedAt ?? 0)) await d.put("cards", c as never);
+        }
+        for (const m of st.mistakes as { id: string }[]) if (!(await d.get("mistakes", m.id))) await d.put("mistakes", m as never);
+        for (const e of st.exams as { id: string; updatedAt?: number }[]) {
+          const have = await d.get("exams", e.id);
+          if (!have || (have.updatedAt ?? 0) < (e.updatedAt ?? 0)) await d.put("exams", e as never);
+        }
+        const mine = (await d.get("meta", "study:progress")) as { xp?: number } | undefined;
+        const theirs = st.progress as { xp?: number } | null;
+        if (theirs && (theirs.xp ?? 0) > (mine?.xp ?? -1)) await d.put("meta", theirs, "study:progress");
       }
       let i = 0;
       for (const n of bundle.notes) {

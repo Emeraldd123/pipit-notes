@@ -232,7 +232,7 @@ export type Progress = {
   sound: boolean;
   hearts: boolean;
 };
-export const newProgress = (): Progress => ({ xp: 0, streak: 0, best: 0, lastDay: null, days: {}, goal: 50, sound: true, hearts: true });
+export const newProgress = (): Progress => ({ xp: 0, streak: 0, best: 0, lastDay: null, days: {}, goal: 30, sound: true, hearts: true });
 
 export function dayKey(t: number): string {
   const d = new Date(t);
@@ -259,10 +259,10 @@ export function addXp(p: Progress, xp: number, now = Date.now()): Progress {
 
 export type LessonStats = { total: number; correctFirstTry: number; maxCombo: number; heartsLeft?: number; completed: boolean };
 export function lessonXp(s: LessonStats): number {
-  const base = s.correctFirstTry * 10;
-  const combo = Math.max(0, s.maxCombo - 2) * 2;
+  const base = s.correctFirstTry * 5;
+  const combo = Math.max(0, s.maxCombo - 2);
   const accuracy = s.total ? s.correctFirstTry / s.total : 0;
-  const bonus = s.completed ? (accuracy >= 0.9 ? 15 : accuracy >= 0.7 ? 8 : 3) : 0;
+  const bonus = s.completed ? (accuracy >= 0.9 ? 10 : accuracy >= 0.7 ? 5 : 2) : 0;
   return base + combo + bonus;
 }
 
