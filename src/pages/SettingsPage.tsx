@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Check, Database, Download, HardDrive, KeyRound, Loader2, ShieldCheck, Upload } from "lucide-react";
+import { ArrowLeft, Check, Database, Download, HardDrive, KeyRound, Loader2, Pencil, ShieldCheck, Upload } from "lucide-react";
 import { go } from "@/router";
 import { importBackups, lastBackupAt } from "@/lib/backup";
 import { useBackupFlow } from "@/components/backup-flow";
@@ -8,6 +8,7 @@ import { formatBytes, timeAgo } from "@/lib/format";
 import { aiReady, updateSettings, useSettings } from "@/lib/settings";
 import { claude } from "@/lib/ai";
 import { Button, Card, Toast } from "@/components/ui";
+import { PenTest } from "@/components/pentest";
 
 const MODELS = [
   { id: "claude-sonnet-5", label: "Claude Sonnet 5 (recommended)" },
@@ -22,6 +23,7 @@ export function SettingsPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
+  const [penTest, setPenTest] = useState(false);
   const restoreRef = useRef<HTMLInputElement>(null);
   const backup = useBackupFlow((m) => { flash(m); setLast(Date.now()); });
   const standalone = typeof window !== "undefined" && (window.matchMedia("(display-mode: standalone)").matches || (navigator as Navigator & { standalone?: boolean }).standalone === true);
@@ -100,6 +102,11 @@ export function SettingsPage() {
           </div>
         </Section>
 
+        <Section icon={<Pencil size={16} />} title="Pen test">
+          <p className="text-sm text-foreground-muted">See exactly what your stylus reports on this device — sample rate, pressure, tilt, and stalls. Handy for checking a new iPad or Pencil.</p>
+          <div className="mt-3"><Button onClick={() => setPenTest(true)}>Open pen test</Button></div>
+        </Section>
+
         <Section icon={<HardDrive size={16} />} title="Appearance">
           <select value={s.theme} onChange={(e) => updateSettings({ theme: e.target.value as "system" | "light" | "dark" })} className="rounded-xl border border-border bg-surface px-3 py-2.5 text-sm">
             <option value="system">Match system</option><option value="light">Light</option><option value="dark">Dark</option>
@@ -111,6 +118,7 @@ export function SettingsPage() {
         </Section>
       </div>
       {backup.modal}
+      {penTest && <PenTest onClose={() => setPenTest(false)} />}
       <Toast msg={toast} />
     </div>
   );
