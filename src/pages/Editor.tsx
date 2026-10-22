@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, ArrowLeftRight, ArrowUpRight, Check, CheckCheck, Circle, Code2, Copy, Download, Eraser, FilePlus2, FileText,
-  Hand, Highlighter, History, Lightbulb, LineChart, ListChecks, ImagePlus, Lasso, Loader2, Maximize2, Minus, MoreHorizontal, MousePointer2, Paintbrush, Pen,
+  Hand, Highlighter, History, Layers, Lightbulb, LineChart, ListChecks, ImagePlus, Lasso, Loader2, Maximize2, Minus, MoreHorizontal, MousePointer2, Paintbrush, Pen,
   Pencil, Printer, Redo2, Columns2, FileCode2, FlaskConical, Network, Shapes, TextCursorInput, Wand2, Scissors, ScanText, Sigma, Square, Trash, Trash2, Type, Undo2, ZoomIn, ZoomOut, Sparkles,
 } from "lucide-react";
 import { NoteCanvas, type CanvasImage, type NoteCanvasHandle, type Stroke, type Tool } from "@/components/note-canvas";
 import { BlocksLayer, BLOCK_DEFAULTS, Latex } from "@/components/blocks";
+import { PagesPanel } from "@/components/pages-panel";
 import { ExplainPanel, HighlightLayer, ReviewBar, ReviewSetup, type ExplainState, type Highlight, type ReviewState } from "@/components/understanding";
 import { Button, IconButton, Modal, Toast } from "@/components/ui";
 import type { BlockKind, BlockRec, NoteMeta, NotePaper } from "@/types";
 import {
   addImage, dataUrlToBlob, deleteBlock, deleteImage, deleteNote, getPageTexts, listNotes, listVersions, loadNote, maybeSnapshot, patchNote, putBlock,
-  restoreVersion, snapshotDue, syncStrokes, updateImage, type LoadedNote,
+  restoreVersion, restructurePages, snapshotDue, syncStrokes, updateImage, type LoadedNote,
 } from "@/lib/db";
 import { computeDelta, strokeSig } from "@/lib/delta";
 import { newId } from "@/lib/ids";
@@ -23,6 +24,7 @@ import { AiError, askAboutRegion, explainRegion, readChemistry, readGraphable, r
 import { checkEquation, formatEquation, molarMass, type BalanceReport } from "@/lib/chem";
 import { verifyWorking, type StepResult } from "@/lib/stepcheck";
 import { indexNote } from "@/lib/search";
+import { deleteMapping, duplicateMapping, insertBlankMapping, moveMapping, type PageMapping } from "@/lib/page-ops";
 import { mergeReview, summarize, type Issue } from "@/lib/review-core";
 import { buildLatexDocument } from "@/lib/latex";
 import { buildPageSvg } from "@/lib/svg";
@@ -94,6 +96,7 @@ function printImages(urls: string[]) {
 
 export function EditorPage({ id, page, splitWith }: { id: string; page?: number; splitWith?: string }) {
   const [loaded, setLoaded] = useState<LoadedNote | null | undefined>(undefined);
+  const [rk, setRk] = useState(0); // bumped after page operations to reload the note from disk
   useEffect(() => {
     let alive = true;
     setLoaded(undefined);
@@ -110,7 +113,7 @@ export function EditorPage({ id, page, splitWith }: { id: string; page?: number;
       })
       .catch((e) => { logError("open", e); if (alive) setLoaded(null); });
     return () => { alive = false; };
-  }, [id]);
+  }, [id, rk]);
   // Image object URLs live exactly as long as the loaded note. (Revoking them in
   // the editor's own cleanup broke images under React StrictMode's mount/unmount/
   // mount: the simulated unmount revoked URLs the real mount then tried to load.)
@@ -122,7 +125,7 @@ export function EditorPage({ id, page, splitWith }: { id: string; page?: number;
       <Button onClick={() => go({ name: "library", notebook: null, q: "" })}>Back to notes</Button>
     </div>
   );
-  return <Editor key={id} note={loaded} startPage={page} splitWith={splitWith} />;
+  return <Editor key={`${id}:${rk}`} note={loaded} startPage={page} splitWith={splitWith} onReload={() => setRk((k) => k + 1)} />;
 }
 
 type SaveState = "saved" | "saving" | "error";
@@ -131,7 +134,7 @@ type SaveState = "saved" | "saving" | "error";
 // pane you're using when two notes are open side by side.
 let activeEditor: string | null = null;
 
-function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: number; splitWith?: string }) {
+function Editor({ note, startPage, splitWith, onReload }: { note: LoadedNote; startPage?: number; splitWith?: string; onReload: () => void }) {
   const noteId = note.meta.id;
   const settings = useSettings();
   const ai = aiReady(settings);
@@ -165,6 +168,8 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
   const [check, setCheck] = useState<{ lines: WorkingLine[]; results: StepResult[] } | null>(null);
   const [picking, setPicking] = useState<NoteMeta[] | null>(null);
   const [chem, setChem] = useState<{ eq: ReadEquation; report: BalanceReport }[] | null>(null);
+  const [pagesOpen, setPagesOpen] = useState(false);
+  const [pagesRev, setPagesRev] = useState(0);
   const [explain, setExplain] = useState<ExplainState | null>(null);
   const explainRegionImg = useRef<string | null>(null);
   const [explainRect, setExplainRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -561,6 +566,26 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
     } catch (e) { failed("ai", e, "Couldn't check that"); } finally { setBusy(null); }
   }
 
+  // --- page operations: reorder / duplicate / insert / delete from the pages panel ---------------
+  async function applyPageOp(mapping: PageMapping, doneMsg: string) {
+    setBusy("Updating pages…");
+    try {
+      for (let i = 0; i < 30 && (pending.current || saving.current); i++) { await flushRef.current(); await new Promise((r) => setTimeout(r, 60)); }
+      await flushRef.current();
+      for (const [bid, t] of blockTimers.current) { clearTimeout(t); const b = blocks.find((x) => x.id === bid); if (b) await putBlock(b); }
+      blockTimers.current.clear();
+      await restructurePages(noteId, mapping);
+      count("pages.op");
+      onReload();
+      sessionStorage.setItem("pipit.pagesToast", doneMsg);
+    } catch (e) { failed("pages", e, "Couldn't change the pages"); setBusy(null); }
+  }
+  useEffect(() => {
+    const m = sessionStorage.getItem("pipit.pagesToast");
+    if (m) { sessionStorage.removeItem("pipit.pagesToast"); flash(m); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // --- graph it: read handwritten equations, drop a graph block beside them ---------------------
   async function graphSelection() {
     if (!ai) return flash("Turn on AI in Settings to read handwritten equations.");
@@ -821,6 +846,16 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
           />
           <BlocksLayer blocks={blocks} innerRef={blocksInner} interactive={blockMode} scaleRef={scaleRef} running={running} onChange={onBlockChange} onDelete={onBlockDelete} onRun={onRunBlock} />
           <HighlightLayer rects={highlights} innerRef={highlightsInner} camRef={camRef} />
+          {pagesOpen && (
+            <PagesPanel count={pageCount} current={currentPage} rev={pagesRev}
+              render={(p) => canvasRef.current?.previewPage(p, 150) ?? null}
+              onJump={(p) => canvasRef.current?.goToPage(p)}
+              onMove={(f, t) => applyPageOp(moveMapping(pageCount, f, t), `Moved page ${f + 1} to ${t + 1}.`)}
+              onDuplicate={(p) => applyPageOp(duplicateMapping(pageCount, p), `Duplicated page ${p + 1}.`)}
+              onInsertAfter={(p) => applyPageOp(insertBlankMapping(pageCount, p), `Added a blank page after ${p + 1}.`)}
+              onDelete={(p) => { if (confirm(`Delete page ${p + 1}? Its writing goes with it (version history can bring it back).`)) void applyPageOp(deleteMapping(pageCount, p), `Deleted page ${p + 1}.`); }}
+              onClose={() => setPagesOpen(false)} />
+          )}
           {explain && <ExplainPanel state={explain} onAsk={askFollowUp} onClose={closeExplain} />}
           {review && <ReviewBar review={review} onGo={goIssue} onToggleFixed={toggleFixed} onDismiss={dismissIssue} onClose={() => setReview(null)} />}
 
@@ -839,6 +874,7 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
               className={`select-none rounded-full px-1 py-0.5 text-foreground-muted ${pageCount > 1 ? "cursor-ew-resize hover:bg-surface-secondary" : ""} ${scrub !== null ? "bg-surface-secondary text-foreground" : ""}`}>
               Page {Math.min(currentPage + 1, pageCount)} / {pageCount}
             </span>
+            <button onClick={() => { setPagesOpen((v) => !v); setPagesRev((r) => r + 1); }} title="Page thumbnails — reorder, duplicate, insert" className={`ml-1 flex items-center rounded-full p-1.5 hover:bg-surface-secondary ${pagesOpen ? "bg-primary/10 text-primary" : "text-foreground-muted"}`}><Layers size={14} /></button>
             <button onClick={deleteCurrentPage} title="Delete this page" disabled={pageCount <= 1} className="ml-1 flex items-center rounded-full p-1.5 text-foreground-muted hover:bg-negative/10 hover:text-negative disabled:opacity-30"><Trash size={14} /></button>
             <button onClick={addPage} title="Add a page to the end" className="flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-white hover:bg-primary-hover"><FilePlus2 size={13} /> Add page</button>
           </div>

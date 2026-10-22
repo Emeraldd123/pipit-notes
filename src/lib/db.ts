@@ -6,6 +6,7 @@ import type {
   BlockRec, ImageRec, LogEntry, NoteMeta, NotePaper, NotebookRec, PageTextRec, StrokeInput, StrokeRec, VersionRec,
 } from "@/types";
 import { newId } from "./ids";
+import { pageOfY, remapItems, type PageMapping } from "./page-ops.ts";
 
 interface Schema extends DBSchema {
   notebooks: { key: string; value: NotebookRec };
@@ -309,4 +310,51 @@ export async function requestPersistentStorage(): Promise<{ persisted: boolean; 
   } catch {
     return { persisted: false };
   }
+}
+
+// --- page operations -----------------------------------------------------------------
+/**
+ * Re-order / duplicate / insert / delete pages. `mapping[n]` is the OLD page shown at new
+ * position n (-1 = blank). Strokes, images, blocks and page text move with their page.
+ * A version snapshot is taken first, so any page operation can be undone from history.
+ */
+export async function restructurePages(noteId: string, mapping: PageMapping): Promise<void> {
+  const d = await db();
+  const meta = await d.get("notes", noteId);
+  if (!meta) return;
+  await maybeSnapshot(noteId, await loadStrokes(noteId), true);
+  const oldCount = meta.pageCount;
+  const tx = d.transaction(["notes", "strokes", "images", "blocks", "pageText"], "readwrite");
+
+  const strokes = await tx.objectStore("strokes").index("noteId").getAll(noteId);
+  const sStore = tx.objectStore("strokes");
+  for (const s of strokes) await sStore.delete(s.id);
+  const outStrokes = remapItems(strokes, oldCount, mapping, (s) => pageOfY(s.points[0]?.y ?? 0, oldCount), (s, dy) => ({ ...s, points: s.points.map((p) => ({ ...p, y: p.y + dy })) }));
+  for (const { item, isClone } of outStrokes) await sStore.put({ ...item, id: isClone ? newId() : item.id, ord: item.ord + (isClone ? 0.0005 : 0) });
+
+  const images = await tx.objectStore("images").index("noteId").getAll(noteId);
+  const iStore = tx.objectStore("images");
+  for (const im of images) await iStore.delete(im.id);
+  const outImages = remapItems(images, oldCount, mapping, (im) => pageOfY(im.y + im.height / 2, oldCount), (im, dy) => ({ ...im, y: im.y + dy }));
+  for (const { item, isClone } of outImages) await iStore.put({ ...item, id: isClone ? newId() : item.id });
+
+  const blocks = await tx.objectStore("blocks").index("noteId").getAll(noteId);
+  const bStore = tx.objectStore("blocks");
+  for (const b of blocks) await bStore.delete(b.id);
+  const outBlocks = remapItems(blocks, oldCount, mapping, (b) => pageOfY(b.y + 20, oldCount), (b, dy) => ({ ...b, y: b.y + dy }));
+  for (const { item, isClone } of outBlocks) await bStore.put({ ...item, id: isClone ? newId() : item.id });
+
+  const texts = await tx.objectStore("pageText").index("noteId").getAll(noteId);
+  const tStore = tx.objectStore("pageText");
+  for (const t of texts) await tStore.delete(t.key);
+  for (let n = 0; n < mapping.length; n++) {
+    for (const t of texts.filter((x) => x.page === mapping[n])) await tStore.put({ ...t, page: n, key: `${noteId}:${n}:${t.source}` });
+  }
+
+  await tx.objectStore("notes").put({
+    ...meta, pageCount: Math.max(1, mapping.length), updatedAt: Date.now(),
+    strokeCount: outStrokes.length, imageCount: outImages.length,
+  });
+  await tx.done;
+  await d.delete("meta", `thumb:${noteId}`);
 }
