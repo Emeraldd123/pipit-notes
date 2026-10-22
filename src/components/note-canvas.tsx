@@ -12,7 +12,7 @@ import { newStrokeId } from "@/lib/ids";
 import { PAGE_W, PAGE_H, PAGE_GAP, pageTop } from "@/lib/page";
 import { classifyStroke } from "@/lib/shapes";
 
-export type Tool = NoteTool | "eraser" | "line" | "rect" | "ellipse" | "arrow" | "hand" | "lasso" | "image" | "snip" | "block";
+export type Tool = NoteTool | "eraser" | "line" | "rect" | "ellipse" | "arrow" | "hand" | "lasso" | "image" | "snip" | "explain" | "block";
 // `id` is a stable per-stroke identity used for incremental (delta) saves. New
 // strokes get one on commit; strokes loaded from the DB carry their row id.
 export type Stroke = StrokeInput & { id?: string };
@@ -82,6 +82,8 @@ export type NoteCanvasHandle = {
   /** Remove page `pageIdx`: delete its strokes/images and shift the rest up.
    * (The caller decrements pageCount.) */
   deletePageContent: (pageIdx: number) => void;
+  /** Pan (and zoom out if needed) so a document rect is in view, centred in the upper part of the canvas. */
+  focusRect: (r: { x: number; y: number; w: number; h: number }, opts?: { bottomInset?: number }) => void;
 };
 
 type Selection = { kind: "strokes"; idx: number[] } | { kind: "image"; i: number } | null;
@@ -257,6 +259,7 @@ export function NoteCanvas({
   onPageChange,
   onSelectionChange,
   onSnipRegion,
+  onExplainRegion,
   onImageAdd,
   onImageUpdate,
   onImageDelete,
@@ -284,6 +287,8 @@ export function NoteCanvas({
   onSelectionChange?: (has: boolean) => void;
   /** A `snip` lasso finished: a PNG of the lassoed region + its doc size. */
   onSnipRegion?: (dataUrl: string, wDoc: number, hDoc: number) => void;
+  /** An `explain` lasso finished: a PNG of the circled region + its document bbox. */
+  onExplainRegion?: (dataUrl: string, bbox: { x: number; y: number; w: number; h: number }) => void;
   onImageAdd?: (img: { data: string; x: number; y: number; width: number; height: number }) => Promise<string | undefined>;
   onImageUpdate?: (id: string, patch: { x?: number; y?: number; width?: number; height?: number; rotation?: number }) => void;
   onImageDelete?: (id: string) => void;
@@ -996,6 +1001,18 @@ export function NoteCanvas({
         paintContent(octx, null);
         return out.toDataURL("image/png");
       },
+      focusRect: (r, opts) => {
+        const el = viewportRef.current;
+        const v = viewRef.current;
+        const vw = el?.clientWidth ?? 800, vh = (el?.clientHeight ?? 600) - (opts?.bottomInset ?? 0);
+        // keep the rect comfortably inside: zoom out only if it would not fit
+        const fit = Math.min((vw * 0.9) / Math.max(r.w, 1), (vh * 0.7) / Math.max(r.h, 1));
+        if (fit < v.scale) v.scale = Math.max(MIN_SCALE, fit);
+        v.camX = r.x + r.w / 2 - vw / 2 / v.scale;
+        v.camY = r.y + r.h / 2 - vh / 2 / v.scale;
+        clampView();
+        redraw();
+      },
       goToPage: (pageIdx) => {
         const i = Math.max(0, Math.min(pageCountRef.current - 1, Math.round(pageIdx)));
         viewRef.current.camY = pageTop(i) - MARGIN / viewRef.current.scale;
@@ -1080,7 +1097,7 @@ export function NoteCanvas({
   // Snapshot the lassoed region (paper + background PDF page + ink) to a PNG,
   // clipped to the polygon. Used by the `snip` tool to lift a piece of a page
   // (e.g. a homework question) onto a fresh page.
-  function snapshotRegion(poly: Point[]): { dataUrl: string; w: number; h: number } | null {
+  function snapshotRegion(poly: Point[]): { dataUrl: string; w: number; h: number; bbox: { x: number; y: number; w: number; h: number } } | null {
     let minX = Infinity,
       minY = Infinity,
       maxX = -Infinity,
@@ -1108,7 +1125,7 @@ export function NoteCanvas({
     octx.closePath();
     octx.clip();
     paintContent(octx, { top: minY - 4, bot: maxY + 4 });
-    return { dataUrl: out.toDataURL("image/png"), w, h };
+    return { dataUrl: out.toDataURL("image/png"), w, h, bbox: { x: minX, y: minY, w, h } };
   }
 
   function eraseAt(p: Point) {
@@ -1296,7 +1313,7 @@ export function NoteCanvas({
       tapRef.current = { x: pt.x, y: pt.y };
       return;
     }
-    if (t === "snip") {
+    if (t === "snip" || t === "explain") {
       selRef.current = null;
       onSelectionChange?.(false);
       lassoRef.current = [pt];
@@ -1538,10 +1555,11 @@ export function NoteCanvas({
     if (lassoRef.current) {
       const poly = lassoRef.current;
       lassoRef.current = null;
-      if (settings.current.tool === "snip") {
+      if (settings.current.tool === "snip" || settings.current.tool === "explain") {
         if (poly.length >= 3) {
           const snap = snapshotRegion(poly);
-          if (snap) onSnipRegion?.(snap.dataUrl, snap.w, snap.h);
+          if (snap && settings.current.tool === "explain") onExplainRegion?.(snap.dataUrl, snap.bbox);
+          else if (snap) onSnipRegion?.(snap.dataUrl, snap.w, snap.h);
         }
         redraw();
         return;

@@ -3,6 +3,7 @@
 // an action that needs it (read a page, ask a question, check working, …).
 import { aiReady, getSettings } from "./settings";
 import { count, error as logErr, track, warn } from "./telemetry";
+import { normalizeIssues, type Issue } from "./review-core.ts";
 
 export class AiError extends Error {}
 
@@ -48,7 +49,7 @@ export async function claude(opts: {
         model: opts.model ?? s.model,
         max_tokens: opts.maxTokens ?? 2000,
         ...(opts.system ? { system: opts.system } : {}),
-        messages: [{ role: "user", content: typeof opts.user === "string" ? opts.user : opts.user }],
+        messages: [{ role: "user", content: opts.user }],
       }),
     });
   } catch (e) {
@@ -202,4 +203,67 @@ export async function transcribeRegion(region: string): Promise<string> {
     user: [imageBlock(region), text("Transcribe this.")],
   });
   return raw.replace(/^```\w*\s*|\s*```$/g, "").trim();
+}
+
+/** Read handwritten equations to graph, one per line, in plain typed syntax (y = x^2 + 3x). */
+export async function readGraphable(region: string): Promise<string[]> {
+  const raw = await claude({
+    feature: "graph",
+    maxTokens: 600,
+    system:
+      "You read handwritten equations or functions to be graphed. Reply with ONLY the equations, one per line, in plain typed syntax: " +
+      "use ^ for powers, * for multiplication, sin(x), sqrt(x), pi, e, abs(x). Use only the variables x and y (and z for a surface z = f(x, y)). " +
+      "Examples: y = x^2 + 3x   |   x^2 + y^2 = 25   |   z = sin(x)*cos(y). Transcribe exactly what is written; no commentary, no code fences, no $.",
+    user: [imageBlock(region), text("Which equations should be graphed?")],
+  });
+  return raw.replace(/```\w*/g, "").split("\n").map((l) => l.replace(/^[\s\-*\d.)]+(?=[a-zA-Z(])/, "").trim()).filter(Boolean).slice(0, 6);
+}
+
+export type Shortfall = { what: string; why: string; fix: string };
+export type Explanation = { concept: string; explanation: string; shortfalls: Shortfall[]; followups: string[] };
+
+const EXPLAIN_SYSTEM =
+  "You are a patient tutor. The image is a region a student circled in their own notes (handwriting, possibly over a printed PDF page). " +
+  "Work out the concept it shows and explain it clearly for someone learning it: lead with the core idea in plain words, then the mechanism or a short worked example. " +
+  "Then judge the student's OWN writing: list every place their understanding fell short — wrong steps, misconceptions, missing conditions, sloppy notation — " +
+  "each with what is wrong, why, and the correct version. Only list real problems you are confident about; if the writing is correct, return an empty list. " +
+  "Use LaTeX in $...$ for maths. Return STRICT JSON only: " +
+  '{"concept":"short name","explanation":"markdown-lite text","shortfalls":[{"what":"...","why":"...","fix":"..."}],"followups":["a natural next question","another"]}.';
+
+export async function explainRegion(region: string): Promise<Explanation> {
+  const raw = await claude({ feature: "explain", maxTokens: 2200, system: EXPLAIN_SYSTEM, user: [imageBlock(region), text("Explain this, and tell me where my understanding fell short.")] });
+  const j = extractJson<Partial<Explanation>>(raw);
+  const s = (v: unknown) => (typeof v === "string" ? v : "");
+  return {
+    concept: s(j.concept) || "This region",
+    explanation: s(j.explanation),
+    shortfalls: (Array.isArray(j.shortfalls) ? j.shortfalls : []).map((x) => ({ what: s(x?.what), why: s(x?.why), fix: s(x?.fix) })).filter((x) => x.what),
+    followups: (Array.isArray(j.followups) ? j.followups : []).map(s).filter(Boolean).slice(0, 4),
+  };
+}
+
+/** Continue the conversation about a circled region. `turns` holds earlier Q&A as plain text. */
+export async function askAboutRegion(region: string, turns: { role: "user" | "assistant"; content: string }[], question: string): Promise<string> {
+  const transcript = turns.map((t) => `${t.role === "user" ? "Student" : "Tutor"}: ${t.content}`).join("\n\n");
+  return claude({
+    feature: "explain.followup",
+    maxTokens: 1200,
+    system: "You are a patient tutor answering follow-up questions about a region of the student's notes (image attached). Be concise; use LaTeX in $...$ for maths. Plain text, no JSON.",
+    user: [imageBlock(region), text((transcript ? transcript + "\n\n" : "") +`Student: ${question}`)],
+  });
+}
+
+const REVIEW_SYSTEM =
+  "You are a careful marker reviewing ONE page of a student's handwritten notes (maybe over a printed PDF page). Find genuine mistakes in the student's own work: " +
+  "arithmetic slips, algebra errors, sign errors, wrong formulas or concepts, unit errors, steps that don't follow from the previous line, wrong facts. " +
+  "Do not flag neatness, style, or printed text. Check each line against the one before it. Be conservative: report only errors you are confident about " +
+  '(use "confidence":"medium" when unsure). For each, give a tight bounding box around the offending line/term as FRACTIONS of the image: [x, y, width, height], each 0..1 from the top-left. ' +
+  "Return STRICT JSON only: " +
+  '{"issues":[{"bbox":[0.1,0.2,0.5,0.04],"read":"what you read there","problem":"what is wrong","why":"the principle / why","fix":"the correct version","kind":"arithmetic|algebra|sign|concept|units|missing-step|notation|other","confidence":"high|medium"}]}. ' +
+  'Use LaTeX in $...$ for maths. If the page has no mistakes (or is blank) return {"issues":[]}.';
+
+export async function reviewPage(pageImage: string, page: number): Promise<Issue[]> {
+  const raw = await claude({ feature: "review", maxTokens: 3000, system: REVIEW_SYSTEM, user: [imageBlock(pageImage), text(`Review this page (page ${page + 1}).`)] });
+  const j = extractJson<{ issues?: unknown }>(raw);
+  return normalizeIssues(j.issues, page);
 }

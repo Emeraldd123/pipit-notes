@@ -6,10 +6,13 @@ A private, offline-first handwriting notebook. **No account, no server** — eve
 
 - **Write** with Apple Pencil: multi-page notes, PDF annotation, snip-to-new-page, page scrubber (hold the page chip and drag), shapes, lasso, undo/redo, version history, Cornell/ruled/grid/dotted paper, and optional **hold-to-snap** (hold the pen still after a rough line/circle/box and it straightens — conservative, never touches handwriting; the wand button in the tool rail).
 - **Blocks** on the page: runnable **Python** (Pyodide — SymPy/NumPy/SciPy/Matplotlib), text, and **LaTeX** maths.
+- **Graph blocks** (no AI, works offline): type `y = x^2 + 3x`, `x^2 + y^2 = 25` (circles and any implicit curve), `x = y^2`, or `z = sin(x)*cos(y)` for a rotatable 3D surface — one equation per line, several curves overlay. Drag to pan/rotate, pinch or +/− to zoom, double-tap to reset. Or lasso a handwritten equation → **Graph it**.
 - **Understand** (opt-in, your own Anthropic key, off by default):
   - *Recognise maths* — lasso handwriting → LaTeX block.
   - *Check working* — the AI reads each line; **SymPy running locally** verifies every step follows from the last.
   - *Check equation* — chemistry: atoms **and** charge per element, correct coefficients, molar masses (deterministic code).
+  - *Explain* (lightbulb tool) — circle any concept, including printed PDF text: get an explanation, **where your own understanding fell short** (what's wrong, why, the correct version), and follow-up questions you can keep asking.
+  - *Review for mistakes* (⋯ menu) — pick pages or the whole note; every mistake is found and you step through them **top to bottom**, with the spot highlighted on the page, the explanation and the fix. Mark fixed / dismiss false alarms.
   - *Search & ask* — instant local search; ask questions answered from your own notes with citations.
   - *Practice exams* generated from your notes.
 - **Organise**: notebooks, split view (two notes side by side), a knowledge map that links related notes (local TF-IDF, no AI).
@@ -54,7 +57,7 @@ Nothing else: no database, no accounts, no other keys.
     npm run dev          # http://localhost:5173
     npm run build        # static site in dist/
     npm run typecheck
-    npm test             # 63 tests; step-checker tests need python + sympy (skipped otherwise)
+    npm test             # 80+ tests; step-checker tests need python + sympy (skipped otherwise)
 
 ## Monitoring (so problems can be found and fixed)
 
@@ -115,6 +118,7 @@ Notes never leave the device unless you export or back them up. AI features send
     src/lib/db.ts                    IndexedDB store
     src/lib/bundle-format.ts         backup format (shared with tools/)
     src/lib/{chem,stepcheck,py,ai,search,related,latex,svg}.ts
+    src/lib/{mathexpr,graph-render,review-core}.ts   graphing + mistake review (pure, tested)
     src/lib/{telemetry,telemetry-core,health,report}.ts   monitoring
     netlify/                         diagnostics endpoint (Function + handler)
     src/pages/                       Library, Editor, Search, Graph, Settings

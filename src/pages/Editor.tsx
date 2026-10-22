@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, ArrowLeftRight, ArrowUpRight, Check, CheckCheck, Circle, Code2, Copy, Download, Eraser, FilePlus2, FileText,
-  Hand, Highlighter, History, LineChart, ImagePlus, Lasso, Loader2, Maximize2, Minus, MoreHorizontal, MousePointer2, Paintbrush, Pen,
+  Hand, Highlighter, History, Lightbulb, LineChart, ListChecks, ImagePlus, Lasso, Loader2, Maximize2, Minus, MoreHorizontal, MousePointer2, Paintbrush, Pen,
   Pencil, Printer, Redo2, Columns2, FileCode2, FlaskConical, Network, Shapes, TextCursorInput, Wand2, Scissors, ScanText, Sigma, Square, Trash, Trash2, Type, Undo2, ZoomIn, ZoomOut, Sparkles,
 } from "lucide-react";
 import { NoteCanvas, type CanvasImage, type NoteCanvasHandle, type Stroke, type Tool } from "@/components/note-canvas";
 import { BlocksLayer, BLOCK_DEFAULTS, Latex } from "@/components/blocks";
+import { ExplainPanel, HighlightLayer, ReviewBar, ReviewSetup, type ExplainState, type Highlight, type ReviewState } from "@/components/understanding";
 import { Button, IconButton, Modal, Toast } from "@/components/ui";
 import type { BlockKind, BlockRec, NoteMeta, NotePaper } from "@/types";
 import {
@@ -18,10 +19,11 @@ import { saveThumb } from "@/lib/thumbs";
 import { buildNotePdf, safeName, triggerDownload } from "@/lib/export";
 import { loadExportNote } from "@/lib/note-io";
 import { runPython } from "@/lib/py";
-import { AiError, readChemistry, readWorking, recognizeMath, transcribeRegion, type ReadEquation, type WorkingLine } from "@/lib/ai";
+import { AiError, askAboutRegion, explainRegion, readChemistry, readGraphable, readWorking, recognizeMath, reviewPage, transcribeRegion, type ReadEquation, type WorkingLine } from "@/lib/ai";
 import { checkEquation, formatEquation, molarMass, type BalanceReport } from "@/lib/chem";
 import { verifyWorking, type StepResult } from "@/lib/stepcheck";
 import { indexNote } from "@/lib/search";
+import { mergeReview, summarize, type Issue } from "@/lib/review-core";
 import { buildLatexDocument } from "@/lib/latex";
 import { buildPageSvg } from "@/lib/svg";
 import { relatedTo } from "@/lib/related";
@@ -38,7 +40,7 @@ const PAPERS: { id: NotePaper; label: string }[] = [
   { id: "blank", label: "Blank" }, { id: "ruled", label: "Ruled" }, { id: "grid", label: "Grid" }, { id: "dotted", label: "Dotted" }, { id: "cornell", label: "Cornell" },
 ];
 
-const TOOL_NAMES: Partial<Record<Tool, string>> = { pen: "pen", pencil: "pencil", highlighter: "highlighter", marker: "marker", line: "line", rect: "rectangle", ellipse: "ellipse", arrow: "arrow", lasso: "lasso", image: "select", snip: "snip", hand: "pan" };
+const TOOL_NAMES: Partial<Record<Tool, string>> = { pen: "pen", pencil: "pencil", highlighter: "highlighter", marker: "marker", line: "line", rect: "rectangle", ellipse: "ellipse", arrow: "arrow", lasso: "lasso", image: "select", snip: "snip", explain: "explain", hand: "pan" };
 
 type ToolDef = { id: Tool; label: string; icon: React.ReactNode };
 const WRITE: ToolDef[] = [
@@ -57,6 +59,7 @@ const SELECT: ToolDef[] = [
   { id: "lasso", label: "Lasso select ink", icon: <Lasso size={17} /> },
   { id: "image", label: "Select / move image", icon: <MousePointer2 size={17} /> },
   { id: "snip", label: "Snip a region onto a new page", icon: <Scissors size={17} /> },
+  { id: "explain", label: "Explain: circle anything to understand it (and see where you went wrong)", icon: <Lightbulb size={17} /> },
   { id: "hand", label: "Pan", icon: <Hand size={17} /> },
 ];
 
@@ -161,6 +164,12 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
   const [check, setCheck] = useState<{ lines: WorkingLine[]; results: StepResult[] } | null>(null);
   const [picking, setPicking] = useState<NoteMeta[] | null>(null);
   const [chem, setChem] = useState<{ eq: ReadEquation; report: BalanceReport }[] | null>(null);
+  const [explain, setExplain] = useState<ExplainState | null>(null);
+  const explainRegionImg = useRef<string | null>(null);
+  const [explainRect, setExplainRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [review, setReview] = useState<ReviewState | null>(null);
+  const [reviewSetup, setReviewSetup] = useState(false);
+  const highlightsInner = useRef<HTMLDivElement>(null);
   const [related, setRelated] = useState<{ note: { id: string; title: string }; weight: number; shared: string[] }[] | null>(null);
 
   // page scrubber
@@ -303,7 +312,9 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
     camRef.current = c;
     scaleRef.current = c.scale;
     const el = blocksInner.current;
-    if (el) el.style.transform = `scale(${c.scale}) translate(${-c.camX}px, ${-c.camY}px)`;
+    const t = `scale(${c.scale}) translate(${-c.camX}px, ${-c.camY}px)`;
+    if (el) el.style.transform = t;
+    if (highlightsInner.current) highlightsInner.current.style.transform = t;
   }, []);
 
   // --- blocks -------------------------------------------------------------------------------
@@ -549,6 +560,113 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
     } catch (e) { failed("ai", e, "Couldn't check that"); } finally { setBusy(null); }
   }
 
+  // --- graph it: read handwritten equations, drop a graph block beside them ---------------------
+  async function graphSelection() {
+    if (!ai) return flash("Turn on AI in Settings to read handwritten equations.");
+    const sel = canvasRef.current?.selectionImage();
+    if (!sel) return flash("Lasso the equation(s) you want graphed.");
+    setBusy("Reading the equation…");
+    try {
+      const eqs = await readGraphable(sel.dataUrl);
+      if (!eqs.length) return flash("I couldn't find an equation to graph there.");
+      count("graph.fromInk");
+      addBlock("graph", { x: sel.bbox.x, y: sel.bbox.y + sel.bbox.h + 28 }, eqs.join("\n"));
+      flash("Graphed — edit the equations in the block if I misread anything.");
+    } catch (e) { failed("ai", e, "Couldn't graph that"); } finally { setBusy(null); }
+  }
+
+  // --- explain: circle a concept -> explanation + where understanding fell short + follow-ups ----
+  async function explainRegionNow(dataUrl: string, bbox: { x: number; y: number; w: number; h: number }) {
+    if (!ai) return flash("Turn on AI in Settings (and add your API key) to use Explain.");
+    explainRegionImg.current = dataUrl;
+    setExplainRect(bbox);
+    setReview(null);
+    setExplain({ status: "loading", turns: [], asking: false });
+    try {
+      const data = await explainRegion(dataUrl);
+      setExplain((s) => (s && explainRegionImg.current === dataUrl ? { ...s, status: "done", data } : s));
+    } catch (e) {
+      if (!(e instanceof AiError)) logError("ai", e);
+      setExplain((s) => (s && explainRegionImg.current === dataUrl ? { ...s, status: "error", error: e instanceof AiError ? e.message : "Couldn't explain that — try circling again." } : s));
+    }
+  }
+  function explainSelection() {
+    const sel = canvasRef.current?.selectionImage();
+    if (!sel) return flash("Select some handwriting with the lasso first.");
+    void explainRegionNow(sel.dataUrl, sel.bbox);
+  }
+  async function askFollowUp(q: string) {
+    const img = explainRegionImg.current;
+    if (!img || !explain?.data) return;
+    const base = [{ role: "assistant" as const, content: `${explain.data.concept}: ${explain.data.explanation}` }, ...explain.turns];
+    setExplain((s) => (s ? { ...s, asking: true, turns: [...s.turns, { role: "user", content: q }] } : s));
+    try {
+      const a = await askAboutRegion(img, base, q);
+      setExplain((s) => (s ? { ...s, asking: false, turns: [...s.turns, { role: "assistant", content: a }] } : s));
+    } catch (e) {
+      setExplain((s) => (s ? { ...s, asking: false, turns: [...s.turns, { role: "assistant", content: e instanceof AiError ? e.message : "Sorry — that didn't work. Try again." }] } : s));
+    }
+  }
+  const closeExplain = () => { setExplain(null); setExplainRect(null); explainRegionImg.current = null; };
+
+  // --- review: find every mistake on chosen pages, then step through them top to bottom -----------
+  async function runReview(pages: number[]) {
+    setReviewSetup(false);
+    if (!ai) return flash("Turn on AI in Settings (and add your API key) to review for mistakes.");
+    closeExplain();
+    await flush();
+    const results: { page: number; issues: Issue[] }[] = [];
+    const failedPages: number[] = [];
+    let fatal: unknown = null;
+    count("review.run");
+    for (let k = 0; k < pages.length; k++) {
+      const p = pages[k];
+      setBusy(`Reviewing page ${p + 1} (${k + 1}/${pages.length})…`);
+      try {
+        const img = canvasRef.current?.previewPage(p, 1500);
+        if (!img) throw new Error("page image unavailable");
+        results.push({ page: p, issues: await reviewPage(img, p) });
+      } catch (e) {
+        failedPages.push(p);
+        if (e instanceof AiError && /key|offline|Rate limited/i.test(e.message)) { fatal = e; break; }
+        if (!(e instanceof AiError)) logError("review", e);
+      }
+    }
+    setBusy(null);
+    if (fatal && !results.length) return failed("ai", fatal, "Couldn't review");
+    const issues = mergeReview(results);
+    count(issues.length ? "review.found" : "review.clean");
+    if (!issues.length) {
+      flash(failedPages.length ? `Couldn't review page${failedPages.length === 1 ? "" : "s"} ${failedPages.map((x) => x + 1).join(", ")} — try again.` : `No mistakes found on ${pages.length} page${pages.length === 1 ? "" : "s"}.`);
+      return;
+    }
+    flash(summarize(issues));
+    setReview({ issues, i: 0, fixed: new Set(), failedPages });
+    setTool("hand");
+  }
+  const goIssue = (i: number) => setReview((r) => (r ? { ...r, i: Math.max(0, Math.min(r.issues.length - 1, i)) } : r));
+  const issueId = review?.issues[review.i]?.id;
+  useEffect(() => {
+    const it = review?.issues.find((x) => x.id === issueId);
+    if (it) canvasRef.current?.focusRect(it.rect, { bottomInset: Math.round(window.innerHeight * 0.4) });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [issueId]);
+  const dismissIssue = (id: string) => setReview((r) => {
+    if (!r) return r;
+    const issues = r.issues.filter((x) => x.id !== id);
+    return { ...r, issues, i: Math.min(r.i, Math.max(0, issues.length - 1)) };
+  });
+  const toggleFixed = (id: string) => setReview((r) => {
+    if (!r) return r;
+    const fixed = new Set(r.fixed);
+    if (fixed.has(id)) fixed.delete(id); else fixed.add(id);
+    return { ...r, fixed };
+  });
+  const highlights: Highlight[] = [
+    ...(review ? review.issues.map((x, n): Highlight => ({ id: x.id, ...x.rect, tone: n === review.i ? "active" : "issue", label: n === review.i ? String(n + 1) : undefined })).filter((h) => !review.fixed.has(h.id) || h.tone === "active") : []),
+    ...(explainRect && explain ? [{ id: "explain", ...explainRect, tone: "explain" as const }] : []),
+  ];
+
   const activeTool: Tool = tool;
   const blockMode = tool === "block";
   const rail = (defs: ToolDef[]) => (
@@ -588,6 +706,7 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
                 <MenuItem icon={<ScanText size={15} />} label="Read handwriting for search" onClick={indexThisNote} />
                 <MenuItem icon={<History size={15} />} label="Version history" onClick={openHistory} />
                 <MenuItem icon={<Network size={15} />} label="Related notes" onClick={showRelated} />
+                <MenuItem icon={<ListChecks size={15} />} label="Review for mistakes…" onClick={() => { setMenu(false); setReviewSetup(true); }} />
                 {splitWith ? (
                   <MenuItem icon={<Columns2 size={15} />} label="Close split (keep this note)" onClick={() => go({ name: "note", id: noteId })} />
                 ) : (
@@ -615,6 +734,8 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
           <SelBtn onClick={convertSelectionToText} accent><TextCursorInput size={13} /> To text</SelBtn>
           <SelBtn onClick={recognizeSelection} accent><Sigma size={13} /> Recognise maths</SelBtn>
           <SelBtn onClick={checkSelection} accent><CheckCheck size={13} /> Check working</SelBtn>
+          <SelBtn onClick={explainSelection} accent><Lightbulb size={13} /> Explain</SelBtn>
+          <SelBtn onClick={graphSelection} accent><LineChart size={13} /> Graph it</SelBtn>
           <SelBtn onClick={checkChemistry} accent><FlaskConical size={13} /> Check equation</SelBtn>
           <SelBtn onClick={() => canvasRef.current?.deleteSelection()} danger><Trash2 size={13} /> Delete</SelBtn>
         </div>
@@ -692,11 +813,15 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
             onPageChange={(p) => setCurrentPage(p)}
             onSelectionChange={setHasSel}
             onSnipRegion={onSnipRegion}
+            onExplainRegion={explainRegionNow}
             onImageAdd={persistImageAdd}
             onImageUpdate={(id, patch) => void updateImage(id, patch)}
             onImageDelete={(id) => void deleteImage(id)}
           />
           <BlocksLayer blocks={blocks} innerRef={blocksInner} interactive={blockMode} scaleRef={scaleRef} running={running} onChange={onBlockChange} onDelete={onBlockDelete} onRun={onRunBlock} />
+          <HighlightLayer rects={highlights} innerRef={highlightsInner} camRef={camRef} />
+          {explain && <ExplainPanel state={explain} onAsk={askFollowUp} onClose={closeExplain} />}
+          {review && <ReviewBar review={review} onGo={goIssue} onToggleFixed={toggleFixed} onDismiss={dismissIssue} onClose={() => setReview(null)} />}
 
           {scrub !== null && (
             <div className="absolute bottom-16 left-1/2 z-20 flex -translate-x-1/2 flex-col items-center gap-1.5 rounded-xl border border-border bg-surface/95 p-2 shadow-xl backdrop-blur">
@@ -707,7 +832,7 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
               <span className="text-[10px] text-foreground-muted">release to jump</span>
             </div>
           )}
-          <div className="safe-b absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-full border border-border bg-surface/95 py-1 pl-3 pr-1.5 text-xs font-medium shadow-md backdrop-blur">
+          <div className={`safe-b absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-full border border-border bg-surface/95 py-1 pl-3 pr-1.5 text-xs font-medium shadow-md backdrop-blur ${explain || review ? "hidden" : ""}`}>
             <span onPointerDown={onScrubDown} onPointerMove={onScrubMove} onPointerUp={onScrubUp} onPointerCancel={onScrubUp}
               title={pageCount > 1 ? "Hold and drag to jump to a page" : undefined} style={{ touchAction: "none" }}
               className={`select-none rounded-full px-1 py-0.5 text-foreground-muted ${pageCount > 1 ? "cursor-ew-resize hover:bg-surface-secondary" : ""} ${scrub !== null ? "bg-surface-secondary text-foreground" : ""}`}>
@@ -773,6 +898,7 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
           )}
         </Modal>
       )}
+      {reviewSetup && <ReviewSetup pageCount={pageCount} currentPage={currentPage} thumb={(p) => { try { return canvasRef.current?.previewPage(p, 180) ?? null; } catch { return null; } }} onStart={runReview} onClose={() => setReviewSetup(false)} />}
       {chem && <ChemModal items={chem} onClose={() => setChem(null)} />}
       {check && <CheckModal check={check} onClose={() => setCheck(null)} />}
       <Toast msg={toast} />
