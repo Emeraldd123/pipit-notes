@@ -12,6 +12,10 @@ import type { Exam } from "./exam-core";
 import type { Figure } from "./figure-core";
 import type { Excerpt } from "./ai";
 import { count } from "./telemetry";
+import { hashString } from "./ai-cache";
+import { getMeta, setMeta } from "./db";
+
+const CARDS_SRC = "cards:src";
 
 /** "all", "nb:<id>" or "note:<id>" → note ids (null = everything). */
 export async function scopeNoteIds(scope: string): Promise<string[] | null> {
@@ -37,15 +41,30 @@ export async function toCards(raws: RawCard[], ctx: { notebookId: string | null;
 }
 
 /** Read a scope of notes and add new flashcards. Returns how many were added. */
-export async function makeCardsFromNotes(scope: string, want: number): Promise<{ added: number; sources: number }> {
+/**
+ * Pages are only sent to the AI if cards haven't already been made from their CURRENT text — re-running "make
+ * cards" on the same notes would otherwise pay again for pages that can only produce duplicates.
+ */
+export async function makeCardsFromNotes(scope: string, want: number, includeDone = false): Promise<{ added: number; sources: number; skipped: number }> {
   const ids = await scopeNoteIds(scope);
-  const excerpts = await corpusExcerpts(ids, 22000);
-  if (!excerpts.length) return { added: 0, sources: 0 };
+  const pool = await corpusExcerpts(ids, 400_000);
+  if (!pool.length) return { added: 0, sources: 0, skipped: 0 };
+  const done = (await getMeta<Record<string, string>>(CARDS_SRC)) ?? {};
+  const keyOf = (e: Excerpt) => `${e.noteId}:${e.page}`;
+  const fresh = includeDone ? pool : pool.filter((e) => done[keyOf(e)] !== hashString(e.text));
+  const skipped = pool.length - fresh.length;
+  if (!fresh.length) return { added: 0, sources: 0, skipped };
+  // fit the request budget, renumbering so the model's source numbers match what we send
+  const excerpts: Excerpt[] = [];
+  let used = 0;
+  for (const e of fresh) { if (used + e.text.length > 22000) break; used += e.text.length; excerpts.push({ ...e, n: excerpts.length + 1 }); }
   count("study.cards.generate");
   const raws = await generateCards(excerpts, want);
-  const fresh = dedupeCards(await toCards(raws, { notebookId: null, source: "ai", excerpts }), await listCards());
-  await putCards(fresh);
-  return { added: fresh.length, sources: excerpts.length };
+  const cards = dedupeCards(await toCards(raws, { notebookId: null, source: "ai", excerpts }), await listCards());
+  await putCards(cards);
+  for (const e of excerpts) done[keyOf(e)] = hashString(e.text);
+  await setMeta(CARDS_SRC, done);
+  return { added: cards.length, sources: excerpts.length, skipped };
 }
 
 export async function makeCardsFromRegion(dataUrl: string, ctx: { notebookId: string | null; noteId: string; page: number }): Promise<number> {

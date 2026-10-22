@@ -9,7 +9,8 @@ import { BlocksLayer, BLOCK_DEFAULTS, Latex } from "@/components/blocks";
 import { DrawingAids, type Cam, type ProtractorState } from "@/components/drawing-aids";
 import type { Segment } from "@/lib/guides";
 import { PX_PER_CM } from "@/lib/guides";
-import { findBoxes, boxToDoc } from "@/lib/search-core";
+import { findBoxes, boxToDoc, pageFingerprints } from "@/lib/search-core";
+import { estimateUsd, formatUsd } from "@/lib/ai-cost";
 import { PAGE_H, PAGE_W, PAGE_GAP } from "@/lib/page";
 import { TEMPLATES, renderTemplate, type TemplateId } from "@/lib/templates";
 import { PresetsButton } from "@/components/presets";
@@ -731,8 +732,17 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
   const closeExplain = () => { setExplain(null); setExplainRect(null); explainRegionImg.current = null; };
 
   // --- review: find every mistake on chosen pages, then step through them top to bottom -----------
-  async function runReview(pages: number[]) {
+  /** Which pages have anything of yours on them (ink or a text/maths/graph block). */
+  function inkPages(): boolean[] {
+    const fps = pageFingerprints({ strokes: canvasRef.current?.getStrokes() ?? [], images: [] }, pageCount);
+    const withBlocks = new Set(blocks.map((b) => Math.floor(b.y / (PAGE_H + PAGE_GAP))));
+    return fps.map((f, i) => f.strokes > 0 || withBlocks.has(i));
+  }
+  async function runReview(pagesIn: number[]) {
     setReviewSetup(false);
+    const inked = inkPages();
+    const pages = pagesIn.filter((p) => inked[p]);   // never pay to review a page with nothing written on it
+    if (!pages.length) return flash("There's no handwriting on the pages you picked, so there's nothing to review.");
     if (!ai) return flash("Turn on AI in Settings (and add your API key) to review for mistakes.");
     closeExplain();
     await flush();
@@ -1115,7 +1125,7 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
         </Modal>
       )}
       {sharePdf.modal}
-      {reviewSetup && <ReviewSetup pageCount={pageCount} currentPage={currentPage} thumb={(p) => { try { return canvasRef.current?.previewPage(p, 180) ?? null; } catch { return null; } }} onStart={runReview} onClose={() => setReviewSetup(false)} />}
+      {reviewSetup && <ReviewSetup pageCount={pageCount} currentPage={currentPage} inkPages={inkPages()} costHint={(n) => formatUsd(estimateUsd("review", n, getSettings()))} thumb={(p) => { try { return canvasRef.current?.previewPage(p, 180) ?? null; } catch { return null; } }} onStart={runReview} onClose={() => setReviewSetup(false)} />}
       {chem && <ChemModal items={chem} onClose={() => setChem(null)} />}
       {check && <CheckModal check={check} onClose={() => setCheck(null)} />}
       <Toast msg={toast} />

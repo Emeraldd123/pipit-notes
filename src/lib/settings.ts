@@ -22,6 +22,15 @@ export type Settings = {
   reportEnabled: boolean;
   /** Reporting endpoint; empty = this site's own /.netlify/functions/diag. */
   reportUrl: string;
+  /** Use the cheaper model for simple jobs (reading handwriting for search, follow-up chat, link explanations). */
+  economy: boolean;
+  economyModel: string;
+  /** Think harder on everything (slower, costs more). */
+  careful: boolean;
+  /** Soft monthly cap on AI spend in USD (0 = no cap). */
+  monthlyBudgetUsd: number;
+  /** Which side of the screen the tool rail sits on (put it under your non-writing hand). */
+  railSide: "left" | "right";
   /** Saved pen setups. */
   presets: Preset[];
   /** Custom colours picked recently (most recent first). */
@@ -34,13 +43,18 @@ const KEY = "pipit-notes.settings.v1";
 export const DEFAULT_SETTINGS: Settings = {
   apiKey: "",
   aiEnabled: false,
-  model: "claude-sonnet-5",
+  model: "claude-sonnet-5-5",
   theme: "system",
   autoIndex: false,
   shapeSnap: false,
   diagnostics: true,
   reportEnabled: true,
   reportUrl: "",
+  economy: true,
+  economyModel: "claude-haiku-5-5",
+  careful: false,
+  monthlyBudgetUsd: 0,
+  railSide: "left",
   presets: [],
   recentColors: [],
   scribbleErase: false,

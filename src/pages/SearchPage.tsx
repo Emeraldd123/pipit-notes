@@ -4,7 +4,8 @@ import { go } from "@/router";
 import { corpusExcerpts, excerptsFor, indexNote, searchNotes, type Hit } from "@/lib/search";
 import { askNotes, AiError, practiceQuestions, type Excerpt, type PracticeQuestion } from "@/lib/ai";
 import { getPageTexts, listNotebooks, listNotes } from "@/lib/db";
-import { aiReady, useSettings } from "@/lib/settings";
+import { aiReady, getSettings, useSettings } from "@/lib/settings";
+import { estimateUsd, formatUsd } from "@/lib/ai-cost";
 import type { NoteMeta, NotebookRec } from "@/types";
 import { Button, Card, Wordmark } from "@/components/ui";
 import { RichText } from "@/components/blocks";
@@ -124,7 +125,7 @@ function SearchTab({ notes, onIndexed, ai }: { notes: NoteMeta[]; onIndexed: (n:
       <Card className="mt-8 flex flex-wrap items-center justify-between gap-3 px-4 py-3.5">
         <div className="text-sm">
           <p className="flex items-center gap-1.5 font-medium"><ScanText size={15} className="text-primary" /> Read my handwriting</p>
-          <p className="text-xs text-foreground-muted">Makes handwritten pages searchable. Only pages that changed since last time are read.</p>
+          <p className="text-xs text-foreground-muted">Makes handwritten pages searchable. Only pages that changed since last time are read, about {formatUsd(estimateUsd("transcribe", 1, getSettings()))} a page.</p>
           {indexing && <p className="mt-1 flex items-center gap-1.5 text-xs"><Loader2 size={12} className="animate-spin" /> {indexing}</p>}
           {msg && <p className="mt-1 text-xs">{msg}</p>}
         </div>

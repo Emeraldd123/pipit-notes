@@ -7,6 +7,8 @@ import { requestPersistentStorage } from "@/lib/db";
 import { formatBytes, timeAgo } from "@/lib/format";
 import { aiReady, updateSettings, useSettings } from "@/lib/settings";
 import { claude } from "@/lib/ai";
+import { FEATURE_LABEL, monthByFeature, monthKey, monthTotal, type Ledger } from "@/lib/ai-cost";
+import { loadLedger, onLedgerChange, resetLedger } from "@/lib/ai-ledger";
 import { Button, Card, Modal, Toast } from "@/components/ui";
 import { PenTest } from "@/components/pentest";
 import { useDiagFlow } from "@/components/diag-flow";
@@ -17,9 +19,14 @@ import type { HealthItem } from "@/lib/telemetry-core";
 import type { LogEntry } from "@/types";
 
 const MODELS = [
-  { id: "claude-sonnet-5", label: "Claude Sonnet 5 (recommended)" },
-  { id: "claude-opus-5", label: "Claude Opus 5 (most accurate, slower)" },
-  { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5 (cheapest)" },
+  { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5 — recommended ($2 in / $10 out per million tokens)" },
+  { id: "claude-sonnet-5", label: "Claude Sonnet 5 ($2 / $10)" },
+  { id: "claude-opus-5-5", label: "Claude Opus 5.5 — most accurate ($4 / $20)" },
+  { id: "claude-haiku-5-5", label: "Claude Haiku 5.5 — cheapest ($0.10 / $0.50)" },
+];
+const ECONOMY_MODELS = [
+  { id: "claude-haiku-5-5", label: "Claude Haiku 5.5 ($0.10 / $0.50)" },
+  { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5 (same as main)" },
 ];
 
 export function SettingsPage() {
@@ -55,7 +62,11 @@ export function SettingsPage() {
   }
   async function testKey() {
     setTesting(true);
-    try { await claude({ user: "Reply with the single word: ok", maxTokens: 8, feature: "test" }); flash("Connected — the key works."); }
+    try {
+      await claude({ user: "Reply with the single word: ok", maxTokens: 8, feature: "test", model: s.model });
+      if (s.economy && s.economyModel !== s.model) await claude({ user: "Reply with the single word: ok", maxTokens: 8, feature: "test", model: s.economyModel });
+      flash("Connected — the key works" + (s.economy && s.economyModel !== s.model ? " (both models)." : "."));
+    }
     catch (e) { flash((e as Error).message); } finally { setTesting(false); }
   }
 
@@ -108,6 +119,29 @@ export function SettingsPage() {
               {!MODELS.some((m) => m.id === s.model) && <option value={s.model}>{s.model}</option>}
             </select>
           </label>
+          <label className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-border px-4 py-3 text-sm">
+            <span><strong>Use the cheaper model for simple jobs</strong><span className="block text-xs text-foreground-muted">Reading handwriting for search, follow-up questions and link explanations. Exams, marking, review, Explain, flashcards and maps always use your main model.</span></span>
+            <input type="checkbox" checked={s.economy} disabled={!s.aiEnabled} onChange={(e) => updateSettings({ economy: e.target.checked })} className="h-5 w-5 accent-[var(--primary)]" />
+          </label>
+          {s.economy && (
+            <label className="mt-3 block text-xs text-foreground-muted">Cheaper model
+              <select value={s.economyModel} onChange={(e) => updateSettings({ economyModel: e.target.value })} className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-foreground">
+                {ECONOMY_MODELS.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                {!ECONOMY_MODELS.some((m) => m.id === s.economyModel) && <option value={s.economyModel}>{s.economyModel}</option>}
+              </select>
+            </label>
+          )}
+          <label className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-border px-4 py-3 text-sm">
+            <span><strong>Careful mode</strong><span className="block text-xs text-foreground-muted">Lets the model think harder before answering. Slower and costs noticeably more — worth it only if you see mistakes in its answers.</span></span>
+            <input type="checkbox" checked={s.careful} disabled={!s.aiEnabled} onChange={(e) => updateSettings({ careful: e.target.checked })} className="h-5 w-5 accent-[var(--primary)]" />
+          </label>
+          <label className="mt-3 block text-xs text-foreground-muted">Monthly budget (US dollars, 0 = no limit)
+            <input type="number" min={0} step={1} inputMode="decimal" value={s.monthlyBudgetUsd || ""} placeholder="0"
+              onChange={(e) => updateSettings({ monthlyBudgetUsd: Math.max(0, Number(e.target.value) || 0) })}
+              className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary" />
+            <span className="mt-1 block">AI features pause when this month&apos;s estimated spend reaches it. Your real bill is in the Anthropic console.</span>
+          </label>
+          <AiUsagePanel budget={s.monthlyBudgetUsd} />
           <div className="mt-3 flex items-center gap-3">
             <Button onClick={testKey} disabled={testing || !aiReady(s)}>{testing ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Test connection</Button>
             <span className="text-xs text-foreground-muted">The key is stored only on this device.</span>
@@ -204,5 +238,35 @@ function Step({ done, children }: { done: boolean; children: React.ReactNode }) 
       <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] text-white ${done ? "bg-positive" : "bg-foreground-muted/60"}`}>{done ? "✓" : "·"}</span>
       <span className="min-w-0">{children}</span>
     </li>
+  );
+}
+
+/** What AI has cost this month, by feature (an estimate from token counts × published prices; kept only on this device). */
+function AiUsagePanel({ budget }: { budget: number }) {
+  const [ledger, setLedger] = useState<Ledger | null>(null);
+  useEffect(() => {
+    const load = () => void loadLedger().then((l) => setLedger({ ...l }));
+    load();
+    return onLedgerChange(load);
+  }, []);
+  if (!ledger) return null;
+  const m = monthKey();
+  const total = monthTotal(ledger, m);
+  const rows = monthByFeature(ledger, m).slice(0, 6);
+  const pct = budget > 0 ? Math.min(100, Math.round((total / budget) * 100)) : 0;
+  return (
+    <div className="mt-3 rounded-xl border border-border px-4 py-3 text-sm">
+      <div className="flex items-baseline justify-between">
+        <strong>AI usage this month</strong>
+        <span className="tabular-nums">{total < 0.01 ? "under 1¢" : `≈ $${total.toFixed(2)}`}{budget > 0 ? ` of $${budget.toFixed(0)}` : ""}</span>
+      </div>
+      {budget > 0 && <div className="mt-2 h-2 overflow-hidden rounded-full bg-surface-secondary"><div className={`h-full rounded-full ${pct >= 90 ? "bg-negative" : pct >= 70 ? "bg-amber-500" : "bg-positive"}`} style={{ width: `${pct}%` }} /></div>}
+      {rows.length === 0 ? <p className="mt-2 text-xs text-foreground-muted">Nothing yet this month.</p> : (
+        <ul className="mt-2 space-y-1 text-xs text-foreground-muted">
+          {rows.map((r) => <li key={r.feature} className="flex justify-between gap-3"><span className="truncate">{FEATURE_LABEL[r.feature] ?? r.feature} · {r.calls}×</span><span className="tabular-nums">{r.usd < 0.01 ? "<1¢" : `$${r.usd.toFixed(2)}`}</span></li>)}
+        </ul>
+      )}
+      <p className="mt-2 text-[11px] text-foreground-muted">An estimate from token counts and published prices — your Anthropic console has the real figure.{rows.length ? " " : ""}{rows.length ? <button className="underline" onClick={() => { if (confirm("Reset this device's usage estimate?")) void resetLedger(); }}>Reset</button> : null}</p>
+    </div>
   );
 }

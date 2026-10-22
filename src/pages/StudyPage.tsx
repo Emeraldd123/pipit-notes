@@ -18,7 +18,8 @@ import { crownOf, isDue, isNew } from "@/lib/srs";
 import { allParts, buildResult, type Exam, type Part, type PartAnswer, type PartMark, type Question } from "@/lib/exam-core";
 import { generateExam, markWithAi } from "@/lib/ai-study";
 import { AiError } from "@/lib/ai";
-import { aiReady, useSettings } from "@/lib/settings";
+import { aiReady, getSettings, useSettings } from "@/lib/settings";
+import { estimateUsd, formatUsd } from "@/lib/ai-cost";
 import { corpusExcerpts } from "@/lib/search";
 import { cardFromMistake, gatherPageImages, makeCardsFromNotes, resolveCrops, scopeNoteIds } from "@/lib/study-actions";
 import { markObjective } from "@/lib/exam-core";
@@ -514,11 +515,13 @@ function GenerateModal({ ai, notes, notebooks, onClose, onDone, setBusy }: {
 }) {
   const [scope, setScope] = useState("all");
   const [want, setWant] = useState(20);
+  const [again, setAgain] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const run = async () => {
     setErr(null); setBusy("Reading your notes and writing cards…");
     try {
-      const r = await makeCardsFromNotes(scope, want);
+      const r = await makeCardsFromNotes(scope, want, again);
+      if (!r.sources && r.skipped) { setErr(`You've already made cards from all ${r.skipped} page${r.skipped === 1 ? "" : "s"} here, and none have changed. Tick “Include pages I've already used” to make more anyway.`); return; }
       if (!r.sources) { setErr("There's no readable text in that scope yet. Use “Read my handwriting” on the Search page, or import typed PDFs."); return; }
       onDone(r.added ? `Added ${r.added} new card${r.added === 1 ? "" : "s"} from ${r.sources} page${r.sources === 1 ? "" : "s"}.` : "No new cards — you already have these.");
     } catch (e) { setErr(e instanceof AiError ? e.message : "Something went wrong: " + (e as Error).message); } finally { setBusy(null); }
@@ -531,7 +534,8 @@ function GenerateModal({ ai, notes, notebooks, onClose, onDone, setBusy }: {
           <Field label="About how many cards">
             <select value={want} onChange={(e) => setWant(Number(e.target.value))} className="mt-1 block w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground">{[10, 20, 30, 40].map((n) => <option key={n}>{n}</option>)}</select>
           </Field>
-          <p className="text-xs text-foreground-muted">Uses your handwriting-search text and PDF text. Cards are checked against what you already have so you won&apos;t get duplicates.</p>
+          <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={again} onChange={(e) => setAgain(e.target.checked)} /><span>Include pages I&apos;ve already used <span className="text-foreground-muted">(otherwise only new or changed pages are read, which saves money)</span></span></label>
+          <p className="text-xs text-foreground-muted">Uses your handwriting-search text and PDF text. Cards are checked against what you already have so you won&apos;t get duplicates. Typical cost {formatUsd(estimateUsd("cards", 1, getSettings()))}.</p>
           {err && <p className="text-sm text-negative">{err}</p>}
           <Button variant="primary" onClick={run}><Sparkles size={14} /> Make cards</Button>
         </div>
@@ -624,6 +628,7 @@ function ExamModal({ ai, notes, notebooks, onClose, onReady, setBusy, flash }: {
           </Field>
           <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={figures} onChange={(e) => setFigures(e.target.checked)} /><span><b>Lots of figures</b> — graphs, data tables, charts and diagrams to read and calculate from</span></label>
           <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={pictures} onChange={(e) => setPictures(e.target.checked)} /><span><b>Use pictures from my notes</b> — slides and diagrams from your PDFs can appear in questions <span className="text-foreground-muted">(sends a few page images; costs more)</span></span></label>
+          <p className="text-xs text-foreground-muted">Typical cost {formatUsd(estimateUsd("exam", questions / 8, getSettings()) + (pictures ? estimateUsd("review", 4, getSettings()) : 0))} to write, plus about {formatUsd(estimateUsd("exam.mark", 2, getSettings()))} to mark the written answers.</p>
           {err && <p className="text-sm text-negative">{err}</p>}
           <Button variant="primary" onClick={run}><Sparkles size={14} /> Write my exam</Button>
         </div>

@@ -113,26 +113,29 @@ export function ExplainPanel({ state, onAsk, onClose, onPin, onCards }: { state:
 
 // --- review: page picker ------------------------------------------------------------------------------------------
 
-export function ReviewSetup({ pageCount, currentPage, thumb, onStart, onClose }: {
+export function ReviewSetup({ pageCount, currentPage, thumb, inkPages, costHint, onStart, onClose }: {
   pageCount: number; currentPage: number; thumb: (p: number) => string | null;
+  /** which pages have any writing — blank or printed-only pages are skipped (nothing of yours to check, and no cost) */
+  inkPages: boolean[]; costHint: (pages: number) => string;
   onStart: (pages: number[]) => void; onClose: () => void;
 }) {
-  const [sel, setSel] = useState<Set<number>>(() => new Set([currentPage]));
+  const [sel, setSel] = useState<Set<number>>(() => new Set(inkPages[currentPage] ? [currentPage] : []));
   const toggle = (p: number) => setSel((s) => { const n = new Set(s); if (n.has(p)) n.delete(p); else n.add(p); return n; });
   const all = Array.from({ length: pageCount }, (_, i) => i);
+  const written = all.filter((p) => inkPages[p]);
   return (
     <Modal title="Review for mistakes" onClose={onClose} wide>
-      <p className="mb-3 text-sm text-foreground-muted">Pick the pages to check. I&apos;ll find every mistake and walk you through them from top to bottom. Each page is read by AI once (about one request per page).</p>
+      <p className="mb-3 text-sm text-foreground-muted">Pick the pages to check. I&apos;ll find every mistake and walk you through them from top to bottom. Only pages you&apos;ve written on can be reviewed, and a page that hasn&apos;t changed since the last review costs nothing.</p>
       <div className="mb-3 flex flex-wrap gap-2">
-        <Button onClick={() => setSel(new Set(all))}>Whole note</Button>
-        <Button onClick={() => setSel(new Set([currentPage]))}>This page</Button>
+        <Button onClick={() => setSel(new Set(written))}>Whole note ({written.length} written)</Button>
+        <Button disabled={!inkPages[currentPage]} onClick={() => setSel(new Set([currentPage]))}>This page</Button>
         <Button variant="ghost" onClick={() => setSel(new Set())}>Clear</Button>
       </div>
       <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-4 md:grid-cols-5">
         {all.map((p) => {
           const on = sel.has(p), src = thumb(p);
           return (
-            <button key={p} onClick={() => toggle(p)} className={`relative overflow-hidden rounded-lg border-2 bg-white text-left ${on ? "border-primary" : "border-border"}`}>
+            <button key={p} disabled={!inkPages[p]} onClick={() => toggle(p)} title={inkPages[p] ? undefined : "Nothing written on this page"} className={`relative overflow-hidden rounded-lg border-2 bg-white text-left ${on ? "border-primary" : "border-border"} ${inkPages[p] ? "" : "opacity-35"}`}>
               {src ? <img src={src} alt="" className="block aspect-[1240/1754] w-full object-cover" draggable={false} /> : <div className="aspect-[1240/1754] w-full" />}
               <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 text-[11px] text-white">{p + 1}</span>
               {on && <span className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-white"><Check size={12} /></span>}
@@ -141,7 +144,7 @@ export function ReviewSetup({ pageCount, currentPage, thumb, onStart, onClose }:
         })}
       </div>
       <div className="mt-4 flex items-center justify-between">
-        <span className="text-sm text-foreground-muted">{sel.size} page{sel.size === 1 ? "" : "s"} selected</span>
+        <span className="text-sm text-foreground-muted">{sel.size} page{sel.size === 1 ? "" : "s"} selected · {costHint(sel.size)}</span>
         <Button variant="primary" disabled={sel.size === 0} onClick={() => onStart([...sel].sort((a, b) => a - b))}><ListChecks size={15} /> Find mistakes</Button>
       </div>
     </Modal>

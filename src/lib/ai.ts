@@ -4,6 +4,9 @@
 import { aiReady, getSettings } from "./settings";
 import { count, error as logErr, track, warn } from "./telemetry";
 import { JsonReplyError, parseModelJson } from "./json-repair.ts";
+import { effortFor, maxTokensFor, modelFor, type Effort } from "./ai-cost.ts";
+import { recordUsage, spentThisMonth } from "./ai-ledger";
+import { cachedAi } from "./ai-cache";
 import { normalizeIssues, type Issue } from "./review-core.ts";
 
 export class AiError extends Error {}
@@ -19,45 +22,90 @@ export function imageBlock(dataUrl: string): ImageBlock {
 }
 export const text = (t: string): TextBlock => ({ type: "text", text: t });
 
+const RETRY_STATUS = new Set([429, 500, 502, 503, 529]);
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const usd = (v: number) => `$${v.toFixed(2)}`;
+
 export async function claude(opts: {
   system?: string;
   user: Content[] | string;
   maxTokens?: number;
   model?: string;
   signal?: AbortSignal;
-  /** which feature is calling — used only to label metrics (never content) */
+  /** which feature is calling — decides the model, thinking effort and cost labelling (never content) */
   feature?: string;
+  effort?: Effort;
+  timeoutMs?: number;
 }): Promise<string> {
   const s = getSettings();
   if (!aiReady(s)) throw new AiError("AI features are off. Turn them on and add an API key in Settings.");
   const feature = opts.feature ?? "other";
+  if (s.monthlyBudgetUsd > 0) {
+    const spent = await spentThisMonth();
+    if (spent >= s.monthlyBudgetUsd) throw new AiError(`You've reached your monthly AI budget (${usd(spent)} of ${usd(s.monthlyBudgetUsd)}). Raise it in Settings → AI features to keep going.`);
+  }
+  let model = opts.model ?? modelFor(feature, s);
+  let effort = opts.effort ?? effortFor(feature, s.careful, model);
   const t0 = performance.now();
   count(`ai.${feature}`);
-  let res: Response;
-  try {
-    res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      signal: opts.signal,
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": s.apiKey.trim(),
-        "anthropic-version": "2023-06-01",
-        // Required for calls made directly from a browser (this is a single-user,
-        // on-device app using its owner's own key).
-        "anthropic-dangerous-direct-browser-access": "true",
-      },
-      body: JSON.stringify({
-        model: opts.model ?? s.model,
-        max_tokens: opts.maxTokens ?? 2000,
-        ...(opts.system ? { system: opts.system } : {}),
-        messages: [{ role: "user", content: opts.user }],
-      }),
-    });
-  } catch (e) {
-    // network failure / offline / blocked — distinct from the API rejecting the call
-    if ((e as Error)?.name !== "AbortError") logErr("ai", "request could not be sent", { feature, err: String((e as Error)?.message ?? e).slice(0, 120), online: navigator.onLine });
-    throw new AiError(navigator.onLine === false ? "You're offline — AI features need a connection." : "Couldn't reach the AI service. Check your connection and try again.");
+  const timeoutMs = opts.timeoutMs ?? (feature === "exam" ? 300_000 : 120_000);
+  let res: Response | null = null;
+  let networkRetried = false;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const ctrl = new AbortController();
+    const onAbort = () => ctrl.abort();
+    opts.signal?.addEventListener("abort", onAbort);
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        signal: ctrl.signal,
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": s.apiKey.trim(),
+          "anthropic-version": "2023-06-01",
+          // Required for calls made directly from a browser (this is a single-user,
+          // on-device app using its owner's own key).
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: maxTokensFor(opts.maxTokens ?? 2000, effort),   // thinking shares this budget
+          ...(effort ? { output_config: { effort } } : {}),
+          ...(opts.system ? { system: opts.system } : {}),
+          messages: [{ role: "user", content: opts.user }],
+        }),
+      });
+    } catch (e) {
+      if (opts.signal?.aborted) throw new AiError("Cancelled.");
+      if (ctrl.signal.aborted) {
+        logErr("ai", "request timed out", { feature, model, ms: Math.round(performance.now() - t0) });
+        throw new AiError("The AI took too long to answer. Try again — a smaller selection is quicker.");
+      }
+      // network failure / offline / blocked — nothing was billed, so one quiet retry is free
+      if (!networkRetried && navigator.onLine !== false) { networkRetried = true; await sleep(800); continue; }
+      logErr("ai", "request could not be sent", { feature, err: String((e as Error)?.message ?? e).slice(0, 120), online: navigator.onLine });
+      throw new AiError(navigator.onLine === false ? "You're offline — AI features need a connection." : "Couldn't reach the AI service. Check your connection and try again.");
+    } finally {
+      clearTimeout(timer);
+      opts.signal?.removeEventListener("abort", onAbort);
+    }
+    if (res.ok) break;
+    // Rejections that are about OUR request shape are fixed once and retried (a 400/404 is never billed)
+    if (res.status === 400 || res.status === 404) {
+      let detail = "";
+      try { detail = (await res.clone().json())?.error?.message ?? ""; } catch { /* ignore */ }
+      if (effort && /effort|output_config/i.test(detail)) { effort = undefined; continue; }
+      if (model !== s.model && res.status === 404) { model = s.model; effort = opts.effort ?? effortFor(feature, s.careful, model); continue; }   // cheaper model not available on this key
+    }
+    if (RETRY_STATUS.has(res.status) && attempt < 3) {
+      const ra = Number(res.headers.get("retry-after"));
+      await sleep(Number.isFinite(ra) && ra > 0 ? Math.min(ra, 20) * 1000 : 1500 * 2 ** attempt);
+      continue;
+    }
+    break;
   }
+  if (!res) throw new AiError("Couldn't reach the AI service.");
   const ms = performance.now() - t0;
   if (!res.ok) {
     let detail = "";
@@ -66,16 +114,20 @@ export async function claude(opts: {
     } catch {
       /* ignore */
     }
-    logErr("ai", `request failed (${res.status})`, { feature, status: res.status, model: opts.model ?? s.model, ms: Math.round(ms), detail: detail.slice(0, 160) });
+    logErr("ai", `request failed (${res.status})`, { feature, status: res.status, model, ms: Math.round(ms), detail: detail.slice(0, 160) });
     if (res.status === 401) throw new AiError("The API key was rejected. Check it in Settings.");
     if (res.status === 429) throw new AiError("Rate limited — wait a moment and try again.");
+    if (res.status === 529 || res.status >= 500) throw new AiError("The AI service is busy right now. Try again in a minute.");
     throw new AiError(`AI request failed (${res.status}) ${detail}`.trim());
   }
   const data = await res.json();
   track("ai.ms", ms);
   track(`ai.${feature}.ms`, ms);
-  if (data?.usage) { track("ai.inputTokens", data.usage.input_tokens ?? 0); track("ai.outputTokens", data.usage.output_tokens ?? 0); }
-  if (data?.stop_reason === "max_tokens") warn("ai", "reply was cut off at the token limit", { feature, maxTokens: opts.maxTokens ?? 2000 });
+  if (data?.usage) {
+    track("ai.inputTokens", data.usage.input_tokens ?? 0); track("ai.outputTokens", data.usage.output_tokens ?? 0);
+    void recordUsage(feature, model, data.usage);
+  }
+  if (data?.stop_reason === "max_tokens") warn("ai", "reply was cut off at the token limit", { feature, maxTokens: opts.maxTokens ?? 2000, model });
   return (data.content ?? []).filter((b: { type: string }) => b.type === "text").map((b: { text: string }) => b.text).join("");
 }
 
@@ -231,6 +283,10 @@ const EXPLAIN_SYSTEM =
   '{"concept":"short name","explanation":"markdown-lite text","shortfalls":[{"what":"...","why":"...","fix":"..."}],"followups":["a natural next question","another"]}.';
 
 export async function explainRegion(region: string): Promise<Explanation> {
+  // circling the same thing again is free: the answer for an identical picture is remembered
+  return (await cachedAi("explain", region, () => explainRegionFresh(region))).value;
+}
+async function explainRegionFresh(region: string): Promise<Explanation> {
   const raw = await claude({ feature: "explain", maxTokens: 2200, system: EXPLAIN_SYSTEM, user: [imageBlock(region), text("Explain this, and tell me where my understanding fell short.")] });
   const j = extractJson<Partial<Explanation>>(raw);
   const s = (v: unknown) => (typeof v === "string" ? v : "");
@@ -263,7 +319,11 @@ const REVIEW_SYSTEM =
   'Use LaTeX in $...$ for maths. If the page has no mistakes (or is blank) return {"issues":[]}.';
 
 export async function reviewPage(pageImage: string, page: number): Promise<Issue[]> {
-  const raw = await claude({ feature: "review", maxTokens: 3000, system: REVIEW_SYSTEM, user: [imageBlock(pageImage), text(`Review this page (page ${page + 1}).`)] });
-  const j = extractJson<{ issues?: unknown }>(raw);
-  return normalizeIssues(j.issues, page);
+  // an unchanged page (same picture) is never reviewed — or paid for — twice. The raw findings are cached, not the
+  // page-specific rectangles, so the answer stays right even if pages have been reordered since.
+  const { value } = await cachedAi("review", pageImage, async () => {
+    const raw = await claude({ feature: "review", maxTokens: 3000, system: REVIEW_SYSTEM, user: [imageBlock(pageImage), text("Review this page.")] });
+    return extractJson<{ issues?: unknown }>(raw).issues ?? [];
+  });
+  return normalizeIssues(value, page);
 }
