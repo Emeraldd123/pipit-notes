@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ArrowLeft, BookOpenCheck, BookmarkPlus, Brain, Crown, Flame, GraduationCap, Layers, Loader2, Pencil, Play, Plus, Settings2, Sparkles, Star, Target, Trash2, Zap, ClipboardList, AlertTriangle, Check,
+  ArrowLeft, BookOpenCheck, BookmarkPlus, Brain, Crown, Flame, GraduationCap, Layers, Loader2, Pencil, Play, Plus, Settings2, Sparkles, Star, Target, Trash2, Zap, ClipboardList, AlertTriangle, Check, Snowflake,
 } from "lucide-react";
 import { go } from "@/router";
 import { RichText } from "@/components/blocks";
@@ -207,6 +207,9 @@ export function StudyPage({ view }: { view?: string }) {
           <h1 className="serif text-4xl tracking-tight">Study <span className="serif-i text-primary">time</span></h1>
           <div className="flex items-center gap-3">
             <span className={`flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm font-bold ${streak ? "border-orange-500/40 bg-orange-500/10 text-orange-600" : "border-border text-foreground-muted"}`} title="Day streak"><Flame size={16} fill={streak ? "currentColor" : "none"} /> {streak}</span>
+            <span className="flex items-center gap-1 rounded-full border border-sky-500/40 bg-sky-500/10 px-2.5 py-1.5 text-sm font-bold text-sky-600" title="Streak freezes: if you miss a day, one is used instead of ending your streak. You earn one for every 7 days in a row (you can hold 2).">
+              <Snowflake size={15} /> {progress?.freezes ?? 0}
+            </span>
             <GoalRing pct={goalPct} label={`${goalXp}/${progress?.goal ?? 30}`} />
             <button onClick={() => setModal("settings")} className="rounded-lg p-2 text-foreground-muted hover:bg-surface-secondary" title="Study settings"><Settings2 size={17} /></button>
           </div>

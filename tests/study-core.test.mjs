@@ -99,14 +99,14 @@ test("outcomes reschedule cards: right first time = Good, a slip = Again, self-g
     { cardId: d[2].id, firstTry: true, grade: 3 },
     { cardId: d[2].id, firstTry: true },
   ], NOW);
-  assert.equal(out[0].interval, 1);
+  assert.equal(out[0].interval, 3);                                            // Good on a new card (FSRS default)
   assert.equal(out[1].interval, 0);
-  assert.equal(out[2].interval, 3);                                            // Easy
+  assert.equal(out[2].interval, 16);                                           // Easy
   assert.equal(gradeFor([{ cardId: "x", firstTry: false }, { cardId: "x", firstTry: true }]), 0);
 });
 
 test("streaks, XP and the daily goal", () => {
-  let p = newProgress();
+  let p = { ...newProgress(), freezes: 0 };                      // without a freeze in hand
   const D1 = NOW, D2 = NOW + DAY, D4 = NOW + 3 * DAY;
   p = addXp(p, 30, D1);  assert.equal(p.streak, 1);
   p = addXp(p, 25, D1);  assert.equal(p.streak, 1); assert.equal(xpToday(p, D1), 55);
@@ -143,4 +143,22 @@ test("new cards and duplicates", () => {
   assert.equal(c.reps, 0); assert.equal(c.kind, "basic"); assert.equal(c.source, "manual");
   const out = dedupeCards([{ front: "Powerhouse of the cell?" }, { front: "New thing" }, { front: "New thing" }], deck());
   assert.deepEqual(out.map((x) => x.front), ["New thing"]);          // the first is the same question as an existing card
+});
+
+test("streak freezes cover a missed day, are earned every 7 days, and cap at 2", () => {
+  let p = newProgress();
+  assert.equal(p.freezes, 1);
+  const day = (n) => NOW + n * DAY;
+  p = addXp(p, 5, day(0)); p = addXp(p, 5, day(1));            // streak 2
+  assert.equal(currentStreak(p, day(3)), 2);                      // one missed day: the freeze will save it
+  p = addXp(p, 5, day(3));                                        // missed day 2
+  assert.equal(p.streak, 3);
+  assert.equal(p.freezes, 0);
+  assert.equal(p.frozen.length, 1);
+  assert.equal(currentStreak(p, day(5)), 0);                      // no freezes left: a missed day breaks it
+  for (let d = 4; d <= 7; d++) p = addXp(p, 5, day(d));           // streak reaches 7 -> earn one back
+  assert.equal(p.streak, 7);
+  assert.equal(p.freezes, 1);
+  for (let d = 8; d <= 21; d++) p = addXp(p, 5, day(d));
+  assert.equal(p.freezes, 2);                                     // capped
 });

@@ -241,8 +241,13 @@ export type Progress = {
   goal: number;
   sound: boolean;
   hearts: boolean;
+  /** Streak freezes held (max 2): a missed day uses one instead of breaking the streak. One is earned every 7 days of streak. */
+  freezes: number;
+  /** days covered by a freeze, for the "your streak was saved" note */
+  frozen?: string[];
 };
-export const newProgress = (): Progress => ({ xp: 0, streak: 0, best: 0, lastDay: null, days: {}, goal: 30, sound: true, hearts: true });
+export const MAX_FREEZES = 2;
+export const newProgress = (): Progress => ({ xp: 0, streak: 0, best: 0, lastDay: null, days: {}, goal: 30, sound: true, hearts: true, freezes: 1 });
 
 export function dayKey(t: number): string {
   const d = new Date(t);
@@ -254,17 +259,30 @@ const dayDiff = (a: string, b: string) => Math.round((new Date(b + "T12:00:00").
 /** The streak as it should be DISPLAYED now (a missed day silently breaks it). */
 export function currentStreak(p: Progress, now = Date.now()): number {
   if (!p.lastDay) return 0;
-  return dayDiff(p.lastDay, dayKey(now)) <= 1 ? p.streak : 0;
+  const gap = dayDiff(p.lastDay, dayKey(now));
+  if (gap <= 1) return p.streak;
+  return gap - 1 <= (p.freezes ?? 0) ? p.streak : 0;   // missed days a freeze will cover don't break it
 }
 
 export function addXp(p: Progress, xp: number, now = Date.now()): Progress {
   const today = dayKey(now);
   let streak = p.streak;
+  let freezes = p.freezes ?? 0;
+  let frozen = p.frozen ?? [];
   if (p.lastDay !== today) {
-    streak = p.lastDay && dayDiff(p.lastDay, today) === 1 ? p.streak + 1 : 1;
+    const gap = p.lastDay ? dayDiff(p.lastDay, today) : Infinity;
+    const missed = gap - 1;
+    if (gap === 1) streak = p.streak + 1;
+    else if (p.lastDay && p.streak > 0 && missed <= freezes) {
+      // Duolingo-style streak freeze: the missed days are covered, the streak carries on
+      freezes -= missed;
+      frozen = [...frozen, ...Array.from({ length: missed }, (_, i) => dayKey(now - (missed - i) * 86_400_000))].slice(-14);
+      streak = p.streak + 1;
+    } else streak = 1;
+    if (streak > 0 && streak % 7 === 0 && freezes < MAX_FREEZES) freezes++;
   }
   const days = { ...p.days, [today]: (p.days[today] ?? 0) + xp };
-  return { ...p, xp: p.xp + xp, streak, best: Math.max(p.best, streak), lastDay: today, days };
+  return { ...p, xp: p.xp + xp, streak, best: Math.max(p.best, streak), lastDay: today, days, freezes, frozen };
 }
 
 export type LessonStats = { total: number; correctFirstTry: number; maxCombo: number; heartsLeft?: number; completed: boolean };
