@@ -5,6 +5,7 @@ import { EditorPage } from "./pages/Editor";
 import { SearchPage } from "./pages/SearchPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { GraphPage } from "./pages/GraphPage";
+import { StudyPage } from "./pages/StudyPage";
 import { applyTheme, getSettings } from "./lib/settings";
 
 export function App() {
@@ -25,6 +26,7 @@ export function App() {
     case "graph": return <GraphPage />;
     case "search": return <SearchPage />;
     case "settings": return <SettingsPage />;
+    case "study": return <StudyPage />;
     default: return <Library notebook={route.notebook} q={route.q} />;
   }
 }

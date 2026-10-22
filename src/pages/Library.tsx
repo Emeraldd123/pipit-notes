@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Download, FileUp, Folder, FolderInput, FolderPlus, Loader2, Network, NotebookPen, Pencil, Pin, Plus, Search, Settings as SettingsIcon, Trash2, Upload,
+  CheckSquare, Clock, Download, FileUp, Folder, FolderInput, FolderPlus, GraduationCap, Loader2, Network, NotebookPen, Pencil, Pin, Plus, Search, Settings as SettingsIcon, Tag, Trash2, Upload, X,
 } from "lucide-react";
 import type { NoteMeta, NotebookRec } from "@/types";
 import {
@@ -26,6 +26,10 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [overdue, setOverdue] = useState(false);
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [moveMenu, setMoveMenu] = useState(false);
   const [bootDismissed, setBootDismissed] = useState(false);
   // The startup checks finish a moment after first paint, so the result must be reactive —
   // otherwise a data-loss warning detected after the first render would never be shown.
@@ -48,12 +52,22 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
 
   const visible = useMemo(() => {
     const f = filter.trim().toLowerCase();
+    if (notebook === "recent") {
+      return (notes ?? []).filter((n) => n.openedAt).sort((a, b) => (b.openedAt ?? 0) - (a.openedAt ?? 0)).slice(0, 16);
+    }
     return (notes ?? []).filter((n) => {
       if (notebook === "none" ? n.notebookId !== null : notebook ? n.notebookId !== notebook : false) return false;
+      if (tagFilter && !n.tags.includes(tagFilter)) return false;
       if (!f) return true;
       return n.title.toLowerCase().includes(f) || n.tags.some((t) => t.toLowerCase().includes(f));
     });
-  }, [notes, notebook, filter]);
+  }, [notes, notebook, filter, tagFilter]);
+
+  const allTags = useMemo(() => {
+    const c = new Map<string, number>();
+    for (const n of notes ?? []) for (const t of n.tags) c.set(t, (c.get(t) ?? 0) + 1);
+    return [...c.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([t]) => t);
+  }, [notes]);
 
   const counts = useMemo(() => {
     const c = new Map<string | null, number>();
@@ -63,7 +77,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
 
   async function newNote() {
     count("library.newNote");
-    const nb = notebook && notebook !== "none" ? notebook : null;
+    const nb = notebook && notebook !== "none" && notebook !== "recent" ? notebook : null;
     const n = await createNote({ notebookId: nb });
     go({ name: "note", id: n.id });
   }
@@ -83,37 +97,94 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
     await reload();
   }
 
+  async function importOnePdf(file: File, label: string): Promise<string> {
+    const pages = await renderPdf(file, (d, t) => setBusy(`${label}Rendering page ${d}/${t}…`));
+    const nb = notebook && notebook !== "none" && notebook !== "recent" ? notebook : null;
+    const note = await createNote({ title: file.name.replace(/\.pdf$/i, ""), notebookId: nb, paper: "blank", pageCount: pages.length });
+    for (let i = 0; i < pages.length; i++) {
+      setBusy(`${label}Saving page ${i + 1}/${pages.length}…`);
+      const pg = pages[i];
+      const fit = Math.min(PAGE_W / pg.w, PAGE_H / pg.h); // contain within the sheet
+      const w = pg.w * fit;
+      const h = pg.h * fit;
+      await addImage(note.id, pg.blob, { x: (PAGE_W - w) / 2, y: pageTop(i) + (PAGE_H - h) / 2, width: w, height: h, zIndex: i });
+      if (pg.text) await putPageText({ key: `${note.id}:${i}:pdf`, noteId: note.id, page: i, source: "pdf", text: pg.text, hash: "pdf", updatedAt: Date.now() });
+    }
+    return note.id;
+  }
+
+  /** One or many PDFs (e.g. a stack of Canva packets): each becomes its own note, filed in the open notebook. */
   async function onImportPdf(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+    const files = Array.from(e.target.files ?? []).filter((f) => /pdf$/i.test(f.type) || /\.pdf$/i.test(f.name));
     e.target.value = "";
-    if (!file) return;
+    if (!files.length) return;
     count("library.importPdf");
-    setBusy("Reading PDF…");
+    if (files.length > 1) count("library.importPdf.batch");
+    const made: string[] = [];
+    const failed: string[] = [];
     try {
-      const pages = await renderPdf(file, (d, t) => setBusy(`Rendering page ${d}/${t}…`));
-      const nb = notebook && notebook !== "none" ? notebook : null;
-      const note = await createNote({ title: file.name.replace(/\.pdf$/i, ""), notebookId: nb, paper: "blank", pageCount: pages.length });
-      for (let i = 0; i < pages.length; i++) {
-        setBusy(`Saving page ${i + 1}/${pages.length}…`);
-        const pg = pages[i];
-        const fit = Math.min(PAGE_W / pg.w, PAGE_H / pg.h); // contain within the sheet
-        const w = pg.w * fit;
-        const h = pg.h * fit;
-        await addImage(note.id, pg.blob, { x: (PAGE_W - w) / 2, y: pageTop(i) + (PAGE_H - h) / 2, width: w, height: h, zIndex: i });
-        if (pg.text) await putPageText({ key: `${note.id}:${i}:pdf`, noteId: note.id, page: i, source: "pdf", text: pg.text, hash: "pdf", updatedAt: Date.now() });
+      for (let i = 0; i < files.length; i++) {
+        const label = files.length > 1 ? `${i + 1}/${files.length} “${files[i].name.replace(/\.pdf$/i, "").slice(0, 28)}” · ` : "";
+        setBusy(`${label}Reading PDF…`);
+        try {
+          made.push(await importOnePdf(files[i], label));
+        } catch (err) {
+          logError("pdf-import", err, { bytes: files[i].size });
+          failed.push(`${files[i].name}: ${(err as Error).message}`);
+        }
       }
-      go({ name: "note", id: note.id });
-    } catch (err) {
-      logError("pdf-import", err, { bytes: file.size });
-      alert("Couldn't import that PDF: " + (err as Error).message);
     } finally {
       setBusy(null);
     }
+    if (made.length === 1 && !failed.length) return go({ name: "note", id: made[0] });
+    await reload();
+    flash(`Imported ${made.length} PDF${made.length === 1 ? "" : "s"}${failed.length ? ` · ${failed.length} failed` : ""}.`);
+    if (failed.length) alert("Couldn't import:\n" + failed.join("\n"));
+  }
+
+  // --- multi-select -------------------------------------------------------------------------
+  const togglePick = (id: string) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const stopSelecting = () => { setSelecting(false); setPicked(new Set()); setMoveMenu(false); };
+  async function moveSelected(nbId: string | null) {
+    setMoveMenu(false);
+    for (const id of picked) await patchNote(id, { notebookId: nbId }, false);
+    count("library.bulkMove");
+    flash(`Moved ${picked.size} note${picked.size === 1 ? "" : "s"}.`);
+    stopSelecting();
+    await reload();
+  }
+  async function tagSelected() {
+    const t = prompt("Add tag(s) to the selected notes (comma-separated)")?.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+    if (!t?.length) return;
+    for (const id of picked) {
+      const n = (notes ?? []).find((x) => x.id === id);
+      if (n) await patchNote(id, { tags: [...new Set([...n.tags, ...t])] }, false);
+    }
+    count("library.bulkTag");
+    stopSelecting();
+    await reload();
+  }
+  async function deleteSelected() {
+    if (!confirm(`Delete ${picked.size} note${picked.size === 1 ? "" : "s"}? This can't be undone — back up first if unsure.`)) return;
+    for (const id of picked) await deleteNote(id);
+    count("library.bulkDelete");
+    flash(`Deleted ${picked.size}.`);
+    stopSelecting();
+    await reload();
+  }
+  async function exportSelected() {
+    const list = (notes ?? []).filter((n) => picked.has(n.id));
+    if (!list.length) return;
+    await exportList(list, "Selected notes");
+    stopSelecting();
   }
 
   async function exportNotebookZip(id: string | null, name: string) {
     const list = (notes ?? []).filter((n) => (id === null ? n.notebookId === null : n.notebookId === id));
     if (!list.length) return flash(`"${name}" has no notes to export.`);
+    await exportList(list, name);
+  }
+  async function exportList(list: NoteMeta[], name: string) {
     setBusy("Preparing…");
     count("export.zip");
     const stopZip = timer("export.zip.ms");
@@ -155,7 +226,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
     }
   }
 
-  const activeName = notebook === "none" ? "Unfiled" : notebook ? notebooks.find((n) => n.id === notebook)?.name ?? "Notebook" : "All notes";
+  const activeName = notebook === "recent" ? "Recent" : notebook === "none" ? "Unfiled" : notebook ? notebooks.find((n) => n.id === notebook)?.name ?? "Notebook" : "All notes";
 
   return (
     <div className="paper-bg safe-t flex min-h-full">
@@ -164,6 +235,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
         <div className="mb-6 flex items-center gap-2"><NotebookPen size={20} className="text-primary" /><Wordmark size="sm" /></div>
         <nav className="space-y-0.5 text-sm">
           <SideItem active={!notebook} onClick={() => go({ name: "library", notebook: null, q: "" })} icon={<Folder size={15} />} label="All notes" count={notes?.length} />
+          <SideItem active={notebook === "recent"} onClick={() => go({ name: "library", notebook: "recent", q: "" })} icon={<Clock size={15} />} label="Recent" />
           <SideItem active={notebook === "none"} onClick={() => go({ name: "library", notebook: "none", q: "" })} icon={<Folder size={15} />} label="Unfiled" count={counts.get(null)}
             action={<button title="Download as PDFs (.zip)" onClick={() => exportNotebookZip(null, "Unfiled")} className="p-1 text-foreground-muted hover:text-primary"><Download size={12} /></button>} />
           {notebooks.map((nb) => (
@@ -179,6 +251,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
           </button>
         </nav>
         <div className="mt-auto space-y-0.5 pt-6 text-sm">
+          <button onClick={() => go({ name: "study" })} className="flex w-full items-center gap-2 rounded-lg bg-primary/10 px-2.5 py-1.5 font-medium text-primary hover:bg-primary/20"><GraduationCap size={15} /> Study</button>
           <button onClick={() => go({ name: "search" })} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-foreground-muted hover:bg-surface-secondary"><Search size={15} /> Search &amp; ask</button>
           <button onClick={() => go({ name: "graph" })} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-foreground-muted hover:bg-surface-secondary"><Network size={15} /> Knowledge map</button>
           <button onClick={() => go({ name: "settings" })} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-foreground-muted hover:bg-surface-secondary"><SettingsIcon size={15} /> Settings &amp; backup</button>
@@ -201,7 +274,8 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
                   className="w-48 rounded-xl border border-border bg-surface py-2 pl-8 pr-3 text-sm outline-none focus:border-primary" />
               </div>
               <Button onClick={() => go({ name: "search" })} className="md:hidden"><Search size={15} /></Button>
-              <Button onClick={() => pdfRef.current?.click()} disabled={!!busy}><FileUp size={15} /> Import PDF</Button>
+              <Button onClick={() => (selecting ? stopSelecting() : setSelecting(true))} title="Select several notes"><CheckSquare size={15} /> {selecting ? "Cancel" : "Select"}</Button>
+              <Button onClick={() => pdfRef.current?.click()} disabled={!!busy} title="Pick one or several PDFs"><FileUp size={15} /> Import PDFs</Button>
               <Button variant="primary" onClick={newNote}><Plus size={15} /> New note</Button>
             </div>
           </header>
@@ -212,8 +286,20 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
             <Chip active={notebook === "none"} onClick={() => go({ name: "library", notebook: "none", q: "" })}>Unfiled</Chip>
             {notebooks.map((nb) => <Chip key={nb.id} active={notebook === nb.id} onClick={() => go({ name: "library", notebook: nb.id, q: "" })}>{nb.name}</Chip>)}
             <Chip onClick={newNotebook}>+ Notebook</Chip>
+            <Chip active={notebook === "recent"} onClick={() => go({ name: "library", notebook: "recent", q: "" })}>Recent</Chip>
+            <Chip onClick={() => go({ name: "study" })}>Study</Chip>
             <Chip onClick={() => go({ name: "graph" })}>Map</Chip>
           </div>
+
+          {allTags.length > 0 && notebook !== "recent" && (
+            <div className="mb-4 flex flex-wrap items-center gap-1.5">
+              <Tag size={13} className="text-foreground-muted" />
+              {allTags.map((t) => (
+                <button key={t} onClick={() => setTagFilter(tagFilter === t ? null : t)}
+                  className={`rounded-full border px-2.5 py-0.5 text-xs ${tagFilter === t ? "border-primary bg-primary text-white" : "border-border bg-surface text-foreground-muted hover:bg-surface-secondary"}`}>#{t}</button>
+              ))}
+            </div>
+          )}
 
           {boot.evicted && !bootDismissed && (
             <Card className="mb-5 border-negative/50 bg-negative/10 px-4 py-3">
@@ -247,15 +333,38 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
           ) : (
             <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4">
               {visible.map((n) => (
-                <NoteTile key={n.id} note={n} notebook={notebooks.find((b) => b.id === n.notebookId)} notebooks={notebooks} onChange={reload} flash={flash} />
+                <NoteTile key={n.id} note={n} notebook={notebooks.find((b) => b.id === n.notebookId)} notebooks={notebooks} onChange={reload} flash={flash} selecting={selecting} picked={picked.has(n.id)} onPick={() => togglePick(n.id)} />
               ))}
             </div>
           )}
         </div>
       </main>
 
-      <input ref={pdfRef} type="file" accept="application/pdf" hidden onChange={onImportPdf} />
+      <input ref={pdfRef} type="file" accept="application/pdf" multiple hidden onChange={onImportPdf} />
       <input ref={restoreRef} type="file" accept=".zip,application/zip" multiple hidden onChange={onRestore} />
+      {selecting && (
+        <div className="safe-b fixed inset-x-0 bottom-4 z-40 flex justify-center px-3">
+          <div className="relative flex flex-wrap items-center gap-1.5 rounded-2xl border border-border bg-surface px-3 py-2 shadow-2xl">
+            <span className="mr-1 text-sm font-medium">{picked.size} selected</span>
+            <Button variant="ghost" onClick={() => setPicked(new Set(visible.map((n) => n.id)))}>All</Button>
+            <Button disabled={!picked.size} onClick={() => setMoveMenu((v) => !v)}><FolderInput size={14} /> Move</Button>
+            <Button disabled={!picked.size} onClick={tagSelected}><Tag size={14} /> Tag</Button>
+            <Button disabled={!picked.size} onClick={exportSelected}><Download size={14} /> PDFs</Button>
+            <Button variant="danger" disabled={!picked.size} onClick={deleteSelected}><Trash2 size={14} /> Delete</Button>
+            <button onClick={stopSelecting} className="rounded-md p-1.5 text-foreground-muted hover:bg-surface-secondary" title="Done"><X size={16} /></button>
+            {moveMenu && (
+              <div className="absolute bottom-full left-0 mb-2 max-h-60 w-52 overflow-auto rounded-xl border border-border bg-surface p-1 text-sm shadow-xl">
+                {[{ id: null as string | null, name: "Unfiled", color: "" }, ...notebooks].map((b) => (
+                  <button key={b.id ?? "none"} onClick={() => moveSelected(b.id)} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-surface-secondary">
+                    {b.color ? <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: b.color }} /> : <span className="h-2 w-2" />}
+                    <span className="truncate">{b.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       {backup.modal}
       <Toast msg={toast} />
     </div>
@@ -296,7 +405,7 @@ function Empty({ onNew, onPdf, onRestore, hasAny }: { onNew: () => void; onPdf: 
   );
 }
 
-function NoteTile({ note, notebook, notebooks, onChange, flash }: { note: NoteMeta; notebook?: NotebookRec; notebooks: NotebookRec[]; onChange: () => void; flash: (m: string) => void }) {
+function NoteTile({ note, notebook, notebooks, onChange, flash, selecting, picked, onPick }: { note: NoteMeta; notebook?: NotebookRec; notebooks: NotebookRec[]; onChange: () => void; flash: (m: string) => void; selecting: boolean; picked: boolean; onPick: () => void }) {
   const [thumb, setThumb] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
@@ -321,18 +430,26 @@ function NoteTile({ note, notebook, notebooks, onChange, flash }: { note: NoteMe
   }
   const [moving, setMoving] = useState(false);
   async function moveTo(id: string | null) { setMoving(false); if (id !== note.notebookId) { await patchNote(note.id, { notebookId: id }, false); flash(id ? "Moved to notebook." : "Moved to Unfiled."); onChange(); } }
+  async function editTags() {
+    const t = prompt("Tags (comma-separated)", note.tags.join(", "));
+    if (t === null) return;
+    await patchNote(note.id, { tags: [...new Set(t.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean))] }, false);
+    onChange();
+  }
   async function togglePin() { await patchNote(note.id, { isPinned: !note.isPinned }, false); onChange(); }
 
   return (
     <div className="group relative">
       <div className="relative">
-        <button onClick={() => go({ name: "note", id: note.id })}
-          className="block aspect-[1240/1754] w-full overflow-hidden rounded-xl border border-border bg-white shadow-sm transition-shadow hover:shadow-md">
+        <button onClick={() => (selecting ? onPick() : go({ name: "note", id: note.id }))}
+          className={`block aspect-[1240/1754] w-full overflow-hidden rounded-xl border bg-white shadow-sm transition-shadow hover:shadow-md ${picked ? "border-primary ring-4 ring-primary/40" : "border-border"}`}>
           {thumb ? <img src={thumb} alt="" className="h-full w-full object-cover object-top" draggable={false} /> : <div className="flex h-full items-center justify-center text-xs text-foreground-muted">{note.strokeCount || note.imageCount ? "Loading preview…" : "Blank"}</div>}
         </button>
-        <div className="absolute right-1.5 top-1.5 flex gap-1 opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100">
+        {selecting && <span className={`pointer-events-none absolute left-2 top-2 flex h-6 w-6 items-center justify-center rounded-full border-2 text-white ${picked ? "border-primary bg-primary" : "border-white bg-black/30"}`}>{picked ? "✓" : ""}</span>}
+        <div className={`absolute right-1.5 top-1.5 flex gap-1 opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 ${selecting ? "hidden" : ""}`}>
           <Mini title={note.isPinned ? "Unpin" : "Pin"} onClick={togglePin} active={note.isPinned}><Pin size={12} /></Mini>
           <Mini title="Move to notebook" onClick={() => setMoving((v) => !v)} active={moving}><FolderInput size={12} /></Mini>
+          <Mini title="Tags" onClick={editTags}><Tag size={12} /></Mini>
           <Mini title="Rename" onClick={rename}><Pencil size={12} /></Mini>
           <Mini title="Delete" onClick={remove} danger><Trash2 size={12} /></Mini>
         </div>
@@ -354,6 +471,7 @@ function NoteTile({ note, notebook, notebooks, onChange, flash }: { note: NoteMe
           {notebook && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: notebook.color }} />}
           {note.pageCount} page{note.pageCount === 1 ? "" : "s"} · {timeAgo(note.updatedAt)}
         </p>
+        {note.tags.length > 0 && <p className="mt-0.5 truncate text-[11px] text-primary/80">{note.tags.map((t) => `#${t}`).join(" ")}</p>}
       </div>
     </div>
   );

@@ -22,6 +22,8 @@ export type NoteMeta = {
   updatedAt: number;
   strokeCount: number;
   imageCount: number;
+  /** last time the note was opened (for the Recent view) */
+  openedAt?: number;
 };
 
 export type StrokeRec = StrokeInput & { id: string; noteId: string; ord: number };

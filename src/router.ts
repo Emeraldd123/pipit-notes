@@ -8,7 +8,8 @@ export type Route =
   | { name: "split"; a: string; b: string }
   | { name: "graph" }
   | { name: "search" }
-  | { name: "settings" };
+  | { name: "settings" }
+  | { name: "study"; view?: string };
 
 export function parseHash(hash: string): Route {
   const h = hash.replace(/^#\/?/, "");
@@ -23,6 +24,7 @@ export function parseHash(hash: string): Route {
   if (parts[0] === "graph") return { name: "graph" };
   if (parts[0] === "search") return { name: "search" };
   if (parts[0] === "settings") return { name: "settings" };
+  if (parts[0] === "study") return { name: "study", view: parts[1] ? decodeURIComponent(parts[1]) : undefined };
   return { name: "library", notebook: sp.get("nb"), q: sp.get("q") ?? "" };
 }
 
@@ -33,6 +35,7 @@ export function href(r: Route): string {
     case "graph": return "#/graph";
     case "search": return "#/search";
     case "settings": return "#/settings";
+    case "study": return `#/study${r.view ? `/${encodeURIComponent(r.view)}` : ""}`;
     case "library": {
       const sp = new URLSearchParams();
       if (r.notebook) sp.set("nb", r.notebook);

@@ -103,6 +103,7 @@ export function EditorPage({ id, page, splitWith }: { id: string; page?: number;
         const ms = stop();
         if (n) {
           count("note.open");
+          void patchNote(id, { openedAt: Date.now() }, false);
           if (ms > 2500) warn("open", "slow note open", { ms: Math.round(ms), strokes: n.strokes.length, images: n.images.length, pages: n.meta.pageCount });
         } else warn("open", "note not found", {});
         if (alive) setLoaded(n);
