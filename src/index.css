@@ -1,0 +1,92 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource/instrument-serif/400.css";
+@import "@fontsource/instrument-serif/400-italic.css";
+@import "katex/dist/katex.min.css";
+
+:root {
+  --background: #eceeec;
+  --surface: #ffffff;
+  --surface-secondary: #f3f4f3;
+  --foreground: #1c231f;
+  --foreground-muted: #6a746e;
+  --border: #e0e4e1;
+  --primary: #3d5244;
+  --primary-hover: #2f4036;
+  --positive: #2f7d4f;
+  --negative: #b4402f;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --background: #121614;
+    --surface: #1b211e;
+    --surface-secondary: #232a26;
+    --foreground: #e7ece8;
+    --foreground-muted: #94a09a;
+    --border: #2b342f;
+    --primary: #5f866b;
+    --primary-hover: #6f9a7c;
+    --positive: #5fb384;
+    --negative: #e0705c;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --background: #121614;
+  --surface: #1b211e;
+  --surface-secondary: #232a26;
+  --foreground: #e7ece8;
+  --foreground-muted: #94a09a;
+  --border: #2b342f;
+  --primary: #5f866b;
+  --primary-hover: #6f9a7c;
+  --positive: #5fb384;
+  --negative: #e0705c;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-secondary: var(--surface-secondary);
+  --color-foreground: var(--foreground);
+  --color-foreground-muted: var(--foreground-muted);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-positive: var(--positive);
+  --color-negative: var(--negative);
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-serif: "Instrument Serif", ui-serif, Georgia, "Times New Roman", serif;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+body { -webkit-tap-highlight-color: transparent; }
+button { cursor: pointer; }
+button:disabled { cursor: default; }
+
+/* Safe-area padding for the installed (standalone) iPad/iPhone app. */
+.safe-t { padding-top: env(safe-area-inset-top); }
+.safe-b { padding-bottom: env(safe-area-inset-bottom); }
+
+/* The wordmark: sans + an italic serif accent, like the landing-page headlines. */
+.serif-i { font-family: var(--font-serif); font-style: italic; font-weight: 400; }
+.serif { font-family: var(--font-serif); font-weight: 400; }
+
+/* Faint paper grain behind the library. */
+.paper-bg {
+  background-color: var(--background);
+  background-image:
+    repeating-linear-gradient(0deg, transparent 0 31px, color-mix(in srgb, var(--foreground) 4%, transparent) 31px 32px);
+}
+
+::selection { background: color-mix(in srgb, var(--primary) 28%, transparent); }
