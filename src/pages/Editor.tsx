@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  AlertTriangle, ArrowLeft, ArrowUpRight, Check, CheckCheck, Circle, Code2, Copy, Download, Eraser, FilePlus2, FileText,
+  AlertTriangle, ArrowLeft, ArrowLeftRight, ArrowUpRight, Check, CheckCheck, Circle, Code2, Copy, Download, Eraser, FilePlus2, FileText,
   Hand, Highlighter, History, ImagePlus, Lasso, Loader2, Maximize2, Minus, MoreHorizontal, MousePointer2, Paintbrush, Pen,
   Pencil, Printer, Redo2, Columns2, FileCode2, FlaskConical, Network, Shapes, TextCursorInput, Wand2, Scissors, ScanText, Sigma, Square, Trash, Trash2, Type, Undo2, ZoomIn, ZoomOut, Sparkles,
 } from "lucide-react";
@@ -37,6 +37,8 @@ const WIDTHS = [2, 4, 7, 12];
 const PAPERS: { id: NotePaper; label: string }[] = [
   { id: "blank", label: "Blank" }, { id: "ruled", label: "Ruled" }, { id: "grid", label: "Grid" }, { id: "dotted", label: "Dotted" }, { id: "cornell", label: "Cornell" },
 ];
+
+const TOOL_NAMES: Partial<Record<Tool, string>> = { pen: "pen", pencil: "pencil", highlighter: "highlighter", marker: "marker", line: "line", rect: "rectangle", ellipse: "ellipse", arrow: "arrow", lasso: "lasso", image: "select", snip: "snip", hand: "pan" };
 
 type ToolDef = { id: Tool; label: string; icon: React.ReactNode };
 const WRITE: ToolDef[] = [
@@ -275,6 +277,7 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
       const t = e.target as HTMLElement;
       if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT") return;
       const mod = e.metaKey || e.ctrlKey;
+      if (!mod && !e.altKey && e.key.toLowerCase() === "e") { e.preventDefault(); swapEraser(); return; }
       if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); if (e.shiftKey) canvasRef.current?.redo(); else canvasRef.current?.undo(); }
       else if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); canvasRef.current?.redo(); }
       else if ((e.key === "Delete" || e.key === "Backspace") && canvasRef.current?.hasSelection()) { e.preventDefault(); canvasRef.current?.deleteSelection(); }
@@ -285,6 +288,15 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
   }, [noteId]);
 
   useEffect(() => { count(`tool.${tool}`); }, [tool]);
+
+  // Quick eraser <-> last-used-tool swap (the on-screen version of Pencil double-tap, which
+  // Safari can't see). `lastTool` is whatever you were drawing with before the eraser.
+  const lastTool = useRef<Tool>("pen");
+  useEffect(() => { if (tool !== "eraser" && tool !== "block") lastTool.current = tool; }, [tool]);
+  const swapEraser = useCallback(() => {
+    setTool((t) => (t === "eraser" ? lastTool.current : "eraser"));
+    count("tool.swapEraser");
+  }, []);
 
   // --- camera → blocks overlay (direct DOM, no React state per frame) ------------------
   const onCameraChange = useCallback((c: { scale: number; camX: number; camY: number }) => {
@@ -557,6 +569,15 @@ function Editor({ note, startPage, splitWith }: { note: LoadedNote; startPage?: 
         <select value={paper} onChange={(e) => changePaper(e.target.value as NotePaper)} className="rounded-lg border border-border bg-background px-2 py-1 text-xs" title="Paper style">
           {PAPERS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
         </select>
+        <button
+          onClick={swapEraser}
+          title={tool === "eraser" ? "Back to your last tool (E)" : "Eraser — tap again to go back to this tool (E)"}
+          aria-pressed={tool === "eraser"}
+          className={`flex h-9 shrink-0 items-center gap-1.5 rounded-xl border px-3 text-sm font-medium transition-colors ${tool === "eraser" ? "border-primary bg-primary text-white" : "border-border bg-background text-foreground hover:bg-surface-secondary"}`}
+        >
+          {tool === "eraser" ? <ArrowLeftRight size={16} /> : <Eraser size={16} />}
+          <span>{tool === "eraser" ? `Back to ${TOOL_NAMES[lastTool.current] ?? "pen"}` : "Erase"}</span>
+        </button>
         <SavePill state={saveState} />
         <div className="relative">
           <IconButton title="More" onClick={() => setMenu((o) => !o)}><MoreHorizontal size={18} /></IconButton>
