@@ -5,12 +5,23 @@ import { AiError, claude, extractJson, imageBlock, text, type Content, type Exce
 import { normalizeExam, needsAi, type Exam, type Part, type PartAnswer, type PartMark, type Question } from "./exam-core";
 import type { CardKind } from "./study-core";
 
+// How a real teacher builds wrong options (item-writing guidance: distractors come from students' typical errors).
+// Used for flashcards and exam multiple choice.
+export const DISTRACTOR_RULES =
+  "Wrong options must be written the way a strict teacher writes them, from REAL student mistakes, never filler: " +
+  "(1) a NEAR MISS — what a student who studied gets with one small slip in concept or application (sign error, forgot to convert units, swapped two related terms, applied the right rule to the wrong quantity, off by a factor of 2, confused cause and effect); " +
+  "(2) a PARTLY RIGHT option — right idea, wrong detail; " +
+  "(3) a WEAK option — plausible to someone who didn't study, but clearly wrong to anyone who did. " +
+  "Every option is the same kind of thing as the answer (a value with the same units, a term of the same category, a statement of the same length and grammar), so none can be eliminated without knowing the material. " +
+  "No 'all of the above' / 'none of the above', no joke options, no absolutes ('always', 'never') used only in the wrong options, and the correct option must not be the longest or most detailed one. " +
+  "Each wrong option must be unambiguously wrong — if it could be argued right, rewrite it.";
+
 // --- flashcards -------------------------------------------------------------------------------------------------------
-export type RawCard = { kind: CardKind; front: string; back: string; steps?: string[]; topic?: string; hint?: string; src?: number };
+export type RawCard = { kind: CardKind; front: string; back: string; steps?: string[]; topic?: string; hint?: string; src?: number; wrong?: string[] };
 
 const CARDS_SYSTEM =
   "You turn a student's own notes into high-quality flashcards for spaced repetition. Return STRICT JSON only: " +
-  '{"cards":[{"kind":"basic|cloze|steps","front":"...","back":"...","steps":["..."],"topic":"...","hint":"...","src":1}]}. ' +
+  '{"cards":[{"kind":"basic|cloze|steps","front":"...","back":"...","wrong":["near miss","partly right","weak"],"steps":["..."],"topic":"...","hint":"...","src":1}]}. ' +
   "Rules: ONE idea per card; fronts are clear questions or prompts that make sense alone; backs are short (under ~15 words) so they can be typed or chosen from options. " +
   'Cover definitions, key facts, formulas ("What is the formula for…?"), cause/effect, and worked-problem TYPES (e.g. "How do you find the vertex of a parabola?"). ' +
   'Use kind "cloze" for fill-in-the-blank: front is a sentence with ____ where the answer goes, back is just the missing term. ' +
@@ -21,7 +32,18 @@ const CARDS_SYSTEM =
   '(e.g. "What happens to the SA:V ratio as a cell gets bigger?" → "It decreases"), or ask for a value ("Surface area of a 2 cm cube?" → "24 cm²" is fine only as plain text like "24 cm2"). ' +
   "Each card needs ONE unambiguous answer that the notes actually give; skip questions that are open-ended, need a diagram, or that you could not mark as right or wrong. " +
   "Inside JSON strings write every LaTeX backslash DOUBLED (\\\\frac, \\\\Delta) so the JSON stays valid. Use LaTeX in $...$ for maths and chemistry in the displayed text only. " +
-  "Never invent facts that are not supported by the notes; skip anything unclear.";
+  "Never invent facts that are not supported by the notes; skip anything unclear. " +
+  'For every "basic" and "cloze" card also write "wrong": exactly 3 wrong answers in this order — near miss, partly right, weak — used for multiple choice and true/false. ' +
+  DISTRACTOR_RULES;
+
+const cleanWrong = (w: unknown, back: string): string[] | undefined => {
+  if (!Array.isArray(w)) return undefined;
+  const key = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const seen = new Set([key(back)]);
+  const out = w.filter((x): x is string => typeof x === "string").map((x) => x.trim().slice(0, 200))
+    .filter((x) => x && !/\b(all|none) of the above\b/i.test(x) && !seen.has(key(x)) && (seen.add(key(x)), true)).slice(0, 3);
+  return out.length ? out : undefined;
+};
 
 function toRawCards(raw: string): RawCard[] {
   const j = extractJson<{ cards?: RawCard[] }>(raw);
@@ -32,8 +54,9 @@ function toRawCards(raw: string): RawCard[] {
     const steps = Array.isArray(c?.steps) ? c.steps.map((s) => clean(s, 160)).filter(Boolean).slice(0, 8) : undefined;
     if (!front || (!back && kind !== "steps")) return [];
     if (kind === "steps" && (steps?.length ?? 0) < 3) return [];
-    if (kind === "cloze" && !front.includes("__")) return [{ kind: "basic", front, back, topic: clean(c?.topic, 40) || undefined, hint: clean(c?.hint, 160) || undefined, src: typeof c?.src === "number" ? c.src : undefined }];
-    return [{ kind, front, back: back || steps!.join(" → "), steps: kind === "steps" ? steps : undefined, topic: clean(c?.topic, 40) || undefined, hint: clean(c?.hint, 160) || undefined, src: typeof c?.src === "number" ? c.src : undefined }];
+    const wrong = kind === "steps" ? undefined : cleanWrong(c?.wrong, back);
+    if (kind === "cloze" && !front.includes("__")) return [{ kind: "basic", front, back, wrong, topic: clean(c?.topic, 40) || undefined, hint: clean(c?.hint, 160) || undefined, src: typeof c?.src === "number" ? c.src : undefined }];
+    return [{ kind, front, back: back || steps!.join(" → "), wrong, steps: kind === "steps" ? steps : undefined, topic: clean(c?.topic, 40) || undefined, hint: clean(c?.hint, 160) || undefined, src: typeof c?.src === "number" ? c.src : undefined }];
   });
 }
 
@@ -88,10 +111,11 @@ const EXAM_SYSTEM = `You are an experienced examiner writing a REALISTIC exam pa
 Make it feel like a real paper, not a quiz:
 - Mostly structured, multi-part questions with a shared stem: (a) recall/define, (b) calculate or read a value, (c) explain or apply, (d) combine two ideas. Marks per part reflect effort (1–6).
 - Use data and visuals wherever the subject allows: tables of experimental results, graphs to read or interpret, diagrams to label or calculate from, charts to compare. Questions must REQUIRE the figure ("Using the graph…", "From the table…") — never put a figure in just for decoration.
-- Include a short multiple-choice section (4 options, one correct) with some figure-based items, a short-answer/structured section, and 1–2 extended or applied questions that combine several ideas from different parts of the notes.
+- Include a short multiple-choice section (4 options, exactly one correct) with some figure-based items, a short-answer/structured section, and 1–2 extended or applied questions that combine several ideas from different parts of the notes.
 - Numbers must be consistent: every answer you give must be derivable from the stem and figure. Double-check arithmetic and read values off the plotted functions exactly.
 - Stay within what the notes cover (you may apply it to new scenarios). Use LaTeX in $...$ for maths and chemistry, and in the JSON write every LaTeX backslash DOUBLED (\\\\Delta, \\\\frac) so the JSON stays valid.
 - Be economical: keep stems tight and each model answer and marking-scheme point to a line, so the WHOLE exam fits comfortably in one reply (never stop mid-way).
+- Multiple choice and true/false must feel like a real, strict paper. ${DISTRACTOR_RULES} For a 4-option item: one correct, one near miss, one partly right, one weak. For numeric options, every wrong value must come from a specific error (name it in "why"). True/false statements that are false must be near misses, not obviously silly. Give every mcq part "why": one short reason per option in the same order (why it is right, or exactly which mistake leads to it).
 - Each part has: "type" ("mcq" | "numeric" | "short" | "working" | "tf"), "marks", "prompt", the model "answer", and a marking "scheme" (an array of the points that earn marks). mcq parts add "options" and "correct" (index from 0). numeric parts add "numeric":{"value":12.5,"tol":0.02,"unit":"m/s"} — tol is relative (0.02 = 2%). "working" = show-your-working or extended response. A one-part question may put these fields on the question itself.
 ${FIGURE_DOC}
 Return STRICT JSON only:

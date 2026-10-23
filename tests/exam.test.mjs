@@ -122,8 +122,9 @@ test("objective marking", () => {
   assert.equal(markObjective(num, { text: "-20" }).marks, 0);
   assert.match(markObjective(num, { text: "-20" }).feedback, /sign/);
   assert.equal(markObjective(num, { text: "" }).marks, 0);
-  assert.equal(markObjective(mcq, { choice: 2 }).marks, 1);
-  assert.equal(markObjective(mcq, { choice: 0 }).marks, 0);
+  assert.equal(markObjective(mcq, { choice: mcq.correct }).marks, 1);       // options are shuffled, so use the stored index
+  assert.equal(markObjective(mcq, { choice: (mcq.correct + 1) % mcq.options.length }).marks, 0);
+  assert.equal(mcq.options[mcq.correct], "Velocity");
   assert.equal(markObjective(mcq, undefined).marks, 0);
   assert.equal(markObjective(parts[1], { text: "x" }), null);            // free text goes to the AI
   assert.equal(extractNumber("9.8 m/s²"), 9.8);

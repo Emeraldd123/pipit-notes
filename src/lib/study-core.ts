@@ -19,6 +19,8 @@ export type Card = SrsState & {
   createdAt: number;
   updatedAt: number;
   suspended?: boolean;
+  /** wrong answers written for THIS card, each one a realistic mistake (near miss first), same form as the answer */
+  distractors?: string[];
 };
 
 // --- RNG (seedable so lessons are testable) ----------------------------------------------------------------
@@ -109,20 +111,79 @@ export function checkTyped(input: string, answer: string, alts: string[] = []): 
 
 // --- distractors ---------------------------------------------------------------------------------------------------
 /** Plausible wrong options: other cards' answers, preferring the same topic and a similar length. */
+// A realistic wrong option has to be the same KIND of thing as the answer (a value for a value, a formula for a
+// formula), or it can be ruled out without knowing anything. Best of all is a specific mistake a student makes.
+export type AnswerShape = "number" | "formula" | "short" | "long";
+const NUM_RE = /^\s*([-+−]?\d+(?:\.\d+)?)(?:\s*(?:×|x|\*)\s*10\s*\^?\s*\{?([-−]?\d+)\}?)?\s*([^\d=^]{0,14})$/;
+
+export function answerShape(s: string): AnswerShape {
+  const t = s.trim();
+  if (NUM_RE.test(t)) return "number";
+  if (/[=^×÷*+]|\\frac|\$/.test(t) || /^[A-Za-z]{1,3}\s*[/:]\s*[A-Za-z]{1,3}$/.test(t)) return "formula";
+  return wordCount(t) <= 4 ? "short" : "long";
+}
+
+/** Count significant figures as written ("18.02" → 4, "0.0821" → 3, "2" → 1). */
+export function sigFigs(raw: string): number {
+  const t = raw.replace(/^[-+−]/, "");
+  if (t.includes(".")) return Math.max(1, t.replace(".", "").replace(/^0+/, "").length);
+  return Math.max(1, t.replace(/^0+/, "").replace(/0+$/, "").length);
+}
+function fmtSig(v: number, sig: number, integerAnswer: boolean): string {
+  if (integerAnswer && Number.isInteger(v)) return String(v);
+  const s = Number(v.toPrecision(Math.max(1, sig)));
+  return String(s);
+}
+
+/**
+ * Wrong numbers that come from real slips, in the same precision and unit as the answer:
+ * a sign error or a missed factor of 2 (very close), a power-of-ten / unit-conversion slip (close),
+ * and an inverted calculation (clearly wrong to anyone who checks the size of the answer).
+ */
+export function numericNearMisses(answer: string, rng: Rng = Math.random): string[] {
+  const m = NUM_RE.exec(answer.trim());
+  if (!m) return [];
+  const raw = m[1].replace("−", "-"), unit = (m[3] ?? "").trim();
+  const v = Number(raw), sig = sigFigs(raw), integerAnswer = !raw.includes(".");
+  const unitPart = unit ? (/^[%°′″]/.test(unit) ? unit : ` ${unit}`) : "";
+  if (m[2] !== undefined) {   // scientific notation: slips are in the exponent
+    const e = Number(m[2].replace("−", "-"));
+    const sci = (ex: number) => `${m[1]} × 10^${ex}${unitPart}`;
+    return [sci(e - 1), sci(e + 1), sci(-e)].filter((x) => normalizeAnswer(x) !== normalizeAnswer(answer));
+  }
+  const near = v < 0 ? -v : rng() < 0.5 ? v * 2 : v / 2;
+  const close = rng() < 0.5 ? v * 10 : v / 10;
+  const far = v !== 0 ? 1 / v : 100;
+  const out: string[] = [];
+  for (const x of [near, close, far]) {
+    const str = `${fmtSig(x, sig, integerAnswer)}${unitPart}`;
+    if (Number.isFinite(x) && normalizeAnswer(str) !== normalizeAnswer(answer) && !out.includes(str)) out.push(str);
+  }
+  return out;
+}
+
+const unitOf = (s: string) => (NUM_RE.exec(s.trim())?.[3] ?? "").trim().toLowerCase();
+
+/**
+ * Wrong options for a card: its own written mistakes first, then believable number slips. Answers to OTHER
+ * cards are only used for numbers with the same unit — a word or formula borrowed from a different question can
+ * be ruled out without knowing anything, which makes the question pointless. With fewer than two realistic wrong
+ * options a card is practised another way (typed, or shown and self-graded) instead.
+ */
 export function pickDistractors(card: Card, pool: Card[], n = 3, rng: Rng = Math.random): string[] {
   const correct = normalizeAnswer(card.back);
   const seen = new Set([correct]);
-  const cands = pool.filter((c) => c.id !== card.id && c.kind !== "steps" && c.back.trim()).filter((c) => {
-    const k = normalizeAnswer(c.back);
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
-  const scored = cands.map((c) => ({
-    c,
-    s: (c.topic && c.topic === card.topic ? 0 : 1) + Math.abs(c.back.length - card.back.length) / Math.max(20, card.back.length) + rng() * 0.8,
-  })).sort((a, b) => a.s - b.s);
-  return scored.slice(0, n).map((x) => x.c.back);
+  const out: string[] = [];
+  const add = (x: string) => { const k = normalizeAnswer(x); if (x.trim() && !seen.has(k)) { seen.add(k); out.push(x); } };
+  for (const d of card.distractors ?? []) if (out.length < n) add(d);
+  if (answerShape(card.back) !== "number") return out;
+  for (const d of numericNearMisses(card.back, rng)) if (out.length < n) add(d);
+  if (out.length < n) {
+    const u = unitOf(card.back);
+    const same = pool.filter((c) => c.id !== card.id && answerShape(c.back) === "number" && unitOf(c.back) === u && (c.topic ?? "") === (card.topic ?? ""));
+    for (const c of shuffle(same, rng)) { if (out.length >= n) break; add(c.back); }
+  }
+  return out;
 }
 
 // --- exercises --------------------------------------------------------------------------------------------------------
@@ -147,14 +208,17 @@ function exerciseFor(card: Card, pool: Card[], rng: Rng, forceKind?: Exercise["k
   const flip: Exercise = { kind: "flip", cardId: card.id, front: card.front, back: card.back };
   if (card.kind === "steps" && (card.steps?.length ?? 0) >= 3) return { kind: "order", cardId: card.id, prompt: card.front, steps: card.steps! };
   const distractors = pickDistractors(card, pool, 3, rng);
-  const canMcq = distractors.length >= 3 && card.back.length <= 120;
+  // three good options beat four with an obvious filler (item-writing research), so 3-option questions are fine
+  const canMcq = distractors.length >= 2 && card.back.length <= 120;
   if (card.kind === "cloze") {
     if (typable(card)) return { kind: "cloze", cardId: card.id, prompt: card.front, answer: card.back, alts: [], hint: card.hint };
     // the blank can't be typed on a tablet → choose from options instead (or just reveal it)
     if (canMcq) { const options = shuffle([card.back, ...distractors], rng); return { kind: "mcq", cardId: card.id, prompt: card.front, options, answer: options.indexOf(card.back) }; }
     return flip;
   }
-  const canTf = pool.filter((c) => c.id !== card.id && c.kind === "basic").length >= 1 && card.back.length <= 120;
+  // a false statement must be a believable mistake, never an answer to a different question
+  const falseStatement = card.distractors?.[0] ?? (answerShape(card.back) === "number" ? numericNearMisses(card.back, rng)[0] : undefined);
+  const canTf = !!falseStatement && card.back.length <= 120;
   const kinds: Exercise["kind"][] =
     crowns === 0 ? [canMcq ? "mcq" : "flip", canTf ? "tf" : "flip", "flip"]
     : crowns <= 2 ? [typable(card) ? "typed" : canMcq ? "mcq" : "flip", canMcq ? "mcq" : "flip", "flip"]
@@ -166,11 +230,8 @@ function exerciseFor(card: Card, pool: Card[], rng: Rng, forceKind?: Exercise["k
   }
   if (kind === "typed" && typable(card)) return { kind: "typed", cardId: card.id, prompt: card.front, answer: card.back, alts: [], hint: card.hint };
   if (kind === "tf" && canTf) {
-    const other = distractors[0] ?? pool.find((c) => c.id !== card.id && c.kind === "basic")?.back;
-    if (other) {
-      const truth = rng() < 0.5;
-      return { kind: "tf", cardId: card.id, prompt: card.front, statement: truth ? card.back : other, truth, correct: card.back };
-    }
+    const truth = rng() < 0.5;
+    return { kind: "tf", cardId: card.id, prompt: card.front, statement: truth ? card.back : falseStatement!, truth, correct: card.back };
   }
   return flip;
 }

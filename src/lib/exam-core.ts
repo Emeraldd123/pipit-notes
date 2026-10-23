@@ -11,6 +11,8 @@ export type Part = {
   type: PartType;
   marks: number;
   options?: string[];               // mcq
+  /** mcq: why each option is right / which mistake leads to it (same order as options) */
+  why?: string[];
   correct?: number;                 // mcq: index; tf: 0 = true, 1 = false
   answer: string;                   // model answer (shown after marking)
   numeric?: { value: number; tol: number; unit?: string };
@@ -58,7 +60,7 @@ function normalizePart(raw: unknown, i: number, qid: string, single: boolean): P
   if (type === "mcq") {
     options = Array.isArray(r.options) ? (r.options as unknown[]).map((o) => s(o, 300)).filter(Boolean).slice(0, 6) : [];
     correct = isNum(r.correct) ? Math.round(r.correct) : -1;
-    if (options.length < 2 || correct < 0 || correct >= options.length) { type = "short"; options = undefined; correct = undefined; }
+    if (options.length < 2 || correct < 0 || correct >= options.length || new Set(options.map((o) => o.toLowerCase())).size !== options.length) { type = "short"; options = undefined; correct = undefined; }
   } else if (type === "tf") {
     correct = r.correct === true || r.correct === 0 || r.correct === "true" ? 0 : r.correct === false || r.correct === 1 || r.correct === "false" ? 1 : -1;
     if (correct < 0) { type = "short"; correct = undefined; }
@@ -75,7 +77,44 @@ function normalizePart(raw: unknown, i: number, qid: string, single: boolean): P
     type, marks: marks(r.marks, type === "working" ? 3 : 1), options, correct,
     answer: s(r.answer, 1200) || (options && correct !== undefined && type === "mcq" ? options[correct] : ""),
     numeric, scheme, figure,
+    why: type === "mcq" && Array.isArray(r.why) && (r.why as unknown[]).length === options!.length ? (r.why as unknown[]).map((w) => s(w, 300)) : undefined,
   };
+}
+
+/** Deterministic shuffle seed from a string (so the same exam always shows the same order). */
+function seedOf(id: string): () => number {
+  let h = 2166136261;
+  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619) >>> 0;
+  return () => { h = (h + 0x6d2b79f5) >>> 0; let t = h; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+/**
+ * Re-order multiple-choice options locally. Models place the right answer in biased positions (rarely last),
+ * which an alert student can exploit; the reasons travel with their options. "All/none of the above" stays last.
+ */
+export function shuffleOptions(p: Part, seed: string): Part {
+  if (p.type !== "mcq" || !p.options || p.correct === undefined) return p;
+  const rng = seedOf(seed);
+  const idx = p.options.map((_, i) => i);
+  const pinned = idx.filter((i) => /\b(all|none|both) of (the )?(above|these)\b/i.test(p.options![i]));
+  const free = idx.filter((i) => !pinned.includes(i));
+  for (let i = free.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [free[i], free[j]] = [free[j], free[i]]; }
+  const order = [...free, ...pinned];
+  return { ...p, options: order.map((i) => p.options![i]), why: p.why ? order.map((i) => p.why![i]) : undefined, correct: order.indexOf(p.correct) };
+}
+
+export type McqLint = "correct-longest" | "absolute-only-in-wrong" | "all-of-the-above" | "duplicate";
+/** Cues that let a student pick the answer without knowing the material (classic item-writing flaws). */
+export function lintMcq(p: Part): McqLint[] {
+  if (p.type !== "mcq" || !p.options || p.correct === undefined) return [];
+  const out: McqLint[] = [];
+  const o = p.options, c = p.correct;
+  const others = o.filter((_, i) => i !== c);
+  if (others.length && o[c].length > 1.5 * Math.max(...others.map((x) => x.length)) && o[c].length > 25) out.push("correct-longest");
+  const abs = /\b(always|never|only|all|none|every|must)\b/i;
+  if (!abs.test(o[c]) && others.filter((x) => abs.test(x)).length >= 2) out.push("absolute-only-in-wrong");
+  if (o.some((x) => /\b(all|none) of the above\b/i.test(x))) out.push("all-of-the-above");
+  if (new Set(o.map((x) => x.trim().toLowerCase())).size !== o.length) out.push("duplicate");
+  return out;
 }
 
 export function normalizeExam(raw: unknown, now = Date.now(), id = `exam-${now}`): Exam | null {
@@ -91,7 +130,7 @@ export function normalizeExam(raw: unknown, now = Date.now(), id = `exam-${now}`
       if (!stem && !rawParts.some((p) => p && typeof p === "object" && (s((p as Record<string, unknown>).prompt) || s((p as Record<string, unknown>).question)))) continue;
       const qid = `q${++qn}`;
       const single = rawParts.length === 1;
-      const parts = rawParts.map((p, i) => normalizePart(p, i, qid, single)).filter((p): p is Part => !!p);
+      const parts = rawParts.map((p, i) => normalizePart(p, i, qid, single)).filter((p): p is Part => !!p).map((p) => shuffleOptions(p, `${id}:${p.id}`));
       if (!parts.length || (!stem && !parts[0].prompt)) { qn--; continue; }
       // a lone part's figure is lifted to the question so it is shown once, above the answer box
       const lone = single && rawParts[0] !== rq ? (rawParts[0] as Record<string, unknown> | null)?.figure : undefined;
@@ -136,7 +175,9 @@ export function markObjective(p: Part, a: PartAnswer | undefined): PartMark | nu
   if (p.type === "mcq" || p.type === "tf") {
     const right = a?.choice === p.correct;
     const label = p.type === "tf" ? (p.correct === 0 ? "True" : "False") : p.options?.[p.correct ?? 0] ?? p.answer;
-    return { partId: p.id, marks: right ? p.marks : 0, max: p.marks, auto: true, feedback: a?.choice === undefined ? `No answer. Correct: ${label}` : right ? "Correct." : `Not quite — the answer is ${label}.` };
+    // say WHY the chosen option is wrong (the mistake it represents), not just what the answer is
+    const why = a?.choice !== undefined && p.type === "mcq" ? p.why?.[a.choice] : undefined;
+    return { partId: p.id, marks: right ? p.marks : 0, max: p.marks, auto: true, feedback: a?.choice === undefined ? `No answer. Correct: ${label}` : right ? "Correct." : `Not quite — the answer is ${label}.${why ? ` Your choice: ${why}` : ""}` };
   }
   if (p.type === "numeric" && p.numeric) {
     const got = a?.text ? extractNumber(a.text) : null;

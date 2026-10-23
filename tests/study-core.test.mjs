@@ -10,10 +10,10 @@ const NOW = new Date("2026-03-10T12:00:00").getTime(), DAY = 86_400_000;
 let n = 0;
 const card = (front, back, extra = {}) => ({ id: `c${++n}`, front, back, kind: "basic", notebookId: null, source: "manual", createdAt: NOW + n, updatedAt: NOW, ...newSrs(NOW), ...extra });
 const deck = () => [
-  card("Powerhouse of the cell", "Mitochondria", { topic: "Cells" }),
+  card("Powerhouse of the cell", "Mitochondria", { topic: "Cells", distractors: ["Chloroplast", "Ribosome", "Cell wall"] }),
   card("Site of photosynthesis", "Chloroplast", { topic: "Cells" }),
   card("Controls the cell", "Nucleus", { topic: "Cells" }),
-  card("Makes proteins", "Ribosome", { topic: "Cells" }),
+  card("Makes proteins", "Ribosome", { topic: "Cells", distractors: ["Golgi apparatus", "Nucleolus", "Lysosome"] }),
   card("Packages proteins", "Golgi apparatus", { topic: "Cells" }),
   card("Unit of heredity", "Gene", { topic: "Genetics" }),
   card("Allele pair identical", "Homozygous", { topic: "Genetics" }),
@@ -39,14 +39,15 @@ test("answers are compared forgivingly but not carelessly", () => {
   assert.equal(levenshtein("kitten", "sitting"), 3);
 });
 
-test("distractors are other cards answers, never the right one, preferring the same topic", () => {
+test("wrong options come from the card's own mistakes, never from unrelated answers", () => {
   const d = deck();
   const rng = mulberry32(1);
-  const opts = pickDistractors(d[0], d, 3, rng);
-  assert.equal(opts.length, 3);
-  assert.ok(!opts.includes("Mitochondria"));
-  assert.ok(opts.filter((o) => ["Chloroplast", "Nucleus", "Ribosome", "Golgi apparatus"].includes(o)).length >= 2);
-  assert.deepEqual(pickDistractors(d[0], [d[0]], 3, rng), []);              // nothing to choose from
+  assert.deepEqual(pickDistractors(d[0], d, 3, rng), ["Chloroplast", "Ribosome", "Cell wall"]);
+  // a text card with no written wrong answers gets none: borrowing "Gene" for "Controls the cell" is a giveaway
+  assert.deepEqual(pickDistractors(d[2], d, 3, rng), []);
+  // the right answer is never offered as a wrong one, even if the model repeats it
+  const dup = { ...d[0], distractors: ["mitochondria", "Ribosome"] };
+  assert.deepEqual(pickDistractors(dup, d, 3, rng), ["Ribosome"]);
 });
 
 test("a lesson mixes exercise types, covers every chosen card, is deterministic for a seed", () => {
@@ -57,16 +58,22 @@ test("a lesson mixes exercise types, covers every chosen card, is deterministic 
   const covered = new Set(a.flatMap(exerciseCards));
   assert.equal(covered.size, 8);
   assert.ok(new Set(a.map((e) => e.kind)).size >= 2);
-  const mcq = a.find((e) => e.kind === "mcq");
-  assert.ok(mcq && mcq.options.length === 4 && mcq.options[mcq.answer]);
+  const all = [1, 2, 3, 4, 5, 6, 7, 8].flatMap((s) => buildLesson(d, { size: 8, rng: mulberry32(s), now: NOW }));
+  const mcqs = all.filter((e) => e.kind === "mcq");
+  assert.ok(mcqs.length > 0);
+  for (const m of mcqs) {
+    assert.ok(m.options.length >= 3 && m.options[m.answer]);
+    assert.ok(["Mitochondria", "Ribosome"].includes(m.options[m.answer]));   // only cards with written wrong answers become multiple choice
+  }
+  assert.ok(all.filter((e) => e.kind === "tf").every((e) => e.truth || ["Chloroplast", "Golgi apparatus"].includes(e.statement)));   // false = near miss
   assert.notEqual(a[0].kind, "match");                                       // the matching round isn't first
 });
 
 test("tiny decks degrade gracefully", () => {
-  const two = deck().slice(0, 2);
+  const two = deck().slice(1, 3);                                              // no written wrong answers
   const l = buildLesson(two, { rng: mulberry32(3), now: NOW });
   assert.equal(l.length, 2);
-  assert.ok(l.every((e) => ["flip", "typed", "tf"].includes(e.kind)));        // not enough distractors for multiple choice
+  assert.ok(l.every((e) => ["flip", "typed"].includes(e.kind)));               // no fake multiple choice or true/false
   assert.deepEqual(buildLesson([], {}), []);
 });
 

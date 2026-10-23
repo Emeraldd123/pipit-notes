@@ -34,7 +34,7 @@ export async function toCards(raws: RawCard[], ctx: { notebookId: string | null;
     const noteId = ex?.noteId ?? ctx.noteId;
     return {
       ...makeCard({ front: r.front, back: r.back }, now + i),
-      id: newId(), kind: r.kind, steps: r.steps, topic: r.topic, hint: r.hint, source: ctx.source,
+      id: newId(), kind: r.kind, steps: r.steps, topic: r.topic, hint: r.hint, source: ctx.source, distractors: r.wrong,
       noteId, page: ex?.page ?? ctx.page, notebookId: (noteId ? nbOf.get(noteId) : undefined) ?? ctx.notebookId,
     } as Card;
   });
