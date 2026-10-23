@@ -27,6 +27,33 @@ export async function renderPdf(file: File, onProgress?: (done: number, total: n
   }
 }
 
+/**
+ * Text only, no page pictures — for textbooks used as a question source. Far faster and ~1% of the storage
+ * (a 600-page book is a few MB of text instead of hundreds of MB of images), so whole books are practical.
+ * Line breaks are kept so problems ("Example 5.3", "12. …") can be found later. Scanned pages come back empty.
+ */
+export async function readPdfText(file: File, onProgress?: (done: number, total: number) => void): Promise<string[]> {
+  count("pdf.textbook");
+  const pdfjs = await import("pdfjs-dist");
+  const worker = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
+  pdfjs.GlobalWorkerOptions.workerSrc = worker;
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  const total = Math.min(doc.numPages, 3000);
+  const out: string[] = [];
+  try {
+    for (let i = 1; i <= total; i++) {
+      const page = await doc.getPage(i);
+      try {
+        const tc = await page.getTextContent();
+        out.push(tc.items.map((it) => ("str" in it ? it.str + (it.hasEOL ? "\n" : "") : "")).join(" ").replace(/[ \t]+/g, " ").replace(/ ?\n ?/g, "\n").replace(/\n{3,}/g, "\n\n").trim());
+      } catch { out.push(""); }
+      page.cleanup();
+      if (i % 10 === 0 || i === total) onProgress?.(i, total);
+    }
+  } finally { await doc.destroy(); }
+  return out;
+}
+
 async function renderPdfInner(file: File, onProgress?: (done: number, total: number) => void): Promise<RenderedPdfPage[]> {
   const pdfjs = await import("pdfjs-dist");
   const worker = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
