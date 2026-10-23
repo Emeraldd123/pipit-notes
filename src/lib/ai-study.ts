@@ -86,6 +86,24 @@ export async function cardsFromText(title: string, body: string, want = 4): Prom
   return toRawCards(raw);
 }
 
+/** Wrong options for cards made before cards carried them. Returns one list per input card (empty = couldn't). */
+export async function writeWrongOptions(cards: { front: string; back: string }[]): Promise<string[][]> {
+  const list = cards.map((c, i) => `${i + 1}. Q: ${c.front}\n   A: ${c.back}`).join("\n");
+  const raw = await claude({
+    feature: "cards", maxTokens: 4000,
+    system: 'You write the wrong options for a student\'s flashcards so they work as realistic multiple-choice questions. Return STRICT JSON only: {"items":[{"n":1,"wrong":["near miss","partly right","weak"]}]}. ' +
+      "Exactly 3 wrong answers per card in that order. Inside JSON strings write every LaTeX backslash DOUBLED. " + DISTRACTOR_RULES,
+    user: `Cards:\n${list}`,
+  });
+  const j = extractJson<{ items?: { n?: number; wrong?: unknown }[] }>(raw);
+  const out: string[][] = cards.map(() => []);
+  for (const it of Array.isArray(j.items) ? j.items : []) {
+    const i = typeof it?.n === "number" ? it.n - 1 : -1;
+    if (i >= 0 && i < cards.length) out[i] = cleanWrong(it.wrong, cards[i].back) ?? [];
+  }
+  return out;
+}
+
 // --- exam generation ----------------------------------------------------------------------------------------------------
 export type ExamSpec = {
   excerpts: Excerpt[];
@@ -94,7 +112,12 @@ export type ExamSpec = {
   style: string;                     // e.g. "AP Physics", "university midterm", "IB Chemistry"
   figures: boolean;                  // lean heavily on graphs/diagrams/data
   images?: { label: string; dataUrl: string }[]; // page images the model may crop figures from
+  textbook?: Excerpt[];              // reference pages (numbered T1, T2…) the writer may adapt problems from
 };
+
+const TEXTBOOK_RULES = `TEXTBOOK PAGES (labelled [T1], [T2]…) are reference material, NOT the student's notes. You may adapt problems, data and worked examples from them — real textbook questions make the paper more authentic — but ONLY when the student could solve the question using what their own notes cover.
+Before using a textbook problem, check: does every concept, formula, definition and method the solution needs appear in the student's notes? If the notes don't teach it, don't use it, and never ask about textbook material the notes never mention.
+Every question carries "basis": {"notes":[the note excerpt numbers whose content is needed to solve it],"textbook":"T2" or null,"solvable":"yes" | "stretch" | "no"} — "stretch" = solvable from the notes but needs a step the notes only hint at; never write a "no" question.`;
 
 const FIGURE_DOC = `
 FIGURES (drawn by the app from your JSON — they must be CORRECT and must match the question):
@@ -119,19 +142,21 @@ Make it feel like a real paper, not a quiz:
 - Each part has: "type" ("mcq" | "numeric" | "short" | "working" | "tf"), "marks", "prompt", the model "answer", and a marking "scheme" (an array of the points that earn marks). mcq parts add "options" and "correct" (index from 0). numeric parts add "numeric":{"value":12.5,"tol":0.02,"unit":"m/s"} — tol is relative (0.02 = 2%). "working" = show-your-working or extended response. A one-part question may put these fields on the question itself.
 ${FIGURE_DOC}
 Return STRICT JSON only:
-{"title":"...","subject":"...","durationMin":60,"instructions":"...","sections":[{"title":"Section A — Multiple choice","instructions":"...","questions":[{"topic":"short topic name","stem":"...","figure":{...},"parts":[{"label":"a","type":"numeric","marks":2,"prompt":"...","answer":"...","numeric":{...},"scheme":["..."]}]}]}]}`;
+{"title":"...","subject":"...","durationMin":60,"instructions":"...","sections":[{"title":"Section A — Multiple choice","instructions":"...","questions":[{"topic":"short topic name","basis":{"notes":[1,3],"textbook":null,"solvable":"yes"},"stem":"...","figure":{...},"parts":[{"label":"a","type":"numeric","marks":2,"prompt":"...","answer":"...","numeric":{...},"scheme":["..."]}]}]}]}`;
 
 export async function generateExam(spec: ExamSpec): Promise<Exam> {
   const ctx = spec.excerpts.map((e) => `[${e.n}] ${e.noteTitle} — page ${e.page + 1}\n${e.text}`).join("\n\n");
+  const book = spec.textbook?.length ? `\n\nTextbook pages (reference only):\n\n${spec.textbook.map((e, i) => `[T${i + 1}] ${e.noteTitle} — page ${e.page + 1}\n${e.text}`).join("\n\n")}` : "";
   const content: Content[] = [];
   for (const im of spec.images ?? []) { content.push(text(`Image ${im.label}:`), imageBlock(im.dataUrl)); }
   content.push(text(
-    `Student's notes:\n\n${ctx}\n\nWrite an exam of about ${spec.questions} numbered questions in the style of: ${spec.style || "a typical course exam for this material"}. ` +
+    `Student's notes:\n\n${ctx}${book}\n\nWrite an exam of about ${spec.questions} numbered questions in the style of: ${spec.style || "a typical course exam for this material"}. ` +
     `Difficulty: ${spec.difficulty === "harder" ? "harder than the notes' own examples" : spec.difficulty === "easier" ? "gentler than a real exam — good for a first attempt" : "like a real exam on this material"}. ` +
     (spec.figures ? "Lean heavily on figures, data and applied scenarios — at least half the questions should need one. " : "Include figures where they genuinely help. ") +
-    (spec.images?.length ? "You may crop figures from the attached page images where one is clearly relevant. " : "")
+    (spec.images?.length ? "You may crop figures from the attached page images where one is clearly relevant. " : "") +
+    (book ? "Take or adapt roughly a third of the questions from the textbook pages, following the TEXTBOOK PAGES rules. " : "")
   ));
-  const raw = await claude({ feature: "exam", maxTokens: 16000, system: EXAM_SYSTEM, user: content });
+  const raw = await claude({ feature: "exam", maxTokens: 16000, system: book ? `${EXAM_SYSTEM}\n${TEXTBOOK_RULES}` : EXAM_SYSTEM, user: content });
   const exam = normalizeExam(extractJson<unknown>(raw));
   if (!exam) throw new AiError("The model's exam couldn't be read. Try again (a smaller exam often helps).");
   return exam;

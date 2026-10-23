@@ -19,7 +19,12 @@ export type Part = {
   scheme: string[];                 // marking points
   figure?: Figure;                  // a part can have its own figure
 };
-export type Question = { id: string; topic?: string; stem: string; figure?: Figure; parts: Part[]; marks: number };
+export type Question = { id: string; topic?: string; stem: string; figure?: Figure; parts: Part[]; marks: number; basis?: Basis };
+/**
+ * Where a question came from. Notes-only questions have no textbook. A textbook question carries the
+ * note excerpts the student needs to solve it; "stretch" = it may go a little beyond the notes.
+ */
+export type Basis = { notes: number[]; textbook?: number; stretch?: boolean; source?: string };
 export type Section = { title: string; instructions?: string; questions: Question[] };
 export type Exam = {
   id: string; title: string; subject?: string; durationMin: number; instructions?: string;
@@ -117,6 +122,16 @@ export function lintMcq(p: Part): McqLint[] {
   return out;
 }
 
+/** {"notes":[2,5],"textbook":"T3","solvable":"yes|stretch|no"} → Basis; null = unsolvable (drop); undefined = none given. */
+function normalizeBasis(v: unknown): Basis | null | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const r = v as Record<string, unknown>;
+  if (r.solvable === "no" || r.solvable === false) return null;
+  const notes = (Array.isArray(r.notes) ? r.notes : []).map((n) => (typeof n === "string" ? parseInt(n.replace(/\D/g, ""), 10) : n)).filter((n): n is number => isNum(n) && n > 0).slice(0, 8);
+  const t = typeof r.textbook === "string" ? parseInt(r.textbook.replace(/\D/g, ""), 10) : r.textbook;
+  return { notes, textbook: isNum(t) && t > 0 ? t : undefined, stretch: r.solvable === "stretch" || undefined };
+}
+
 export function normalizeExam(raw: unknown, now = Date.now(), id = `exam-${now}`): Exam | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
@@ -125,6 +140,8 @@ export function normalizeExam(raw: unknown, now = Date.now(), id = `exam-${now}`
   for (const rs of Array.isArray(r.sections) ? (r.sections as Record<string, unknown>[]) : []) {
     const questions: Question[] = [];
     for (const rq of Array.isArray(rs?.questions) ? (rs.questions as Record<string, unknown>[]) : []) {
+      const basis = normalizeBasis(rq?.basis);
+      if (basis === null) continue;                    // the writer itself judged it unsolvable from the notes
       const stem = s(rq?.stem) || s(rq?.question);
       const rawParts = Array.isArray(rq?.parts) && (rq.parts as unknown[]).length ? (rq.parts as unknown[]) : [rq];
       if (!stem && !rawParts.some((p) => p && typeof p === "object" && (s((p as Record<string, unknown>).prompt) || s((p as Record<string, unknown>).question)))) continue;
@@ -135,7 +152,7 @@ export function normalizeExam(raw: unknown, now = Date.now(), id = `exam-${now}`
       // a lone part's figure is lifted to the question so it is shown once, above the answer box
       const lone = single && rawParts[0] !== rq ? (rawParts[0] as Record<string, unknown> | null)?.figure : undefined;
       const figure: Figure | undefined = (rq?.figure ? normalizeFigure(rq.figure) : null) ?? (lone ? normalizeFigure(lone) : null) ?? undefined;
-      questions.push({ id: qid, topic: s(rq?.topic, 40) || undefined, stem: stem || parts[0].prompt, figure, parts, marks: parts.reduce((a, p) => a + p.marks, 0) });
+      questions.push({ id: qid, topic: s(rq?.topic, 40) || undefined, stem: stem || parts[0].prompt, figure, parts, marks: parts.reduce((a, p) => a + p.marks, 0), basis });
       if (single && stem && parts[0].prompt === stem) parts[0].prompt = "";
     }
     if (questions.length) sections.push({ title: s(rs?.title, 60) || `Section ${String.fromCharCode(65 + sections.length)}`, instructions: s(rs?.instructions, 300) || undefined, questions });

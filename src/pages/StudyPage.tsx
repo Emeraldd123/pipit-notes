@@ -21,7 +21,8 @@ import { AiError } from "@/lib/ai";
 import { aiReady, getSettings, useSettings } from "@/lib/settings";
 import { estimateUsd, formatUsd } from "@/lib/ai-cost";
 import { corpusExcerpts } from "@/lib/search";
-import { cardFromMistake, gatherPageImages, makeCardsFromNotes, resolveCrops, scopeNoteIds } from "@/lib/study-actions";
+import { cardFromMistake, gatherPageImages, improveAnswerChoices, makeCardsFromNotes, needsChoices, resolveCrops, scopeNoteIds, textbookPagesFor } from "@/lib/study-actions";
+import { checkSolvable } from "@/lib/coverage";
 import { markObjective } from "@/lib/exam-core";
 import { count, logError } from "@/lib/telemetry";
 import { newId } from "@/lib/ids";
@@ -243,7 +244,13 @@ export function StudyPage({ view }: { view?: string }) {
               onLesson={startLesson} onGenerate={() => setModal("generate")} onCard={() => { setEditing(null); setModal("card"); }} />
           )}
           {tab === "cards" && <CardsView cards={cards} notebooks={notebooks} onAdd={() => { setEditing(null); setModal("card"); }} onEdit={(c) => { setEditing(c); setModal("card"); }}
-            onDelete={async (c) => { await deleteCard(c.id); await reload(); }} onSuspend={async (c) => { await putCards([{ ...c, suspended: !c.suspended, updatedAt: Date.now() }]); await reload(); }} onGenerate={() => setModal("generate")} />}
+            onDelete={async (c) => { await deleteCard(c.id); await reload(); }} onSuspend={async (c) => { await putCards([{ ...c, suspended: !c.suspended, updatedAt: Date.now() }]); await reload(); }} onGenerate={() => setModal("generate")}
+            onImprove={ai ? async (n) => {
+              setBusy(`Writing realistic wrong answers for ${n} card${n === 1 ? "" : "s"}…`);
+              try { const k = await improveAnswerChoices(cards); flash(k ? `${k} card${k === 1 ? "" : "s"} can now be multiple choice and true/false.` : "Couldn't write answer choices — try again."); await reload(); }
+              catch (e) { flash(e instanceof AiError ? e.message : "Something went wrong."); logError("cards.choices", e); }
+              finally { setBusy(null); }
+            } : undefined} />}
           {tab === "tests" && <TestsView exams={exams} ai={ai} cardCount={cards.length} onQuiz={() => setModal("quiz")} onExam={() => setModal("exam")}
             onOpen={(rec) => void runExam(rec.exam, rec)} onDelete={async (rec) => { if (confirm(`Delete "${rec.exam.title}"?`)) { await deleteExam(rec.id); await reload(); } }} />}
           {tab === "mistakes" && <MistakesView mistakes={mistakes} notes={notes} onOpen={(m) => go({ name: "note", id: m.noteId, page: m.page })}
@@ -376,9 +383,11 @@ function PathView({ cards, topics, dueCount, nb, notebooks, onNb, progress, onLe
 }
 
 // ---- Cards -----------------------------------------------------------------------------------------------------------------------------
-function CardsView({ cards, notebooks, onAdd, onEdit, onDelete, onSuspend, onGenerate }: {
+function CardsView({ cards, notebooks, onAdd, onEdit, onDelete, onSuspend, onGenerate, onImprove }: {
   cards: Card[]; notebooks: NotebookRec[]; onAdd: () => void; onEdit: (c: Card) => void; onDelete: (c: Card) => void; onSuspend: (c: Card) => void; onGenerate: () => void;
+  onImprove?: (n: number) => void;
 }) {
+  const plain = cards.filter(needsChoices).length;
   const [q, setQ] = useState("");
   const f = q.trim().toLowerCase();
   const list = cards.filter((c) => !f || c.front.toLowerCase().includes(f) || c.back.toLowerCase().includes(f) || (c.topic ?? "").toLowerCase().includes(f));
@@ -392,6 +401,12 @@ function CardsView({ cards, notebooks, onAdd, onEdit, onDelete, onSuspend, onGen
         <Button onClick={onGenerate}><Sparkles size={14} /> From notes</Button>
         <Button variant="primary" onClick={onAdd}><Plus size={14} /> New card</Button>
       </div>
+      {onImprove && plain > 0 && (
+        <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-surface-secondary px-3.5 py-2.5 text-xs text-foreground-muted">
+          <span className="min-w-0 flex-1">{plain} card{plain === 1 ? " has" : "s have"} no wrong answers written yet, so {plain === 1 ? "it's" : "they're"} only shown as flip or type-in cards.</span>
+          <Button onClick={() => onImprove(plain)}><Sparkles size={14} /> Write answer choices</Button>
+        </p>
+      )}
       {cards.length === 0 && <p className="py-12 text-center text-sm text-foreground-muted">No cards yet. Generate them from your notes or add one by hand.</p>}
       <div className="mt-4 space-y-5">
         {[...groups.entries()].map(([topic, cs]) => (
@@ -522,7 +537,7 @@ function ScopeSelect({ value, onChange, notes, notebooks }: { value: string; onC
     <select value={value} onChange={(e) => onChange(e.target.value)} className="mt-1 block w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground">
       <option value="all">All my notes</option>
       {notebooks.length > 0 && <optgroup label="Notebooks">{notebooks.map((n) => <option key={n.id} value={`nb:${n.id}`}>{n.name}</option>)}</optgroup>}
-      <optgroup label="Notes">{notes.map((n) => <option key={n.id} value={`note:${n.id}`}>{n.title}</option>)}</optgroup>
+      <optgroup label="Notes">{notes.map((n) => <option key={n.id} value={`note:${n.id}`}>{n.title}{n.isTextbook ? " (textbook)" : ""}</option>)}</optgroup>
     </select>
   );
 }
@@ -615,6 +630,8 @@ function ExamModal({ ai, notes, notebooks, onClose, onReady, setBusy, flash }: {
   const [style, setStyle] = useState("");
   const [figures, setFigures] = useState(true);
   const [pictures, setPictures] = useState(false);
+  const books = notes.filter((n) => n.isTextbook);
+  const [useBooks, setUseBooks] = useState(books.length > 0);
   const [err, setErr] = useState<string | null>(null);
   const run = async () => {
     setErr(null); setBusy("Writing your exam — this takes a minute for a full paper…");
@@ -623,8 +640,18 @@ function ExamModal({ ai, notes, notebooks, onClose, onReady, setBusy, flash }: {
       const excerpts = await corpusExcerpts(ids, 20000);
       if (!excerpts.length) { setErr("There's no readable text in that scope yet. Use “Read my handwriting” on the Search page, or import typed PDFs."); return; }
       const images = pictures ? await gatherPageImages(scope) : [];
+      const textbook = useBooks ? await textbookPagesFor(excerpts) : [];
+      if (useBooks && !textbook.length) flash("None of your textbook pages match these notes closely, so this exam uses your notes only.");
       count("study.exam.generate");
-      let exam = await generateExam({ excerpts, questions, difficulty, style, figures, images });
+      let exam = await generateExam({ excerpts, questions, difficulty, style, figures, images, textbook });
+      if (textbook.length) {
+        const c = checkSolvable(exam, excerpts, textbook);
+        if (!c.exam.sections.length) { setErr("Every question the writer took from your textbook needed material your notes don't cover. Try again, or untick “Use my textbooks”."); return; }
+        exam = c.exam;
+        count("study.exam.textbook");
+        for (let i = 0; i < c.dropped; i++) count("study.exam.textbook.dropped");
+        if (c.dropped) flash(`Left out ${c.dropped} textbook question${c.dropped === 1 ? "" : "s"} your notes don't cover.`);
+      }
       if (images.length) exam = await resolveCrops(exam, images);
       onReady(exam);
     } catch (e) { setErr(e instanceof AiError ? e.message : "Something went wrong: " + (e as Error).message); logError("exam", e); } finally { setBusy(null); }
@@ -646,6 +673,11 @@ function ExamModal({ ai, notes, notebooks, onClose, onReady, setBusy, flash }: {
           </Field>
           <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={figures} onChange={(e) => setFigures(e.target.checked)} /><span><b>Lots of figures</b> — graphs, data tables, charts and diagrams to read and calculate from</span></label>
           <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={pictures} onChange={(e) => setPictures(e.target.checked)} /><span><b>Use pictures from my notes</b> — slides and diagrams from your PDFs can appear in questions <span className="text-foreground-muted">(sends a few page images; costs more)</span></span></label>
+          {books.length > 0 ? (
+            <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={useBooks} onChange={(e) => setUseBooks(e.target.checked)} /><span><b>Use questions from my textbooks</b> — real problems from {books.length === 1 ? `“${books[0].title}”` : `your ${books.length} textbooks`}, but only ones your notes give you what you need to solve <span className="text-foreground-muted">(costs a little more)</span></span></label>
+          ) : (
+            <p className="text-xs text-foreground-muted">Tip: import a textbook PDF and mark it as a textbook (the book button on its card in the Library) — exams can then use its problems, limited to what your notes cover.</p>
+          )}
           <p className="text-xs text-foreground-muted">Typical cost {formatUsd(estimateUsd("exam", questions / 8, getSettings()) + (pictures ? estimateUsd("review", 4, getSettings()) : 0))} to write, plus about {formatUsd(estimateUsd("exam.mark", 2, getSettings()))} to mark the written answers.</p>
           {err && <p className="text-sm text-negative">{err}</p>}
           <Button variant="primary" onClick={run}><Sparkles size={14} /> Write my exam</Button>

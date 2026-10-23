@@ -126,6 +126,11 @@ function QuestionView({ n, q, answers, onAnswer, mode, onMode, reported, onRepor
       </div>
       {reported && <p className="mb-3 rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">Reported — this question won&apos;t count toward your score. You can still answer it for practice.</p>}
       {q.topic && <p className="mb-2 text-xs uppercase tracking-wider text-foreground-muted">{q.topic}</p>}
+      {q.basis?.source && (
+        <p className="mb-2 text-xs text-foreground-muted">
+          From your textbook ({q.basis.source}){q.basis.stretch && <span className="ml-1.5 rounded-full bg-amber-500/15 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-400" title="Your notes cover the ideas, but this needs a step they only hint at">Stretch</span>}
+        </p>
+      )}
       <div className="text-[17px] leading-relaxed"><RichText text={q.stem} /></div>
       {q.figure && <FigureView figure={q.figure} className="mt-4" />}
       <div className="mt-5 space-y-6">

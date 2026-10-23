@@ -24,6 +24,8 @@ export type NoteMeta = {
   imageCount: number;
   /** last time the note was opened (for the Recent view) */
   openedAt?: number;
+  /** a textbook / reference PDF: a question source for exams, not the student's own notes */
+  isTextbook?: boolean;
   /** set when the note was moved to "Recently deleted" (removed for good after 30 days) */
   deletedAt?: number;
 };

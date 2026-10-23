@@ -4,9 +4,9 @@ import { getPageTexts, listNotes, type MistakeRec } from "./db";
 import { corpusExcerpts } from "./search";
 import { renderNotePages } from "./export";
 import { loadExportNote } from "./note-io";
-import { cardsFromImage, cardsFromText, generateCards, type RawCard } from "./ai-study";
+import { cardsFromImage, cardsFromText, generateCards, writeWrongOptions, type RawCard } from "./ai-study";
 import { listCards, putCards } from "./study-db";
-import { dedupeCards, makeCard, type Card } from "./study-core";
+import { answerShape, dedupeCards, makeCard, type Card } from "./study-core";
 import { newId } from "./ids";
 import type { Exam } from "./exam-core";
 import type { Figure } from "./figure-core";
@@ -14,15 +14,32 @@ import type { Excerpt } from "./ai";
 import { count } from "./telemetry";
 import { hashString } from "./ai-cache";
 import { getMeta, setMeta } from "./db";
+import { pickTextbookPages, textbookChunks } from "./coverage";
 
 const CARDS_SRC = "cards:src";
 
-/** "all", "nb:<id>" or "note:<id>" → note ids (null = everything). */
+/** "all", "nb:<id>" or "note:<id>" → note ids (null = everything). Textbooks aren't notes, unless picked by name. */
 export async function scopeNoteIds(scope: string): Promise<string[] | null> {
-  if (scope === "all") return null;
+  if (scope.startsWith("note:")) return [scope.slice(5)];
   const notes = await listNotes();
-  if (scope.startsWith("nb:")) return notes.filter((n) => n.notebookId === scope.slice(3)).map((n) => n.id);
-  return [scope.slice(5)];
+  if (scope === "all") return notes.some((n) => n.isTextbook) ? notes.filter((n) => !n.isTextbook).map((n) => n.id) : null;
+  return notes.filter((n) => n.notebookId === scope.slice(3) && !n.isTextbook).map((n) => n.id);
+}
+
+/**
+ * Textbook pages worth offering the exam writer for these notes: from every textbook in the library,
+ * only the pages closest to what the notes cover (see coverage.ts), numbered T1, T2… in the prompt.
+ */
+/**
+ * Cost: the whole book is searched ON THE DEVICE (no AI, no credits). Pages are cut into single problems /
+ * worked examples, ranked against the notes by TF-IDF, and only the best few (≈6,000 characters, about
+ * 1,500 tokens — under a cent even on the default model) are sent with the exam request.
+ */
+export async function textbookPagesFor(notes: Excerpt[], maxChars = 6000): Promise<Excerpt[]> {
+  const books = (await listNotes()).filter((n) => n.isTextbook).map((n) => n.id);
+  if (!books.length || !notes.length) return [];
+  const pages = await corpusExcerpts(books, 6_000_000);
+  return pickTextbookPages(notes.map((e) => e.text), textbookChunks(pages), maxChars);
 }
 
 export async function toCards(raws: RawCard[], ctx: { notebookId: string | null; noteId?: string; page?: number; source: Card["source"]; excerpts?: Excerpt[] }): Promise<Card[]> {
@@ -79,6 +96,25 @@ export async function makeCardsFromExplanation(title: string, body: string, ctx:
   const fresh = dedupeCards(await toCards(await cardsFromText(title, body), { ...ctx, source: "explain" }), await listCards());
   await putCards(fresh);
   return fresh.length;
+}
+
+/** Cards that can only be flip/typed because nobody has written wrong options for them (numbers make their own). */
+export const needsChoices = (c: Card) => !c.distractors?.length && c.kind !== "steps" && c.source !== "mistake" && answerShape(c.back) !== "number";
+
+/** Write realistic wrong options for older cards, 30 per AI call. Returns how many cards gained them. */
+export async function improveAnswerChoices(cards: Card[]): Promise<number> {
+  const todo = cards.filter(needsChoices);
+  let done = 0;
+  for (let k = 0; k < todo.length; k += 30) {
+    const chunk = todo.slice(k, k + 30);
+    count("study.cards.choices");
+    const wrong = await writeWrongOptions(chunk);
+    const now = Date.now();
+    const upd = chunk.flatMap((c, i) => (wrong[i].length >= 2 ? [{ ...c, distractors: wrong[i], updatedAt: now }] : []));
+    await putCards(upd);
+    done += upd.length;
+  }
+  return done;
 }
 
 /** A "spot the error" card for a mistake (no AI needed). */

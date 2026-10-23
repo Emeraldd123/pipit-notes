@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  CheckSquare, Clock, Download, RotateCcw, Trash, FileUp, Folder, FolderInput, FolderPlus, GraduationCap, Loader2, Network, NotebookPen, Pencil, Pin, Plus, Search, Settings as SettingsIcon, Tag, Trash2, Upload, X,
+  BookOpen, CheckSquare, Clock, Download, RotateCcw, Trash, FileUp, Folder, FolderInput, FolderPlus, GraduationCap, Loader2, Network, NotebookPen, Pencil, Pin, Plus, Search, Settings as SettingsIcon, Tag, Trash2, Upload, X,
 } from "lucide-react";
 import type { NoteMeta, NotebookRec } from "@/types";
 import {
@@ -456,6 +456,11 @@ function NoteTile({ note, notebook, notebooks, onChange, flash, selecting, picke
     onChange();
   }
   async function togglePin() { await patchNote(note.id, { isPinned: !note.isPinned }, false); onChange(); }
+  async function toggleTextbook() {
+    await patchNote(note.id, { isTextbook: !note.isTextbook || undefined }, false);
+    flash(note.isTextbook ? "Back to being one of your notes." : "Marked as a textbook — practice exams can use its problems, limited to what your notes cover. It's left out of flashcards.");
+    onChange();
+  }
 
   return (
     <div className="group relative">
@@ -475,6 +480,7 @@ function NoteTile({ note, notebook, notebooks, onChange, flash, selecting, picke
             <div className={`absolute right-1.5 top-1.5 flex gap-1 opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 ${selecting ? "hidden" : ""}`}>
               <Mini title={note.isPinned ? "Unpin" : "Pin"} onClick={togglePin} active={note.isPinned}><Pin size={13} /></Mini>
               <Mini title="Move to notebook" onClick={() => setMoving((v) => !v)} active={moving}><FolderInput size={13} /></Mini>
+              <Mini title={note.isTextbook ? "Textbook — tap to make it a normal note" : "Mark as a textbook"} onClick={toggleTextbook} active={note.isTextbook}><BookOpen size={13} /></Mini>
               <Mini title="Tags" onClick={editTags}><Tag size={13} /></Mini>
               <Mini title="Rename" onClick={rename}><Pencil size={13} /></Mini>
             </div>
@@ -500,6 +506,7 @@ function NoteTile({ note, notebook, notebooks, onChange, flash, selecting, picke
         <p className="truncate text-sm font-medium">{note.title}</p>
         <p className="flex items-center gap-1.5 truncate text-xs text-foreground-muted">
           {notebook && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: notebook.color }} />}
+          {note.isTextbook && <span className="font-medium text-primary">Textbook ·</span>}
           {note.pageCount} page{note.pageCount === 1 ? "" : "s"} · {timeAgo(note.updatedAt)}
         </p>
         {note.tags.length > 0 && <p className="mt-0.5 truncate text-[11px] text-primary/80">{note.tags.map((t) => `#${t}`).join(" ")}</p>}
