@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Flame, Heart, Loader2, Trophy, X, Zap } from "lucide-react";
+import { Check, Compass, Flame, Heart, Loader2, Trophy, X, Zap } from "lucide-react";
 import { RichText } from "@/components/blocks";
 import { playSfx } from "@/lib/sound";
 import { previewIntervals, GRADE_LABELS, type Grade } from "@/lib/srs";
@@ -201,11 +201,15 @@ export type LessonResult = { outcomes: Outcome[]; stats: LessonStats; xp: number
 
 const CONFETTI = ["🎉", "✨", "⭐", "🎊", "💫"];
 
-export function LessonRunner({ title, cards, exercises, progress, quiz, onFinish, onExit, onFlagCard }: {
+export function LessonRunner({ title, cards, exercises, progress, quiz, onFinish, onExit, onFlagCard, onOffTopic, noHearts }: {
   title: string; cards: Card[]; exercises: Exercise[]; progress: Progress; quiz?: boolean;
   onFinish: (r: LessonResult) => void; onExit: () => void;
   /** "This card is bad" — the card is paused for good (and its retry is dropped from this lesson). */
   onFlagCard?: (cardId: string) => void;
+  /** "This is a different unit": the parent drops that topic from the focus and restarts. Gets the answers so far, so they still count. */
+  onOffTopic?: (cardId: string, soFar: Outcome[]) => void;
+  /** flashcard review: no hearts (an "Again" just comes round later) */
+  noHearts?: boolean;
 }) {
   const cardMap = useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards]);
   const startProgress = useRef(progress).current; // the summary shows before/after, so it must not see the already-saved update
@@ -214,10 +218,11 @@ export function LessonRunner({ title, cards, exercises, progress, quiz, onFinish
   const [rep, setRep] = useState<Report>({ ready: false });
   const [checked, setChecked] = useState(false);
   const [heartsLeft, setHeartsLeft] = useState(5);
-  const [heartsOn, setHeartsOn] = useState(!quiz && progress.hearts);
+  const [heartsOn, setHeartsOn] = useState(!quiz && !noHearts && progress.hearts);
   const [combo, setCombo] = useState(0);
   const [finished, setFinished] = useState<LessonResult | null>(null);
   const [outOfHearts, setOutOfHearts] = useState(false);
+  const [offTopic, setOffTopic] = useState<string | null>(null);   // card id being asked about
   const outcomes = useRef<Outcome[]>([]);
   const st = useRef({ firstTry: 0, maxCombo: 0, combo: 0, hearts: 5 }); // mirrors the state above so finishing is never a render behind
   const started = useRef(Date.now());
@@ -309,6 +314,11 @@ export function LessonRunner({ title, cards, exercises, progress, quiz, onFinish
           <div className="h-full rounded-full bg-positive transition-all duration-500" style={{ width: `${Math.min(100, (done / Math.max(1, total)) * 100)}%` }} />
         </div>
         {heartsOn && <span className="flex items-center gap-1 text-sm font-semibold text-negative"><Heart size={18} fill="currentColor" /> {heartsLeft}</span>}
+        {onOffTopic && cur.ex.kind !== "match" && !checked && (
+          <button onClick={() => setOffTopic(exerciseCards(cur.ex)[0])} className="flex min-h-9 items-center gap-1 rounded-lg border border-border px-2.5 text-xs font-medium text-foreground-muted hover:bg-surface-secondary" title="This question is from a different unit">
+            <Compass size={14} /> Off topic
+          </button>
+        )}
       </header>
 
       <main className="mx-auto w-full max-w-xl flex-1 px-5 pb-40 pt-4">
@@ -342,6 +352,19 @@ export function LessonRunner({ title, cards, exercises, progress, quiz, onFinish
         </div>
       </footer>
 
+      {offTopic && onOffTopic && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setOffTopic(null)}>
+          <div className="w-full max-w-sm rounded-2xl bg-surface p-6 text-center shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <Compass size={40} className="mx-auto text-primary" />
+            <h2 className="mt-3 text-xl font-bold">Not what you&apos;re studying?</h2>
+            <p className="mt-1 text-sm text-foreground-muted">This question is from <b>“{cardMap.get(offTopic)?.topic?.trim() || "General"}”</b>. Take that unit out of your Learn focus and restart the lesson with only what you&apos;re studying. What you&apos;ve answered so far still counts.</p>
+            <div className="mt-5 flex flex-col gap-2">
+              <Button variant="primary" onClick={() => { const id = offTopic; setOffTopic(null); onOffTopic(id, outcomes.current); }}>Skip this unit and restart</Button>
+              <Button onClick={() => setOffTopic(null)}>Keep going</Button>
+            </div>
+          </div>
+        </div>
+      )}
       {outOfHearts && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-sm rounded-2xl bg-surface p-6 text-center shadow-2xl">

@@ -91,6 +91,22 @@ export async function putProgress(p: Progress): Promise<void> {
 }
 
 // --- concept maps -----------------------------------------------------------------------------------------------------
+export type ResetWhat = { cards: boolean; exams: boolean; mistakes: boolean; progress: boolean; maps: boolean };
+/**
+ * Clear study data on this device (notes are never touched). Clearing cards also forgets which pages cards
+ * were already made from, so "Make flashcards" reads those pages again.
+ */
+export async function resetStudyData(what: ResetWhat): Promise<void> {
+  const d = await db();
+  const stores = (["cards", "exams", "mistakes", "maps"] as const).filter((s) => what[s]);
+  const names: ("cards" | "exams" | "mistakes" | "maps" | "meta")[] = [...stores, "meta"];
+  const tx = d.transaction(names, "readwrite");
+  for (const s of stores) await tx.objectStore(s).clear();
+  if (what.cards) await tx.objectStore("meta").delete("cards:src");
+  if (what.progress) await tx.objectStore("meta").delete("study:progress");
+  await tx.done;
+}
+
 export async function listMaps(): Promise<ConceptMap[]> {
   return (await (await db()).getAll("maps")).sort((a, b) => b.updatedAt - a.updatedAt);
 }

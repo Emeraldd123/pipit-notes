@@ -306,6 +306,8 @@ export type Progress = {
   freezes: number;
   /** days covered by a freeze, for the "your streak was saved" note */
   frozen?: string[];
+  /** what each study section is focused on (see Focus) */
+  focus?: Partial<Record<FocusSection, Focus>>;
 };
 export const MAX_FREEZES = 2;
 export const newProgress = (): Progress => ({ xp: 0, streak: 0, best: 0, lastDay: null, days: {}, goal: 30, sound: true, hearts: true, freezes: 1 });
@@ -390,4 +392,57 @@ export function makeCard(partial: Pick<Card, "front" | "back"> & Partial<Card>, 
 export function dedupeCards<T extends { front: string }>(incoming: T[], existing: { front: string }[]): T[] {
   const seen = new Set(existing.map((c) => normalizeAnswer(c.front)));
   return incoming.filter((c) => { const k = normalizeAnswer(c.front); if (!k || seen.has(k)) return false; seen.add(k); return true; });
+}
+
+// --- focus: what each study section is about ---------------------------------------------------------------------------
+/**
+ * Each section (Learn, Flashcards, Quizzes) has its own focus so they never mix: a notebook ("all", "none" = unfiled,
+ * or an id), optionally a hand-picked list of topics (units), and topics ruled out as off-topic. An empty `topics`
+ * means every topic in the notebook, so new units are included automatically unless skipped.
+ */
+export type Focus = { nb: string; topics: string[]; skip: string[] };
+export type FocusSection = "learn" | "cards" | "quiz";
+export const ALL_FOCUS: Focus = { nb: "all", topics: [], skip: [] };
+export const topicOf = (c: Pick<Card, "topic">) => c.topic?.trim() || "General";
+
+export function inNotebook(c: Card, nb: string): boolean {
+  return nb === "all" || c.notebookId === (nb === "none" ? null : nb);
+}
+export function inFocus(c: Card, f: Focus): boolean {
+  if (!inNotebook(c, f.nb)) return false;
+  const t = topicOf(c);
+  return (!f.topics.length || f.topics.includes(t)) && !f.skip.includes(t);
+}
+export const focusCards = (cards: Card[], f: Focus) => cards.filter((c) => inFocus(c, f));
+
+/** Topics available in a notebook, in the order they were first studied (same order as the skill path). */
+export function topicsIn(cards: Card[], nb: string): string[] {
+  const seen: string[] = [];
+  for (const c of cards.filter((x) => inNotebook(x, nb)).sort((a, b) => a.createdAt - b.createdAt)) { const t = topicOf(c); if (!seen.includes(t)) seen.push(t); }
+  return seen;
+}
+
+/** "That's a different unit": take a topic out of the focus (a hand-picked list loses it; "all topics" skips it). */
+export function dropTopic(f: Focus, topic: string): Focus {
+  if (f.topics.length) return { ...f, topics: f.topics.filter((t) => t !== topic) };
+  return { ...f, skip: f.skip.includes(topic) ? f.skip : [...f.skip, topic] };
+}
+
+/** Topics/skips that no longer exist (cards deleted, notebook changed) are dropped so a focus can't silently match nothing. */
+export function cleanFocus(f: Focus | undefined, cards: Card[]): Focus {
+  if (!f) return ALL_FOCUS;
+  const have = new Set(topicsIn(cards, f.nb));
+  return { nb: f.nb, topics: f.topics.filter((t) => have.has(t)), skip: f.skip.filter((t) => have.has(t)) };
+}
+
+export function describeFocus(f: Focus, nbName: (id: string) => string | undefined): string {
+  const where = f.nb === "all" ? "All notebooks" : f.nb === "none" ? "Unfiled" : nbName(f.nb) ?? "Notebook";
+  const what = f.topics.length ? (f.topics.length <= 3 ? f.topics.join(", ") : `${f.topics.length} topics`) : "all topics";
+  return `${where} · ${what}${f.skip.length ? ` (skipping ${f.skip.length <= 2 ? f.skip.join(", ") : f.skip.length})` : ""}`;
+}
+
+/** Classic flashcards: flip and self-grade. Due cards first, then new ones, then the weakest; shuffled. */
+export function buildFlashcards(cards: Card[], o: { size?: number; now?: number; rng?: Rng } = {}): Exercise[] {
+  const chosen = selectCards(cards, { size: o.size ?? 20, now: o.now, maxNew: o.size ?? 20 });
+  return shuffle(chosen, o.rng ?? Math.random).map((c): Exercise => ({ kind: "flip", cardId: c.id, front: c.front, back: c.kind === "steps" && c.steps ? c.steps.map((s, i) => `${i + 1}. ${s}`).join("\n") : c.back }));
 }

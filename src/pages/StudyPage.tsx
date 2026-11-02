@@ -9,10 +9,12 @@ import { LessonRunner, type LessonResult } from "@/components/lesson";
 import { ExamResults, ExamRunner, MarkingScreen } from "@/components/exam-runner";
 import { listNotebooks, listNotes, type ExamRec, type MistakeRec } from "@/lib/db";
 import {
-  addAttempt, deleteCard, deleteExam, rescoreLatestAttempt, updateExamDef, deleteMistake, getProgress, listCards, listExams, listMistakes, patchMistake, putCards, putProgress, saveExam,
+  addAttempt, deleteCard, deleteExam, rescoreLatestAttempt, updateExamDef, deleteMistake, getProgress, listCards, listExams, listMistakes, patchMistake, putCards, putProgress, resetStudyData, saveExam,
+  type ResetWhat,
 } from "@/lib/study-db";
 import {
-  addXp, applyOutcomes, buildLesson, currentStreak, lastDays, makeCard, topicStats, xpToday, type Card, type Progress, type Exercise, shuffle,
+  addXp, applyOutcomes, buildFlashcards, buildLesson, cleanFocus, currentStreak, describeFocus, dropTopic, focusCards, lastDays, makeCard, newProgress, topicOf, topicStats, topicsIn, xpToday,
+  type Card, type Focus, type FocusSection, type Outcome, type Progress, type Exercise, shuffle,
 } from "@/lib/study-core";
 import { crownOf, isDue, isNew } from "@/lib/srs";
 import { allParts, buildResult, reportQuestion, type Exam, type Part, type PartAnswer, type PartMark, type Question, type ReportReason } from "@/lib/exam-core";
@@ -29,35 +31,39 @@ import { newId } from "@/lib/ids";
 import { timeAgo } from "@/lib/format";
 import type { NoteMeta, NotebookRec } from "@/types";
 
-type Tab = "path" | "cards" | "tests" | "mistakes";
+type Tab = "path" | "cards" | "quiz" | "exams" | "mistakes";
+/** what a lesson-style session is: a Duolingo lesson, a scored quiz, or flip-and-grade flashcards */
+type LessonMode = "lesson" | "quiz" | "flash";
 type Session =
-  | { kind: "lesson"; title: string; exercises: Exercise[]; quiz?: boolean }
+  | { kind: "lesson"; title: string; exercises: Exercise[]; mode: LessonMode; section?: FocusSection; size: number; dueOnly?: boolean; topic?: string; run: number }
   | { kind: "exam"; exam: Exam; rec: ExamRec }
   | { kind: "marking"; message: string }
   | { kind: "results"; exam: Exam; recId: string; answers: Record<string, PartAnswer>; marks: PartMark[]; seconds: number };
 
+// separate sections, each with its own focus, so a lesson, a flashcard review and a quiz never get mixed up
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: "path", label: "Learn", icon: <GraduationCap size={15} /> },
-  { id: "cards", label: "Cards", icon: <Layers size={15} /> },
-  { id: "tests", label: "Quizzes & exams", icon: <ClipboardList size={15} /> },
+  { id: "cards", label: "Flashcards", icon: <Layers size={15} /> },
+  { id: "quiz", label: "Quizzes", icon: <BookOpenCheck size={15} /> },
+  { id: "exams", label: "Exams", icon: <ClipboardList size={15} /> },
   { id: "mistakes", label: "Mistakes", icon: <AlertTriangle size={15} /> },
 ];
+const SECTION_NAME: Record<FocusSection, string> = { learn: "Learn", cards: "Flashcards", quiz: "Quizzes" };
 
 export function StudyPage({ view }: { view?: string }) {
   const settings = useSettings();
   const ai = aiReady(settings);
-  const tab: Tab = (TABS.find((t) => t.id === view)?.id ?? "path") as Tab;
+  const tab: Tab = view === "tests" ? "exams" : ((TABS.find((t) => t.id === view)?.id ?? "path") as Tab);   // "tests" = the old combined tab
   const [cards, setCards] = useState<Card[]>([]);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [notes, setNotes] = useState<NoteMeta[]>([]);
   const [notebooks, setNotebooks] = useState<NotebookRec[]>([]);
   const [mistakes, setMistakes] = useState<MistakeRec[]>([]);
   const [exams, setExams] = useState<ExamRec[]>([]);
-  const [nb, setNb] = useState<string>("all");
   const [session, setSession] = useState<Session | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [modal, setModal] = useState<null | "generate" | "card" | "quiz" | "exam" | "settings">(null);
+  const [modal, setModal] = useState<null | "generate" | "card" | "exam" | "settings">(null);
   const [editing, setEditing] = useState<Card | null>(null);
 
   const flash = useCallback((m: string) => { setToast(m); setTimeout(() => setToast((t) => (t === m ? null : t)), 3600); }, []);
@@ -76,24 +82,69 @@ export function StudyPage({ view }: { view?: string }) {
     try {
       const f = JSON.parse(raw) as { ids: string[]; title: string };
       const pool = cards.filter((c) => f.ids.includes(c.id));
-      if (pool.length) startLesson({ title: f.title, pool, size: Math.min(10, Math.max(4, pool.length)) });
+      if (pool.length) startLesson({ title: f.title, pool, mode: "lesson", size: Math.min(10, Math.max(4, pool.length)) });
     } catch { /* ignore a malformed hand-off */ }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [progress, cards.length]);
 
-  const scoped = useMemo(() => (nb === "all" ? cards : cards.filter((c) => c.notebookId === (nb === "none" ? null : nb))), [cards, nb]);
+  // each section's focus (notebook + topics), kept with the study progress so it survives reloads and backups
+  const focusOf = useCallback((sec: FocusSection): Focus => cleanFocus(progress?.focus?.[sec], cards), [progress, cards]);
+  const setFocus = useCallback(async (sec: FocusSection, f: Focus) => {
+    const p = progress ?? (await getProgress());
+    const np = { ...p, focus: { ...(p.focus ?? {}), [sec]: f } };
+    setProgress(np); await putProgress(np);
+  }, [progress]);
+  const nbName = useCallback((id: string) => notebooks.find((n) => n.id === id)?.name, [notebooks]);
+  const learnCards = useMemo(() => focusCards(cards, focusOf("learn")), [cards, focusOf]);
   const now = Date.now();
-  const dueCount = scoped.filter((c) => !c.suspended && isDue(c, now)).length;
-  const topics = useMemo(() => topicStats(scoped, now), [scoped, now]);
+  const dueCount = learnCards.filter((c) => !c.suspended && isDue(c, now)).length;
+  const topics = useMemo(() => topicStats(learnCards, now), [learnCards, now]);
 
   // --- sessions ----------------------------------------------------------------------------------------------------
-  function startLesson(o: { topic?: string; dueOnly?: boolean; title: string; size?: number; quiz?: boolean; nb?: string; pool?: Card[] }) {
-    const nbSel = o.nb ?? nb;
-    const pool = o.pool ?? (nbSel === "all" ? cards : cards.filter((c) => c.notebookId === (nbSel === "none" ? null : nbSel)));
-    const ex = buildLesson(pool, { topic: o.topic, dueOnly: o.dueOnly, size: o.size ?? 8, maxNew: o.quiz ? 99 : 4, now: Date.now() });
-    if (!ex.length) return flash(o.dueOnly ? "Nothing is due right now — nice work!" : "No cards to study yet — make some first.");
-    count(o.quiz ? "study.quiz.start" : "study.lesson.start");
-    setSession({ kind: "lesson", title: o.title, exercises: ex, quiz: o.quiz });
+  const build = (mode: LessonMode, pool: Card[], o: { topic?: string; dueOnly?: boolean; size: number }) =>
+    mode === "flash" ? buildFlashcards(o.topic ? pool.filter((c) => topicOf(c) === o.topic) : pool, { size: o.size, now: Date.now() })
+    : buildLesson(pool, { topic: o.topic, dueOnly: o.dueOnly, size: o.size, maxNew: mode === "quiz" ? 99 : 4, now: Date.now() });
+
+  function startLesson(o: { title: string; pool: Card[]; mode: LessonMode; section?: FocusSection; topic?: string; dueOnly?: boolean; size?: number }) {
+    const size = o.size ?? 8;
+    const ex = build(o.mode, o.pool, { topic: o.topic, dueOnly: o.dueOnly, size });
+    if (!ex.length) return flash(o.dueOnly ? "Nothing is due right now — nice work!" : o.pool.length ? "Nothing to study in that selection right now." : "No cards in this focus yet — pick other topics or make some cards.");
+    count(o.mode === "quiz" ? "study.quiz.start" : o.mode === "flash" ? "study.flash.start" : "study.lesson.start");
+    setSession({ kind: "lesson", title: o.title, exercises: ex, mode: o.mode, section: o.section, size, dueOnly: o.dueOnly, topic: o.topic, run: Date.now() });
+  }
+
+  /** "Off topic" in a session: keep what was answered, drop that unit from the section's focus, restart on what's left. */
+  async function offTopic(cardId: string, soFar: Outcome[]) {
+    const s = session;
+    if (!s || s.kind !== "lesson" || !s.section) return;
+    try {
+      if (soFar.length) await putCards(applyOutcomes(await listCards(), soFar, Date.now()));
+      const all = await listCards();
+      const card = all.find((c) => c.id === cardId);
+      if (!card) return;
+      const unit = topicOf(card);
+      const f = dropTopic(focusOf(s.section), unit);
+      await setFocus(s.section, f);
+      count("study.offTopic");
+      await reload();
+      const topic = s.topic === unit ? undefined : s.topic;
+      const ex = build(s.mode, focusCards(all, f), { topic, dueOnly: s.dueOnly, size: s.size });
+      if (!ex.length) { setSession(null); flash(`Skipped “${unit}”. Nothing else is left in your ${SECTION_NAME[s.section]} focus — pick topics below.`); return; }
+      setSession({ ...s, exercises: ex, topic, run: Date.now() });
+      flash(`Skipped “${unit}” — restarted with ${describeFocus(f, nbName)}.`);
+    } catch (e) { logError("study", e); }
+  }
+
+  async function doReset(what: ResetWhat) {
+    const keep = progress;
+    await resetStudyData(what);
+    // a reset of XP/streak keeps your preferences (goal, sound, hearts, focus)
+    if (what.progress && keep) await putProgress({ ...newProgress(), goal: keep.goal, sound: keep.sound, hearts: keep.hearts, focus: what.cards ? undefined : keep.focus });
+    else if (what.cards && keep) await putProgress({ ...keep, focus: undefined });
+    count("study.reset");
+    setModal(null);
+    await reload();
+    flash("Study data cleared. Your notes are untouched.");
   }
 
   async function onLessonFinish(r: LessonResult) {
@@ -120,7 +171,7 @@ export function StudyPage({ view }: { view?: string }) {
     }
     const mine = [...cards.filter((c) => c.source === "mistake"), ...fresh.map((x) => x.c)];
     await reload();
-    startLesson({ title: "My mistakes", pool: mine.length >= 2 ? mine : undefined });
+    startLesson({ title: "My mistakes", pool: mine.length >= 2 ? mine : cards, mode: "lesson" });
   }
 
   // --- exams ----------------------------------------------------------------------------------------------------------
@@ -190,12 +241,13 @@ export function StudyPage({ view }: { view?: string }) {
     })) as Card[];
     await putCards(fresh);
     await reload();
-    flash(`Added ${fresh.length} card${fresh.length === 1 ? "" : "s"} — find them under Learn.`);
+    flash(`Added ${fresh.length} card${fresh.length === 1 ? "" : "s"} — find them under Flashcards.`);
   }
 
   // --- session overlays ----------------------------------------------------------------------------------------------------
   if (progress && session?.kind === "lesson") {
-    return <LessonRunner title={session.title} cards={cards} exercises={session.exercises} progress={progress} quiz={session.quiz} onFinish={(r) => void onLessonFinish(r)} onExit={() => setSession(null)}
+    return <LessonRunner key={session.run} title={session.title} cards={cards} exercises={session.exercises} progress={progress} quiz={session.mode === "quiz"} noHearts={session.mode === "flash"}
+      onFinish={(r) => void onLessonFinish(r)} onExit={() => setSession(null)} onOffTopic={session.section ? (id, soFar) => void offTopic(id, soFar) : undefined}
       onFlagCard={(id) => { const c = cards.find((x) => x.id === id); if (c) { void putCards([{ ...c, suspended: true, updatedAt: Date.now() }]); count("study.card.flagged"); } }} />;
   }
   if (session?.kind === "exam") return <ExamRunner exam={session.exam} onSubmit={(a, s) => void submitExam(session.exam, session.rec.id, a, s)} onExit={() => setSession(null)} onReport={(qid, r) => void reportExamQuestion(qid, r)} />;
@@ -240,10 +292,17 @@ export function StudyPage({ view }: { view?: string }) {
 
         <div className="mt-5">
           {tab === "path" && progress && (
-            <PathView cards={scoped} topics={topics} dueCount={dueCount} nb={nb} notebooks={notebooks} onNb={setNb} progress={progress}
-              onLesson={startLesson} onGenerate={() => setModal("generate")} onCard={() => { setEditing(null); setModal("card"); }} />
+            <>
+              {cards.length > 0 && <FocusBar label="Learning" hint="Lessons only teach these. Tap “Off topic” in a lesson to drop a unit." cards={cards} notebooks={notebooks} focus={focusOf("learn")} onChange={(f) => void setFocus("learn", f)} />}
+              <PathView cards={learnCards} anyCards={cards.length > 0} topics={topics} dueCount={dueCount} progress={progress}
+                onLesson={(o) => startLesson({ ...o, pool: learnCards, mode: "lesson", section: "learn" })} onGenerate={() => setModal("generate")} onCard={() => { setEditing(null); setModal("card"); }} />
+            </>
           )}
-          {tab === "cards" && <CardsView cards={cards} notebooks={notebooks} onAdd={() => { setEditing(null); setModal("card"); }} onEdit={(c) => { setEditing(c); setModal("card"); }}
+          {tab === "cards" && (
+            <FlashcardsHome cards={cards} notebooks={notebooks} focus={focusOf("cards")} onFocus={(f) => void setFocus("cards", f)}
+              onStart={(o) => startLesson({ title: o.topic ?? "Flashcards", pool: focusCards(cards, focusOf("cards")), mode: "flash", section: "cards", size: o.size, topic: o.topic })} />
+          )}
+          {tab === "cards" && <CardsView cards={focusCards(cards, focusOf("cards"))} total={cards.length} notebooks={notebooks} onAdd={() => { setEditing(null); setModal("card"); }} onEdit={(c) => { setEditing(c); setModal("card"); }}
             onDelete={async (c) => { await deleteCard(c.id); await reload(); }} onSuspend={async (c) => { await putCards([{ ...c, suspended: !c.suspended, updatedAt: Date.now() }]); await reload(); }} onGenerate={() => setModal("generate")}
             onImprove={ai ? async (n) => {
               setBusy(`Writing realistic wrong answers for ${n} card${n === 1 ? "" : "s"}…`);
@@ -251,7 +310,11 @@ export function StudyPage({ view }: { view?: string }) {
               catch (e) { flash(e instanceof AiError ? e.message : "Something went wrong."); logError("cards.choices", e); }
               finally { setBusy(null); }
             } : undefined} />}
-          {tab === "tests" && <TestsView exams={exams} ai={ai} cardCount={cards.length} onQuiz={() => setModal("quiz")} onExam={() => setModal("exam")}
+          {tab === "quiz" && (
+            <QuizHome cards={cards} notebooks={notebooks} focus={focusOf("quiz")} onFocus={(f) => void setFocus("quiz", f)}
+              onStart={(size) => startLesson({ title: "Quiz", pool: focusCards(cards, focusOf("quiz")), mode: "quiz", section: "quiz", size })} />
+          )}
+          {tab === "exams" && <ExamsView exams={exams} ai={ai} onExam={() => setModal("exam")}
             onOpen={(rec) => void runExam(rec.exam, rec)} onDelete={async (rec) => { if (confirm(`Delete "${rec.exam.title}"?`)) { await deleteExam(rec.id); await reload(); } }} />}
           {tab === "mistakes" && <MistakesView mistakes={mistakes} notes={notes} onOpen={(m) => go({ name: "note", id: m.noteId, page: m.page })}
             onResolve={async (m) => { await patchMistake(m.id, { resolved: !m.resolved }); await reload(); }} onDelete={async (m) => { await deleteMistake(m.id); await reload(); }} onPractice={() => void startPractice()} />}
@@ -263,10 +326,10 @@ export function StudyPage({ view }: { view?: string }) {
       {modal === "generate" && <GenerateModal ai={ai} notes={notes} notebooks={notebooks} onClose={() => setModal(null)} setBusy={setBusy}
         onDone={async (m) => { setModal(null); await reload(); flash(m); }} />}
       {modal === "card" && <CardModal card={editing} notebooks={notebooks} onClose={() => setModal(null)} onSave={async (c) => { await putCards([c]); setModal(null); await reload(); flash(editing ? "Card updated." : "Card added."); }} />}
-      {modal === "quiz" && <QuizModal cards={cards} notebooks={notebooks} onClose={() => setModal(null)} onStart={(o) => { setModal(null); startLesson({ title: o.title, size: o.size, quiz: true, nb: o.nb }); }} />}
       {modal === "exam" && <ExamModal ai={ai} notes={notes} notebooks={notebooks} onClose={() => setModal(null)} setBusy={setBusy}
         onReady={async (exam) => { setModal(null); const rec = await saveExam(exam); await reload(); void runExam(exam, rec); }} flash={flash} />}
-      {modal === "settings" && progress && <StudySettings progress={progress} onClose={() => setModal(null)} onChange={async (p) => { setProgress(p); await putProgress(p); }} />}
+      {modal === "settings" && progress && <StudySettings progress={progress} counts={{ cards: cards.length, exams: exams.length, mistakes: mistakes.length }} onClose={() => setModal(null)}
+        onChange={async (p) => { setProgress(p); await putProgress(p); }} onReset={(w) => void doReset(w)} />}
       <Toast msg={toast} />
     </div>
   );
@@ -286,13 +349,16 @@ function GoalRing({ pct, label }: { pct: number; label: string }) {
 // ---- Learn (the skill path) ---------------------------------------------------------------------------------------------------------------
 const WIGGLE = [0, 46, 74, 46, 0, -46, -74, -46];
 
-function PathView({ cards, topics, dueCount, nb, notebooks, onNb, progress, onLesson, onGenerate, onCard }: {
-  cards: Card[]; topics: ReturnType<typeof topicStats>; dueCount: number; nb: string; notebooks: NotebookRec[]; onNb: (v: string) => void; progress: Progress;
+function PathView({ cards, anyCards, topics, dueCount, progress, onLesson, onGenerate, onCard }: {
+  cards: Card[]; anyCards: boolean; topics: ReturnType<typeof topicStats>; dueCount: number; progress: Progress;
   onLesson: (o: { topic?: string; dueOnly?: boolean; title: string; size?: number }) => void; onGenerate: () => void; onCard: () => void;
 }) {
   const [open, setOpen] = useState<string | null>(null);
   const days = lastDays(progress, 7);
   const maxXp = Math.max(20, ...days.map((d) => d.xp));
+  if (anyCards && !cards.length) {
+    return <UiCard className="px-6 py-8 text-center text-sm text-foreground-muted">Nothing to learn in this focus. Pick a notebook or topics above, or make cards for this unit.</UiCard>;
+  }
   if (!cards.length) {
     return (
       <UiCard className="px-6 py-10 text-center">
@@ -309,14 +375,7 @@ function PathView({ cards, topics, dueCount, nb, notebooks, onNb, progress, onLe
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2">
-        {notebooks.length > 0 && (
-          <select value={nb} onChange={(e) => onNb(e.target.value)} className="rounded-xl border border-border bg-surface px-3 py-2 text-sm">
-            <option value="all">All notebooks</option>
-            {notebooks.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
-            <option value="none">Unfiled</option>
-          </select>
-        )}
-        <span className="text-sm text-foreground-muted">{cards.length} card{cards.length === 1 ? "" : "s"}</span>
+        <span className="text-sm text-foreground-muted">{cards.length} card{cards.length === 1 ? "" : "s"} in this focus</span>
         <div className="ml-auto flex gap-2">
           <Button onClick={onGenerate}><Sparkles size={14} /> More cards</Button>
         </div>
@@ -383,8 +442,8 @@ function PathView({ cards, topics, dueCount, nb, notebooks, onNb, progress, onLe
 }
 
 // ---- Cards -----------------------------------------------------------------------------------------------------------------------------
-function CardsView({ cards, notebooks, onAdd, onEdit, onDelete, onSuspend, onGenerate, onImprove }: {
-  cards: Card[]; notebooks: NotebookRec[]; onAdd: () => void; onEdit: (c: Card) => void; onDelete: (c: Card) => void; onSuspend: (c: Card) => void; onGenerate: () => void;
+function CardsView({ cards, total, notebooks, onAdd, onEdit, onDelete, onSuspend, onGenerate, onImprove }: {
+  cards: Card[]; total: number; notebooks: NotebookRec[]; onAdd: () => void; onEdit: (c: Card) => void; onDelete: (c: Card) => void; onSuspend: (c: Card) => void; onGenerate: () => void;
   onImprove?: (n: number) => void;
 }) {
   const plain = cards.filter(needsChoices).length;
@@ -395,7 +454,8 @@ function CardsView({ cards, notebooks, onAdd, onEdit, onDelete, onSuspend, onGen
   for (const c of list) groups.set(c.topic?.trim() || "General", [...(groups.get(c.topic?.trim() || "General") ?? []), c]);
   const nbName = (id: string | null) => notebooks.find((n) => n.id === id)?.name;
   return (
-    <div>
+    <div className="mt-8">
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-foreground-muted">Manage cards{total > cards.length ? ` · showing ${cards.length} of ${total} (this focus)` : ""}</h3>
       <div className="flex flex-wrap items-center gap-2">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${cards.length} cards`} className="min-w-0 flex-1 rounded-xl border border-border bg-surface px-3.5 py-2 text-sm outline-none focus:border-primary" />
         <Button onClick={onGenerate}><Sparkles size={14} /> From notes</Button>
@@ -407,7 +467,7 @@ function CardsView({ cards, notebooks, onAdd, onEdit, onDelete, onSuspend, onGen
           <Button onClick={() => onImprove(plain)}><Sparkles size={14} /> Write answer choices</Button>
         </p>
       )}
-      {cards.length === 0 && <p className="py-12 text-center text-sm text-foreground-muted">No cards yet. Generate them from your notes or add one by hand.</p>}
+      {cards.length === 0 && <p className="py-12 text-center text-sm text-foreground-muted">{total ? "No cards in this focus." : "No cards yet. Generate them from your notes or add one by hand."}</p>}
       <div className="mt-4 space-y-5">
         {[...groups.entries()].map(([topic, cs]) => (
           <section key={topic}>
@@ -443,22 +503,102 @@ function CardsView({ cards, notebooks, onAdd, onEdit, onDelete, onSuspend, onGen
   );
 }
 
-// ---- Quizzes & exams ---------------------------------------------------------------------------------------------------------------------
-function TestsView({ exams, ai, cardCount, onQuiz, onExam, onOpen, onDelete }: {
-  exams: ExamRec[]; ai: boolean; cardCount: number; onQuiz: () => void; onExam: () => void; onOpen: (r: ExamRec) => void; onDelete: (r: ExamRec) => void;
+// ---- Focus picker (shared by Learn, Flashcards, Quizzes — each keeps its own) ------------------------------------------------------------
+function FocusBar({ label, hint, cards, notebooks, focus, onChange }: { label: string; hint?: string; cards: Card[]; notebooks: NotebookRec[]; focus: Focus; onChange: (f: Focus) => void }) {
+  const all = topicsIn(cards, focus.nb);
+  const count = (t: string) => cards.filter((c) => topicOf(c) === t && (focus.nb === "all" || c.notebookId === (focus.nb === "none" ? null : focus.nb))).length;
+  const picked = (t: string) => (focus.topics.length ? focus.topics.includes(t) : true) && !focus.skip.includes(t);
+  const toggle = (t: string) => {
+    if (focus.skip.includes(t)) return onChange({ ...focus, skip: focus.skip.filter((x) => x !== t) });
+    const base = focus.topics.length ? focus.topics : [];
+    const next = base.includes(t) ? base.filter((x) => x !== t) : [...base, t];
+    onChange({ ...focus, topics: next.length === all.length ? [] : next });
+  };
+  const chip = "flex min-h-9 items-center gap-1 rounded-full border px-3 text-sm";
+  return (
+    <UiCard className="mb-5 px-4 py-3.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wider text-foreground-muted">{label}</span>
+        {notebooks.length > 0 && (
+          <select value={focus.nb} onChange={(e) => onChange({ nb: e.target.value, topics: [], skip: [] })} className="rounded-xl border border-border bg-background px-3 py-1.5 text-sm">
+            <option value="all">All notebooks</option>
+            {notebooks.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
+            <option value="none">Unfiled</option>
+          </select>
+        )}
+      </div>
+      {all.length > 0 && (
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
+          <button onClick={() => onChange({ ...focus, topics: [], skip: [] })} className={`${chip} ${!focus.topics.length && !focus.skip.length ? "border-primary bg-primary text-white" : "border-border text-foreground-muted hover:bg-surface-secondary"}`}>All topics</button>
+          {all.map((t) => (
+            <button key={t} onClick={() => toggle(t)} title={focus.skip.includes(t) ? "Skipped as off topic — tap to bring it back" : undefined}
+              className={`${chip} ${focus.skip.includes(t) ? "border-dashed border-border text-foreground-muted line-through" : picked(t) && focus.topics.length ? "border-primary bg-primary/10 font-medium text-primary" : picked(t) ? "border-border" : "border-border text-foreground-muted opacity-60"}`}>
+              {picked(t) && focus.topics.length > 0 && <Check size={13} />}{t}<span className="text-xs opacity-60">{count(t)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {hint && <p className="mt-2 text-xs text-foreground-muted">{hint}</p>}
+    </UiCard>
+  );
+}
+
+// ---- Flashcards ---------------------------------------------------------------------------------------------------------------------------
+function FlashcardsHome({ cards, notebooks, focus, onFocus, onStart }: {
+  cards: Card[]; notebooks: NotebookRec[]; focus: Focus; onFocus: (f: Focus) => void; onStart: (o: { size: number; topic?: string }) => void;
+}) {
+  const [size, setSize] = useState(20);
+  const mine = focusCards(cards, focus).filter((c) => !c.suspended);
+  const due = mine.filter((c) => isDue(c)).length, fresh = mine.filter(isNew).length;
+  if (!cards.length) return null;
+  return (
+    <div>
+      <FocusBar label="Studying" cards={cards} notebooks={notebooks} focus={focus} onChange={onFocus} />
+      <UiCard className="flex flex-wrap items-center gap-4 px-5 py-4">
+        <Layers size={28} className="text-primary" />
+        <div className="min-w-0 flex-1">
+          <p className="text-lg font-bold">Flip through flashcards</p>
+          <p className="text-sm text-foreground-muted">{mine.length} card{mine.length === 1 ? "" : "s"} · {due} due · {fresh} new. See the question, think of the answer, flip, and rate how well you knew it.</p>
+        </div>
+        <select value={size} onChange={(e) => setSize(Number(e.target.value))} className="rounded-xl border border-border bg-background px-3 py-2 text-sm">{[10, 20, 30, 50].map((n) => <option key={n} value={n}>{n} cards</option>)}</select>
+        <Button variant="primary" disabled={!mine.length} onClick={() => onStart({ size })}><Play size={14} /> Start</Button>
+      </UiCard>
+    </div>
+  );
+}
+
+// ---- Quizzes ------------------------------------------------------------------------------------------------------------------------------
+function QuizHome({ cards, notebooks, focus, onFocus, onStart }: { cards: Card[]; notebooks: NotebookRec[]; focus: Focus; onFocus: (f: Focus) => void; onStart: (size: number) => void }) {
+  const [size, setSize] = useState(10);
+  const n = focusCards(cards, focus).filter((c) => !c.suspended).length;
+  if (!cards.length) return <UiCard className="px-6 py-8 text-center text-sm text-foreground-muted">Quizzes are made from your flashcards. Make some cards first (Flashcards → From notes).</UiCard>;
+  return (
+    <div>
+      <FocusBar label="Quiz on" cards={cards} notebooks={notebooks} focus={focus} onChange={onFocus} />
+      <UiCard className="flex flex-wrap items-center gap-4 px-5 py-4">
+        <BookOpenCheck size={28} className="text-positive" />
+        <div className="min-w-0 flex-1">
+          <p className="text-lg font-bold">Quick quiz</p>
+          <p className="text-sm text-foreground-muted">Multiple choice, typing, true/false and matching from {n} card{n === 1 ? "" : "s"}. No hearts, no retries: you get your score at the end.</p>
+        </div>
+        <select value={size} onChange={(e) => setSize(Number(e.target.value))} className="rounded-xl border border-border bg-background px-3 py-2 text-sm">{[5, 10, 15, 20].map((k) => <option key={k} value={k}>{k} questions</option>)}</select>
+        <Button variant="primary" disabled={!n} onClick={() => onStart(Math.min(size, 20))}><Play size={14} /> Start quiz</Button>
+      </UiCard>
+    </div>
+  );
+}
+
+// ---- Exams --------------------------------------------------------------------------------------------------------------------------------
+function ExamsView({ exams, ai, onExam, onOpen, onDelete }: {
+  exams: ExamRec[]; ai: boolean; onExam: () => void; onOpen: (r: ExamRec) => void; onDelete: (r: ExamRec) => void;
 }) {
   return (
     <div className="space-y-5">
-      <div className="grid gap-3 sm:grid-cols-2">
-        <button onClick={onQuiz} disabled={!cardCount} className="rounded-2xl border-2 border-border p-5 text-left hover:bg-surface-secondary disabled:opacity-50">
-          <BookOpenCheck size={26} className="text-positive" />
-          <p className="mt-2 text-lg font-bold">Quick quiz</p>
-          <p className="text-sm text-foreground-muted">A set of questions from your flashcards — multiple choice, typing, true/false, matching. Scored at the end, no hearts.</p>
-        </button>
-        <button onClick={onExam} className="rounded-2xl border-2 border-primary/50 bg-primary/5 p-5 text-left hover:bg-primary/10">
+      <div>
+        <button onClick={onExam} className="w-full rounded-2xl border-2 border-primary/50 bg-primary/5 p-5 text-left hover:bg-primary/10">
           <ClipboardList size={26} className="text-primary" />
           <p className="mt-2 text-lg font-bold">Practice exam {ai ? "" : "(needs AI)"}</p>
-          <p className="text-sm text-foreground-muted">A realistic paper written from your notes: multi-part questions with graphs, data tables, diagrams and pictures. Timed, marked, with the model answer.</p>
+          <p className="text-sm text-foreground-muted">A realistic paper written from the notes you choose: multi-part questions with graphs, data tables, diagrams and pictures. Timed, marked, with the model answer.</p>
         </button>
       </div>
       <section>
@@ -603,22 +743,6 @@ function CardModal({ card, notebooks, onClose, onSave }: { card: Card | null; no
   );
 }
 
-function QuizModal({ cards, notebooks, onClose, onStart }: { cards: Card[]; notebooks: NotebookRec[]; onClose: () => void; onStart: (o: { nb: string; size: number; title: string }) => void }) {
-  const [nb, setNb] = useState("all");
-  const [size, setSize] = useState(10);
-  const n = nb === "all" ? cards.length : cards.filter((c) => c.notebookId === (nb === "none" ? null : nb)).length;
-  return (
-    <Modal title="Quick quiz" onClose={onClose}>
-      <div className="space-y-4">
-        <Field label="Questions from"><select value={nb} onChange={(e) => setNb(e.target.value)} className="mt-1 block w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground"><option value="all">All cards</option>{notebooks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}<option value="none">Unfiled</option></select></Field>
-        <Field label="How many"><select value={size} onChange={(e) => setSize(Number(e.target.value))} className="mt-1 block w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground">{[5, 10, 15, 20].map((s) => <option key={s}>{s}</option>)}</select></Field>
-        <p className="text-xs text-foreground-muted">{n} card{n === 1 ? "" : "s"} available. A quiz doesn&apos;t use hearts or retries — you get your score at the end.</p>
-        <Button variant="primary" disabled={!n} onClick={() => onStart({ nb, size: Math.min(size, 20), title: "Quick quiz" })}><Play size={14} /> Start quiz</Button>
-      </div>
-    </Modal>
-  );
-}
-
 const STYLES = ["", "AP exam", "IB", "A-level", "University midterm", "University final", "High-school unit test"];
 
 function ExamModal({ ai, notes, notebooks, onClose, onReady, setBusy, flash }: {
@@ -687,7 +811,34 @@ function ExamModal({ ai, notes, notebooks, onClose, onReady, setBusy, flash }: {
   );
 }
 
-function StudySettings({ progress, onClose, onChange }: { progress: Progress; onClose: () => void; onChange: (p: Progress) => void }) {
+function StudySettings({ progress, counts, onClose, onChange, onReset }: {
+  progress: Progress; counts: { cards: number; exams: number; mistakes: number }; onClose: () => void; onChange: (p: Progress) => void; onReset: (w: ResetWhat) => void;
+}) {
+  const [resetting, setResetting] = useState(false);
+  const [what, setWhat] = useState<ResetWhat>({ cards: true, exams: true, mistakes: true, progress: true, maps: false });
+  const any = Object.values(what).some(Boolean);
+  if (resetting) {
+    const opt = (k: keyof ResetWhat, label: string) => (
+      <label className="flex items-center gap-2"><input type="checkbox" checked={what[k]} onChange={(e) => setWhat({ ...what, [k]: e.target.checked })} /> {label}</label>
+    );
+    return (
+      <Modal title="Reset study data" onClose={onClose}>
+        <div className="space-y-3 text-sm">
+          <p className="text-foreground-muted">Clears study data on this device so you can start fresh. <b>Your notes, PDFs and textbooks are not touched.</b></p>
+          {opt("cards", `Flashcards (${counts.cards}) — you can make new ones from the same notes`)}
+          {opt("exams", `Saved exams and their scores (${counts.exams})`)}
+          {opt("mistakes", `Mistakes log (${counts.mistakes})`)}
+          {opt("progress", "XP, streak and daily history (your settings are kept)")}
+          {opt("maps", "Concept maps")}
+          <p className="text-xs text-foreground-muted">This can&apos;t be undone. A backup (Settings → Back up) keeps a copy if you might want it back.</p>
+          <div className="flex gap-2">
+            <Button variant="danger" disabled={!any} onClick={() => { if (confirm("Delete the selected study data from this device?")) onReset(what); }}><Trash2 size={14} /> Delete selected</Button>
+            <Button onClick={() => setResetting(false)}>Back</Button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
   return (
     <Modal title="Study settings" onClose={onClose}>
       <div className="space-y-4 text-sm">
@@ -699,6 +850,10 @@ function StudySettings({ progress, onClose, onChange }: { progress: Progress; on
         <label className="flex items-center gap-2"><input type="checkbox" checked={progress.sound} onChange={(e) => onChange({ ...progress, sound: e.target.checked })} /> Sound effects</label>
         <label className="flex items-center gap-2"><input type="checkbox" checked={progress.hearts} onChange={(e) => onChange({ ...progress, hearts: e.target.checked })} /> Hearts in lessons (5 mistakes ends the lesson — turn off to practise freely)</label>
         <p className="text-xs text-foreground-muted">Lesson XP: 5 per exercise you get right first time, plus combo and finishing bonuses.</p>
+        <div className="border-t border-border pt-3">
+          <Button onClick={() => setResetting(true)}><Trash2 size={14} /> Reset study data…</Button>
+          <p className="mt-1 text-xs text-foreground-muted">Start over: delete cards, exams, mistakes and/or XP. Notes stay.</p>
+        </div>
       </div>
     </Modal>
   );

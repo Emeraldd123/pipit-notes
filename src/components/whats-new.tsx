@@ -10,6 +10,7 @@ const NOTES: { title: string; body: string }[] = [
   { title: "Deleting is undoable", body: "Deleted notes wait in “Recently deleted” for 30 days, and every delete has an Undo." },
   { title: "Study got smarter", body: "Reviews are now scheduled with FSRS (the method Anki moved to: fewer reviews for the same memory), and streak freezes save your streak if you miss a day." },
   { title: "Report what's wrong", body: "Flag a broken exam question and it stops counting toward your score. In Explain, “Not right? Ask again” gets a more careful answer." },
+  { title: "Study, sorted", body: "Learn, Flashcards, Quizzes and Exams are now separate tabs. Each has its own notebook and topic picker. In a lesson, “Off topic” drops that unit and restarts. Study settings can reset your cards, exams and XP." },
   { title: "Textbooks", body: "“Add textbook” in the Library brings in a book's text only (fast and small). Practice exams can then use its real problems, but only ones your notes cover. Add a book on your laptop and move the small file it saves to your iPad." },
   { title: "Tougher answer choices", body: "Multiple-choice wrong answers now come from real mistakes, not from other cards. Older cards can get theirs with “Write answer choices” in the Cards tab." },
   { title: "Lower AI bills", body: "Simple jobs use a cheaper model, repeats are free, and Settings shows what you've spent this month (you can set a budget)." },
