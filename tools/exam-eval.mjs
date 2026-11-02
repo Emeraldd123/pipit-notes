@@ -43,16 +43,22 @@ const JUDGE_SYSTEM = `You are a strict, experienced examiner reviewing exam ques
 For each question, judge it as a REAL exam question would be judged by a harsh head of department. Score 0-2 on each:
 - realistic: would plausibly appear on a real exam at this level (0 = contrived/quiz-like, 2 = could be lifted from a past paper)
 - applied: tests applying a principle from the notes to a situation the notes don't cover, rather than recall (case questions only; others: null)
-- self_contained: every new fact needed is given in the question, nothing outside the notes is secretly required
+- self_contained: every new fact and value needed is in the question or its FIGURE (figures are given as JSON: tables, plotted functions, chart data), nothing outside the notes is secretly required
 - one_answer: exactly one defensible answer; the model answer and scheme are correct
 - accurate: every real-world claim (agents, cases, findings, numbers) is true and well established; nothing invented
 - distractors: for multiple choice, the wrong options are realistic mistakes (near miss, partly right, weak) and none is arguably right (non-MCQ: null)
 Then "fix": one sentence on the single most important improvement, or "" if none. Be honest; most questions should NOT get perfect scores.
 Return STRICT JSON only: {"items":[{"id":"q1","realistic":2,"applied":1,"self_contained":2,"one_answer":2,"accurate":2,"distractors":null,"fix":"..."}]}`;
 
+// the judge must SEE the figures (tables, plotted functions, chart data) or it can't tell whether a question is answerable
+const figText = (f) => (f ? `\n     FIGURE: ${JSON.stringify({ ...f, src: undefined }).slice(0, 1500)}` : "");
+const REFS_FIGURE = /\b(below|as shown|shown in|the (graph|table|chart|diagram|data|figure|readings|results))\b/i;
+const refsMissingFigure = (q) => [q.stem, ...q.parts.map((p) => p.prompt)].some((t) => REFS_FIGURE.test(t)) && !q.figure && !q.parts.some((p) => p.figure);
+const letterKey = (p) => p.type === "mcq" && /^\s*(option\s*)?[A-F]\b\.?\s*$/i.test(p.answer);
+
 function questionText(q) {
-  return [`${q.id}${q.basis?.kind === "case" ? " [CASE]" : ""}${q.basis?.principle ? ` (principle: ${q.basis.principle})` : ""}: ${q.stem}`,
-    ...q.parts.map((p) => `  (${p.label || "-"}) [${p.type}, ${p.marks}m] ${p.prompt}${p.options ? `\n     options: ${p.options.map((o, i) => `${i === p.correct ? "*" : ""}${o}`).join(" | ")}` : ""}\n     answer: ${p.answer}${p.scheme.length ? `\n     scheme: ${p.scheme.join(" / ")}` : ""}`)].join("\n");
+  return [`${q.id}${q.basis?.kind === "case" ? " [CASE]" : ""}${q.basis?.principle ? ` (principle: ${q.basis.principle})` : ""}: ${q.stem}${figText(q.figure)}`,
+    ...q.parts.map((p) => `  (${p.label || "-"}) [${p.type}, ${p.marks}m] ${p.prompt}${figText(p.figure)}${p.options ? `\n     options: ${p.options.map((o, i) => `${i === p.correct ? "*" : ""}${o}`).join(" | ")}` : ""}\n     answer: ${p.answer}${p.scheme.length ? `\n     scheme: ${p.scheme.join(" / ")}` : ""}`)].join("\n");
 }
 
 const results = [];
@@ -77,7 +83,8 @@ for (const f of subjects) {
       row = {
         ...row, questions: qs.length, cases: cases.length, caseShare: +(cases.length / Math.max(1, qs.length)).toFixed(2),
         dropped: c.dropped, stretch: c.stretch, withFigure: qs.filter((q) => q.figure || q.parts.some((p) => p.figure)).length,
-        mcqs: mcqs.length, mcqWhy: mcqs.filter((p) => p.why).length, lint: lint.length, stop, seconds: Math.round((Date.now() - t0) / 1000),
+        mcqs: mcqs.length, mcqWhy: mcqs.filter((p) => p.why).length, lint: lint.length,
+        keyLetters: parts.filter(letterKey).length, noFigure: qs.filter(refsMissingFigure).length, stop, seconds: Math.round((Date.now() - t0) / 1000),
         inTok: usage?.input_tokens, outTok: usage?.output_tokens,
       };
       lines.push(`## ${f.title} — run ${r + 1}`, "", "```", ...qs.map(questionText), "```", "");
@@ -98,8 +105,9 @@ for (const f of subjects) {
   }
 }
 
-const keys = ["subject", "run", "questions", "cases", "caseShare", "dropped", "stretch", "withFigure", "mcqs", "lint", "realistic", "applied", "selfContained", "oneAnswer", "accurate", "distractors", "error"];
+const keys = ["subject", "run", "questions", "cases", "caseShare", "dropped", "stretch", "withFigure", "noFigure", "mcqs", "keyLetters", "lint", "realistic", "applied", "selfContained", "oneAnswer", "accurate", "distractors", "error"];
 lines.splice(3, 0, "| " + keys.join(" | ") + " |", "|" + keys.map(() => "---").join("|") + "|", ...results.map((r) => "| " + keys.map((k) => r[k] ?? "").join(" | ") + " |"), "");
+if (DRY) process.exit(0);
 mkdirSync("data/exam-eval", { recursive: true });
 const out = `data/exam-eval/${new Date().toISOString().replace(/[:.]/g, "-")}.md`;
 writeFileSync(out, lines.join("\n"));

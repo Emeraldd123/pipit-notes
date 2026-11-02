@@ -82,14 +82,30 @@ function normalizePart(raw: unknown, i: number, qid: string, single: boolean): P
     else numeric = { value, tol: isNum(nv?.tol) && nv!.tol > 0 && nv!.tol < 0.5 ? nv!.tol : 0.02, unit: s(nv?.unit, 20) || undefined };
   }
   const figure = !single && r.figure ? normalizeFigure(r.figure) ?? undefined : undefined;   // a single-part question keeps its figure on the question
-  const scheme = (Array.isArray(r.scheme) ? (r.scheme as unknown[]) : []).map((x) => s(x, 300)).filter(Boolean).slice(0, 8);
+  let scheme = (Array.isArray(r.scheme) ? (r.scheme as unknown[]) : []).map((x) => s(x, 300)).filter(Boolean).slice(0, 8);
+  let answer = s(r.answer, 1200);
+  if (type === "mcq" && options && correct !== undefined) ({ answer, scheme } = mcqKey(answer, scheme, options[correct]));
   return {
     id: `${qid}.${i}`, label: single ? "" : s(r.label, 4) || String.fromCharCode(97 + i), prompt: prompt || (single ? "" : "Answer the question above."),
     type, marks: marks(r.marks, type === "working" ? 3 : 1), options, correct,
-    answer: s(r.answer, 1200) || (options && correct !== undefined && type === "mcq" ? options[correct] : ""),
+    answer,
     numeric, scheme, figure,
     why: type === "mcq" && Array.isArray(r.why) && (r.why as unknown[]).length === options!.length ? (r.why as unknown[]).map((w) => s(w, 300)) : undefined,
   };
+}
+
+/**
+ * Multiple-choice options are re-ordered locally (shuffleOptions), so an answer key written as a letter
+ * ("A", "Option B", "C. because…") would point at the wrong option. Keys are rewritten to the option's text.
+ */
+const LETTER_ONLY = /^\s*(?:(?:the\s+)?(?:correct\s+)?(?:option|answer|choice)\s*(?:is\s*)?)?\(?([A-F])\)?\s*[.):]?\s*(?:\(\d+\s*marks?\))?\s*$/i;
+const LETTER_LEAD = /^\s*(?:(?:option|answer|choice)\s*)?\(?([A-F])\)?\s*[.):—-]\s+/i;
+export function mcqKey(answer: string, scheme: string[], right: string): { answer: string; scheme: string[] } {
+  let a = answer;
+  if (!a || LETTER_ONLY.test(a)) a = right;
+  else if (LETTER_LEAD.test(a)) { const rest = a.replace(LETTER_LEAD, "").trim(); a = rest.toLowerCase().startsWith(right.toLowerCase().slice(0, 20)) ? rest : `${right} — ${rest}`; }
+  const sch = scheme.filter((x) => !LETTER_ONLY.test(x)).map((x) => x.replace(/^(?:correct\s+)?(?:option|answer|choice)\s+\(?[A-F]\)?\s*[.):—-]?\s*/i, "").trim()).filter(Boolean);
+  return { answer: a, scheme: sch };
 }
 
 /** Deterministic shuffle seed from a string (so the same exam always shows the same order). */

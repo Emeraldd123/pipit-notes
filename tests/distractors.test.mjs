@@ -72,3 +72,19 @@ test("lint catches classic giveaways; duplicate options can't become a question"
   const dup = mcqExam(["same", "Same", "other", "x"], 0);
   assert.notEqual(allParts(dup)[0].p.type, "mcq");
 });
+
+test("answer keys written as letters survive the option shuffle", async () => {
+  const { mcqKey } = await import("../src/lib/exam-core.ts");
+  const right = "Q falls below K, so the equilibrium shifts right; K is unchanged";
+  assert.equal(mcqKey("A", ["Option A"], right).answer, right);
+  assert.deepEqual(mcqKey("A", ["Option A", "Correct option B (2 marks)"], right).scheme, []);
+  assert.equal(mcqKey("Option C", [], right).answer, right);
+  assert.equal(mcqKey("B. 1 − 0.95^20 ≈ 0.64.", [], right).answer, `${right} — 1 − 0.95^20 ≈ 0.64.`);
+  assert.equal(mcqKey("Larger, because the cold filament has lower resistance", [], right).answer, "Larger, because the cold filament has lower resistance");
+  assert.deepEqual(mcqKey("", ["K depends only on T"], right), { answer: right, scheme: ["K depends only on T"] });
+  // end to end: the model keyed "A", the shuffle moved it, the shown answer is still the right option
+  const e = normalizeExam({ sections: [{ questions: [{ stem: "Q?", type: "mcq", options: ["right one", "near", "partly", "weak"], correct: 0, answer: "A", scheme: ["Option A"] }] }] }, 1, "k");
+  const p = allParts(e)[0].p;
+  assert.equal(p.answer, "right one");
+  assert.equal(p.options[p.correct], "right one");
+});
