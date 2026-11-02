@@ -126,6 +126,13 @@ function QuestionView({ n, q, answers, onAnswer, mode, onMode, reported, onRepor
       </div>
       {reported && <p className="mb-3 rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">Reported — this question won&apos;t count toward your score. You can still answer it for practice.</p>}
       {q.topic && <p className="mb-2 text-xs uppercase tracking-wider text-foreground-muted">{q.topic}</p>}
+      {q.basis?.kind === "case" && (
+        <p className="mb-2 text-xs text-foreground-muted">
+          <span className="rounded-full bg-primary/10 px-2 py-0.5 font-medium text-primary">Applied — case study</span>
+          <span className="ml-1.5">Everything new you need is given below; work it out from what you&apos;ve learned.</span>
+          {q.basis.stretch && <span className="ml-1.5 rounded-full bg-amber-500/15 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-400" title="This needs a step your notes only hint at">Stretch</span>}
+        </p>
+      )}
       {q.basis?.source && (
         <p className="mb-2 text-xs text-foreground-muted">
           From your textbook ({q.basis.source}){q.basis.stretch && <span className="ml-1.5 rounded-full bg-amber-500/15 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-400" title="Your notes cover the ideas, but this needs a step they only hint at">Stretch</span>}
@@ -247,6 +254,9 @@ export function ExamResults({ exam, answers, marks, seconds, onMarks, onRetake, 
               <article key={q.id} className="rounded-2xl border border-border bg-surface p-5">
                 <div className="mb-2 flex items-baseline justify-between gap-3"><h3 className="font-bold">Question {n + 1}{q.topic ? <span className="ml-2 text-xs font-normal uppercase tracking-wider text-foreground-muted">{q.topic}</span> : null}</h3><ReportButton reason={exam.reported?.[q.id]} onReport={(r) => onReport(q.id, r)} /></div>
                 {exam.reported?.[q.id] && <p className="mb-2 rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">Not counted in your score — you reported it ({REPORT_REASONS.find((r) => r.id === exam.reported?.[q.id])?.label.toLowerCase()}). It&apos;s skipped if you retake this exam.</p>}
+                {q.basis?.kind === "case" && q.basis.principle && (
+                  <p className="mb-2 rounded-lg bg-primary/5 px-3 py-1.5 text-sm"><span className="font-medium text-primary">Case study — builds on: </span><RichText text={q.basis.principle} /></p>
+                )}
                 <div className="leading-relaxed"><RichText text={q.stem} /></div>
                 {q.figure && <FigureView figure={q.figure} className="mt-3" />}
                 <div className="mt-4 space-y-4">

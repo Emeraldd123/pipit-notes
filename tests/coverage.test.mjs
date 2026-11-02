@@ -28,7 +28,8 @@ test("the writer's own 'not solvable' verdict removes a question", () => {
     { stem: "State Boyle's law.", type: "short", answer: "At constant temperature, pressure is inversely proportional to volume", basis: { notes: [2], textbook: null, solvable: "yes" } },
   ]);
   assert.equal(e.sections[0].questions.length, 1);
-  assert.deepEqual(e.sections[0].questions[0].basis, { notes: [2], textbook: undefined, stretch: undefined });
+  const b = e.sections[0].questions[0].basis;
+  assert.deepEqual([b.notes, b.textbook, b.stretch, b.kind], [[2], undefined, undefined, undefined]);
 });
 
 test("textbook questions must cite real notes; thin vocabulary overlap becomes a stretch", () => {
@@ -66,4 +67,38 @@ test("textbook pages are cut into single problems locally, so only those are sen
   assert.ok(c.every((x) => x.page === 4 && x.text.length <= 902));
   const long = textbookChunks([{ ...page, text: "word ".repeat(1000) }]);
   assert.ok(long.length >= 5 && long.every((x) => x.text.length <= 902));
+});
+
+test("case studies: kept when they apply a principle the notes teach; dropped when they rest on nothing", async () => {
+  const { buildExamPrompt } = await import("../src/lib/exam-prompt.ts");
+  const econ = [
+    { n: 1, text: "Tax incidence: the side that is LESS elastic pays more of a tax. Price elasticity of demand is %change Qd over %change P." },
+    { n: 2, text: "Price ceilings are a maximum price; they bind below equilibrium and cause shortages, deadweight loss." },
+  ];
+  const e = normalizeExam({ sections: [{ title: "B", questions: [
+    { stem: "A government puts a $1 per pack tax on cigarettes, whose demand is very inelastic (smokers are addicted).", type: "short", marks: 2, answer: "Mostly buyers, because demand is less elastic than supply",
+      basis: { notes: [1], kind: "case", principle: "The less elastic side pays more of a tax", solvable: "yes" } },
+    { stem: "A city caps monthly rent below the market rate. Predict what happens to the number of apartments available over ten years.", type: "short", marks: 3, answer: "Falls: a binding ceiling creates a shortage that grows as supply becomes more elastic",
+      basis: { notes: [2], kind: "case", principle: "A binding price ceiling causes a shortage", solvable: "yes" } },
+    { stem: "Explain how central bank open-market operations change the money supply.", type: "short", marks: 3, answer: "Buying bonds adds reserves",
+      basis: { notes: [7], kind: "case", principle: "Open-market operations change bank reserves", solvable: "yes" } },          // cites a note that doesn't exist
+    { stem: "A firm doubles its price and revenue falls by half.", type: "short", marks: 2, answer: "Demand is elastic",
+      basis: { notes: [1], kind: "case", principle: "Quantum tunnelling of electrons", solvable: "yes" } },                       // principle not in the notes
+  ] }] }, 1, "e");
+  assert.equal(e.sections[0].questions[0].basis.kind, "case");
+  assert.equal(e.sections[0].questions[0].basis.principle, "The less elastic side pays more of a tax");
+  const c = checkSolvable(e, econ, []);
+  const qs = c.exam.sections[0].questions;
+  assert.equal(c.cases, 3);
+  assert.equal(c.dropped, 1, "a case resting on no real note is dropped");
+  assert.equal(qs.length, 3);
+  assert.equal(qs[0].basis.stretch, undefined);
+  assert.equal(qs[1].basis.stretch, undefined);
+  assert.equal(qs[2].basis.stretch, true, "a principle the notes never teach is flagged");
+  // the case rules only go out when asked for
+  const spec = { excerpts: [{ n: 1, noteTitle: "N", page: 0, text: "x" }], questions: 5, difficulty: "same", style: "", figures: false };
+  assert.ok(!buildExamPrompt(spec).system.includes("CASE-STUDY"));
+  const on = buildExamPrompt({ ...spec, cases: true });
+  assert.ok(on.system.includes("CASE-STUDY") && on.content[0].text.includes("CASE-STUDY questions"));
+  assert.ok(!/mitochond|enzyme|ATP|complex Ib|electron transport/i.test(on.system.slice(on.system.indexOf("CASE-STUDY"))), "the case rules are subject-neutral");
 });

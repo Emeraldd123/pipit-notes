@@ -24,7 +24,13 @@ export type Question = { id: string; topic?: string; stem: string; figure?: Figu
  * Where a question came from. Notes-only questions have no textbook. A textbook question carries the
  * note excerpts the student needs to solve it; "stretch" = it may go a little beyond the notes.
  */
-export type Basis = { notes: number[]; textbook?: number; stretch?: boolean; source?: string };
+export type Basis = {
+  notes: number[]; textbook?: number; stretch?: boolean; source?: string;
+  /** "case" = an applied question set in a real-world case, experiment or dataset the notes don't mention */
+  kind?: "case";
+  /** the idea from the notes the question applies (shown after marking, checked against the notes) */
+  principle?: string;
+};
 export type Section = { title: string; instructions?: string; questions: Question[] };
 export type Exam = {
   id: string; title: string; subject?: string; durationMin: number; instructions?: string;
@@ -129,7 +135,8 @@ function normalizeBasis(v: unknown): Basis | null | undefined {
   if (r.solvable === "no" || r.solvable === false) return null;
   const notes = (Array.isArray(r.notes) ? r.notes : []).map((n) => (typeof n === "string" ? parseInt(n.replace(/\D/g, ""), 10) : n)).filter((n): n is number => isNum(n) && n > 0).slice(0, 8);
   const t = typeof r.textbook === "string" ? parseInt(r.textbook.replace(/\D/g, ""), 10) : r.textbook;
-  return { notes, textbook: isNum(t) && t > 0 ? t : undefined, stretch: r.solvable === "stretch" || undefined };
+  const kind = r.kind === "case" ? "case" as const : undefined;
+  return { notes, textbook: isNum(t) && t > 0 ? t : undefined, stretch: r.solvable === "stretch" || undefined, kind, principle: kind ? s(r.principle, 200) || undefined : undefined };
 }
 
 export function normalizeExam(raw: unknown, now = Date.now(), id = `exam-${now}`): Exam | null {

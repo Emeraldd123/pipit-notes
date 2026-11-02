@@ -756,6 +756,7 @@ function ExamModal({ ai, notes, notebooks, onClose, onReady, setBusy, flash }: {
   const [pictures, setPictures] = useState(false);
   const books = notes.filter((n) => n.isTextbook);
   const [useBooks, setUseBooks] = useState(books.length > 0);
+  const [cases, setCases] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const run = async () => {
     setErr(null); setBusy("Writing your exam — this takes a minute for a full paper…");
@@ -767,15 +768,15 @@ function ExamModal({ ai, notes, notebooks, onClose, onReady, setBusy, flash }: {
       const textbook = useBooks ? await textbookPagesFor(excerpts) : [];
       if (useBooks && !textbook.length) flash("None of your textbook pages match these notes closely, so this exam uses your notes only.");
       count("study.exam.generate");
-      let exam = await generateExam({ excerpts, questions, difficulty, style, figures, images, textbook });
-      if (textbook.length) {
-        const c = checkSolvable(exam, excerpts, textbook);
-        if (!c.exam.sections.length) { setErr("Every question the writer took from your textbook needed material your notes don't cover. Try again, or untick “Use my textbooks”."); return; }
-        exam = c.exam;
-        count("study.exam.textbook");
-        for (let i = 0; i < c.dropped; i++) count("study.exam.textbook.dropped");
-        if (c.dropped) flash(`Left out ${c.dropped} textbook question${c.dropped === 1 ? "" : "s"} your notes don't cover.`);
-      }
+      let exam = await generateExam({ excerpts, questions, difficulty, style, figures, images, textbook, cases });
+      // textbook and case-study questions must rest on something the notes teach (coverage.ts)
+      const c = checkSolvable(exam, excerpts, textbook);
+      if (!c.exam.sections.length) { setErr("Every question needed material your notes don't cover. Try again, or untick the textbook / case-study options."); return; }
+      exam = c.exam;
+      if (textbook.length) count("study.exam.textbook");
+      if (c.cases) count("study.exam.cases");
+      for (let i = 0; i < c.dropped; i++) count("study.exam.unsupported.dropped");
+      if (c.dropped) flash(`Left out ${c.dropped} question${c.dropped === 1 ? "" : "s"} that didn't rest on anything in your notes.`);
       if (images.length) exam = await resolveCrops(exam, images);
       onReady(exam);
     } catch (e) { setErr(e instanceof AiError ? e.message : "Something went wrong: " + (e as Error).message); logError("exam", e); } finally { setBusy(null); }
@@ -797,6 +798,7 @@ function ExamModal({ ai, notes, notebooks, onClose, onReady, setBusy, flash }: {
           </Field>
           <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={figures} onChange={(e) => setFigures(e.target.checked)} /><span><b>Lots of figures</b> — graphs, data tables, charts and diagrams to read and calculate from</span></label>
           <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={pictures} onChange={(e) => setPictures(e.target.checked)} /><span><b>Use pictures from my notes</b> — slides and diagrams from your PDFs can appear in questions <span className="text-foreground-muted">(sends a few page images; costs more)</span></span></label>
+          <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={cases} onChange={(e) => setCases(e.target.checked)} /><span><b>Case studies &amp; real research</b> — about a third of the questions put what you learned into real experiments, applications and data your notes don&apos;t mention, like a real exam would. Everything new is explained in the question.</span></label>
           {books.length > 0 ? (
             <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={useBooks} onChange={(e) => setUseBooks(e.target.checked)} /><span><b>Use questions from my textbooks</b> — real problems from {books.length === 1 ? `“${books[0].title}”` : `your ${books.length} textbooks`}, but only ones your notes give you what you need to solve <span className="text-foreground-muted">(costs a little more)</span></span></label>
           ) : (

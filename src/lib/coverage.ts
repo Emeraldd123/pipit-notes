@@ -66,18 +66,23 @@ export function textbookChunks(pages: Page[], max = 900): Page[] {
 
 /** Share (0–1) of a question's distinct content words that appear somewhere in the student's notes. */
 export function noteCoverage(q: Question, notes: string[]): number {
+  return textCoverage([q.stem, ...q.parts.map((p) => `${p.prompt} ${p.answer}`)].join(" "), notes);
+}
+
+/** Share (0–1) of a text's distinct content words found in the notes (plurals count as the same word). */
+export function textCoverage(text: string, notes: string[]): number {
   const vocab = new Set(tokens(notes.join(" ")));
-  const words = new Set(tokens([q.stem, ...q.parts.map((p) => `${p.prompt} ${p.answer}`)].join(" ")));
+  const words = new Set(tokens(text));
   if (!words.size) return 1;
   let hit = 0;
   for (const w of words) if ([w, w.replace(/s$/, ""), w.replace(/es$/, ""), w + "s", w + "es"].some((x) => vocab.has(x))) hit++;
   return hit / words.size;
 }
 
-export type SolvableCheck = { exam: Exam; dropped: number; stretch: number; fromTextbook: number };
+export type SolvableCheck = { exam: Exam; dropped: number; stretch: number; fromTextbook: number; cases: number };
 
 /**
- * Enforce "the student could solve this from their notes" on textbook-based questions:
+ * Enforce "the student could solve this from their notes" on textbook-based and case-study questions:
  *  - the model must cite at least one real note excerpt it relies on, and must not have judged it unsolvable
  *    (those are dropped — normalizeExam already removes "solvable":"no");
  *  - if too little of the question's vocabulary appears in the notes, it stays but is labelled a stretch.
@@ -86,11 +91,21 @@ export type SolvableCheck = { exam: Exam; dropped: number; stretch: number; from
 export function checkSolvable(exam: Exam, notes: { n: number; text: string }[], textbook: Page[], minCoverage = 0.55): SolvableCheck {
   const noteNums = new Set(notes.map((e) => e.n));
   const noteTexts = notes.map((e) => e.text);
-  let dropped = 0, stretch = 0, fromTextbook = 0;
+  let dropped = 0, stretch = 0, fromTextbook = 0, cases = 0;
   const sections = exam.sections.map((sec) => ({
     ...sec,
     questions: sec.questions.flatMap((q): Question[] => {
       const b = q.basis;
+      // a case study applies a principle the notes teach to a situation they don't: the principle must be in the notes,
+      // the situation (deliberately) isn't, so only the principle is checked against them
+      if (b?.kind === "case" && b.textbook === undefined) {
+        const cited = b.notes.filter((n) => noteNums.has(n));
+        if (!cited.length) { dropped++; return []; }
+        cases++;
+        const weak = b.stretch || !b.principle || textCoverage(b.principle, noteTexts) < 0.5;
+        if (weak) stretch++;
+        return [{ ...q, basis: { ...b, notes: cited, stretch: weak || undefined } }];
+      }
       if (!b || b.textbook === undefined) return [q];
       const page = textbook[b.textbook - 1];
       const cited = b.notes.filter((n) => noteNums.has(n));
@@ -102,5 +117,5 @@ export function checkSolvable(exam: Exam, notes: { n: number; text: string }[], 
     }),
   })).filter((sec) => sec.questions.length);
   const totalMarks = sections.reduce((a, sec) => a + sec.questions.reduce((m, q) => m + q.marks, 0), 0);
-  return { exam: { ...exam, sections, totalMarks }, dropped, stretch, fromTextbook };
+  return { exam: { ...exam, sections, totalMarks }, dropped, stretch, fromTextbook, cases };
 }
