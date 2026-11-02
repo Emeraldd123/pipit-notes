@@ -26,7 +26,20 @@ const JUDGE = !process.argv.includes("--no-judge");
 const only = arg("only", "")?.split(",").filter(Boolean);
 const subjects = FIXTURES.filter((f) => !only?.length || only.includes(f.id));
 
+// one dropped connection or overloaded reply shouldn't lose a whole subject: retry a couple of times
 async function call(system, content, maxTokens, effort) {
+  for (let attempt = 1; ; attempt++) {
+    try { return await callOnce(system, content, maxTokens, effort); }
+    catch (e) {
+      const retryable = /fetch failed|ECONNRESET|ETIMEDOUT|^(429|500|502|503|529):/i.test(String(e.message ?? e));
+      if (!retryable || attempt >= 3) throw e;
+      console.log(`  retrying after: ${String(e.message ?? e).slice(0, 80)}`);
+      await new Promise((r) => setTimeout(r, 4000 * attempt));
+    }
+  }
+}
+
+async function callOnce(system, content, maxTokens, effort) {
   const user = content.map((c) => (c.type === "text" ? { type: "text", text: c.text } : null)).filter(Boolean);
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",

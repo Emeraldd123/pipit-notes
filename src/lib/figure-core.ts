@@ -92,7 +92,7 @@ export function normalizeFigure(raw: unknown): Figure | null {
       return { type: "chart", kind, title: str(r.title), xLabel: str(r.xLabel, 40), yLabel: str(r.yLabel, 40), categories, series, caption };
     }
     case "table": {
-      const headers = (Array.isArray(r.headers) ? r.headers : []).slice(0, 8).map((h: unknown) => String(h).slice(0, 30));
+      const headers = (Array.isArray(r.headers) ? r.headers : []).slice(0, 8).map((h: unknown) => String(h).slice(0, 60));   // long enough to keep the unit, e.g. "Time to constant composition (s)"
       const rows = (Array.isArray(r.rows) ? r.rows : []).slice(0, 14).map((row: unknown) => (Array.isArray(row) ? row.slice(0, 8).map((c) => (typeof c === "number" ? c : String(c).slice(0, 40))) : [])).filter((row: unknown[]) => row.length);
       if (!rows.length) return null;
       return { type: "table", headers, rows, caption };
