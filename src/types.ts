@@ -46,7 +46,14 @@ export type ImageRec = {
 };
 
 // Text / code blocks that live on a note, positioned in document coordinates.
-export type BlockKind = "code" | "text" | "math" | "graph";
+// "explain" (a pinned explanation) and "sticky" sit on the page as a small chip and open in a panel when tapped.
+export type BlockKind = "code" | "text" | "math" | "graph" | "explain" | "sticky";
+export type PinnedExplanation = {
+  explanation: string;
+  shortfalls: { what: string; why: string; fix: string }[];
+  followups: string[];
+  turns: { role: "user" | "assistant"; content: string }[];
+};
 export type BlockRec = {
   id: string;
   noteId: string;
@@ -61,6 +68,13 @@ export type BlockRec = {
   output?: string;
   /** plots etc. produced by running the block (PNG data URLs) */
   images?: string[];
+  /** explain: the concept's name, shown on the chip */
+  title?: string;
+  /** explain: the circled or highlighted area it belongs to */
+  region?: { x: number; y: number; w: number; h: number };
+  explain?: PinnedExplanation;
+  /** sticky: paper colour */
+  tint?: string;
   createdAt: number;
 };
 

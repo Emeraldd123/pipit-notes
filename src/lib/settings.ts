@@ -37,6 +37,10 @@ export type Settings = {
   recentColors: string[];
   /** Scribbling back and forth over ink erases it (off by default — it can surprise you). */
   scribbleErase: boolean;
+  /** Last width used with each tool (pen, pencil, marker, highlighter, eraser, "shape"), so switching tools keeps your size. */
+  toolWidths: Record<string, number>;
+  /** Check each finished line of maths or chemistry as you write (cheap model), and mark mistakes in red. */
+  mathCheck: boolean;
 };
 
 const KEY = "pipit-notes.settings.v1";
@@ -58,6 +62,8 @@ export const DEFAULT_SETTINGS: Settings = {
   presets: [],
   recentColors: [],
   scribbleErase: false,
+  toolWidths: {},
+  mathCheck: false,
 };
 
 let cache: Settings | null = null;

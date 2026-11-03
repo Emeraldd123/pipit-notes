@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import katex from "katex";
-import { Check, Code2, LineChart, Loader2, Pencil, Play, Sigma, Trash2, Type } from "lucide-react";
+import { Check, Code2, Lightbulb, LineChart, Loader2, Pencil, Play, Sigma, StickyNote, Trash2, Type } from "lucide-react";
 import { GraphCanvas } from "./graph-canvas";
 import type { BlockRec } from "@/types";
 
@@ -49,7 +49,11 @@ export const BLOCK_DEFAULTS: Record<BlockRec["kind"], { width: number; height: n
   text: { width: 440, height: 80 },
   math: { width: 520, height: 110 },
   graph: { width: 560, height: 380 },
+  explain: { width: 240, height: 44 },
+  sticky: { width: 240, height: 44 },
 };
+
+export const STICKY_TINTS = ["#fef08a", "#bbf7d0", "#bfdbfe", "#fbcfe8"];
 
 /**
  * Overlay of blocks positioned in DOCUMENT coordinates. The parent applies the
@@ -58,7 +62,7 @@ export const BLOCK_DEFAULTS: Record<BlockRec["kind"], { width: number; height: n
  * take pointer events.
  */
 export function BlocksLayer({
-  blocks, innerRef, interactive, scaleRef, running, onChange, onDelete, onRun,
+  blocks, innerRef, interactive, scaleRef, running, onChange, onDelete, onRun, onOpen, openId,
 }: {
   blocks: BlockRec[];
   innerRef: React.RefObject<HTMLDivElement | null>;
@@ -68,15 +72,72 @@ export function BlocksLayer({
   onChange: (b: BlockRec) => void;
   onDelete: (id: string) => void;
   onRun: (b: BlockRec) => void;
+  /** tap on an explanation / sticky-note chip */
+  onOpen: (b: BlockRec) => void;
+  openId: string | null;
 }) {
   return (
     <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
       <div ref={innerRef} className="absolute left-0 top-0" style={{ transformOrigin: "0 0" }}>
-        {blocks.map((b) => (
+        {blocks.map((b) => b.kind === "explain" || b.kind === "sticky" ? (
+          <PinChip key={b.id} b={b} scaleRef={scaleRef} open={openId === b.id} onChange={onChange} onOpen={onOpen} />
+        ) : (
           <BlockView key={b.id} b={b} interactive={interactive} scaleRef={scaleRef} running={running === b.id} onChange={onChange} onDelete={onDelete} onRun={onRun} />
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * A pinned explanation or sticky note, collapsed to a small chip so it never covers your writing. Tap it to open
+ * it in the panel at the bottom; drag it to move it. A pinned explanation also tints the area it explains.
+ */
+function PinChip({ b, scaleRef, open, onChange, onOpen }: {
+  b: BlockRec; scaleRef: React.RefObject<number>; open: boolean; onChange: (b: BlockRec) => void; onOpen: (b: BlockRec) => void;
+}) {
+  const drag = useRef<{ sx: number; sy: number; x: number; y: number; moved: boolean } | null>(null);
+  const bRef = useRef(b);
+  useEffect(() => { bRef.current = b; }, [b]);
+  const down = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    drag.current = { sx: e.clientX, sy: e.clientY, x: b.x, y: b.y, moved: false };
+  };
+  const move = (e: React.PointerEvent) => {
+    const d = drag.current;
+    if (!d) return;
+    if (!d.moved && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 8) return;
+    d.moved = true;
+    const s = scaleRef.current || 1;
+    onChange({ ...bRef.current, x: d.x + (e.clientX - d.sx) / s, y: d.y + (e.clientY - d.sy) / s });
+  };
+  const up = (e: React.PointerEvent) => {
+    const d = drag.current;
+    drag.current = null;
+    try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* */ }
+    if (d && !d.moved) onOpen(bRef.current);
+  };
+  const r = b.region;
+  const sticky = b.kind === "sticky";
+  const first = b.text.split("\n").find((l) => l.trim())?.trim();
+  return (
+    <>
+      {!sticky && r && (
+        <div className="absolute rounded-md" style={{
+          left: r.x, top: r.y, width: r.w, height: r.h, pointerEvents: "none",
+          background: `rgb(37 99 235 / ${open ? 0.14 : 0.06})`, outline: `${open ? 3 : 2}px ${open ? "solid" : "dashed"} rgb(37 99 235 / ${open ? 0.85 : 0.4})`, outlineOffset: 2,
+        }} />
+      )}
+      <div onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
+        title={sticky ? "Sticky note: tap to open, drag to move" : "Tap to read the explanation, drag to move"}
+        className={`absolute flex cursor-pointer select-none items-center gap-2 rounded-full border px-3.5 shadow-md ${open ? "ring-4 ring-primary/40" : ""} ${sticky ? "border-black/10 text-neutral-800" : "border-blue-600/30 bg-white text-blue-700"}`}
+        style={{ left: b.x, top: b.y, height: 44, maxWidth: 320, fontSize: 18, pointerEvents: "auto", touchAction: "none", background: sticky ? (b.tint ?? STICKY_TINTS[0]) : undefined }}>
+        {sticky ? <StickyNote size={19} className="shrink-0" /> : <Lightbulb size={19} className="shrink-0" />}
+        <span className="shrink-0 font-semibold">{sticky ? (first ? "" : "Sticky note") : "Explain"}</span>
+        {(sticky ? first : b.title) && <span className={`truncate ${sticky ? "" : "text-neutral-500"}`}>{sticky ? first : b.title}</span>}
+      </div>
+    </>
   );
 }
 

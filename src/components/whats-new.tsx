@@ -5,6 +5,11 @@ import { APP } from "@/lib/telemetry";
 
 /** Shown once after an update that moves things around, so nothing feels "gone". Bump the list with the version. */
 const NOTES: { title: string; body: string }[] = [
+  { title: "Explanations fold away", body: "A pinned explanation is now a small “Explain” chip on what you circled. Tap it to read it in the bottom half of the screen. Highlighted something? Tap the Explain button that pops up, or tap the highlight with the Explain tool." },
+  { title: "Sticky notes", body: "＋ Insert → Sticky note. It sits on the page as a small chip and opens when you tap it." },
+  { title: "Sizes stick per tool", body: "Pens, pencils, markers and highlighters each remember the size you last used." },
+  { title: "Math check", body: "Turn it on under the wand. Each line of maths or chemistry you finish with = or an arrow is checked, and mistakes are boxed in red. Tap the red label for the fix. It uses the cheap model, a fraction of a cent per line." },
+  { title: "Exports you can find", body: "PNG, SVG, LaTeX and PDF now open the share sheet, so pick Save to Files (or AirDrop, Mail)." },
   { title: "Tools moved into two menus", body: "Shapes, text, graph, maths, Python, images, templates, the ruler and the protractor are under the ＋ Insert button in the tool rail. Snap-to-shape and scribble-to-erase are under the wand." },
   { title: "Left-handed?", body: "Put the tool rail on the right in Settings → Appearance & handedness." },
   { title: "Deleting is undoable", body: "Deleted notes wait in “Recently deleted” for 30 days, and every delete has an Undo." },

@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useImperativeHandle, useRef } from "react";
 import type { NoteTool, NotePaper, StrokeInput } from "@/types";
 import { newStrokeId } from "@/lib/ids";
+import { highlightGroup, highlightGroupAt, pad, type Box } from "@/lib/ink-groups";
 import { isScribble, strokesUnder } from "@/lib/scribble";
 import { nearGuide, projectOnGuide } from "@/lib/guides";
 import { PAGE_W, PAGE_H, PAGE_GAP, pageTop } from "@/lib/page";
@@ -86,6 +87,8 @@ export type NoteCanvasHandle = {
   deletePageContent: (pageIdx: number) => void;
   /** Pan (and zoom out if needed) so a document rect is in view, centred in the upper part of the canvas. */
   focusRect: (r: { x: number; y: number; w: number; h: number }, opts?: { bottomInset?: number }) => void;
+  /** PNG of a document rectangle (paper + PDF page + ink), for explaining or checking it. */
+  regionImage: (r: Box) => string | null;
 };
 
 type Selection = { kind: "strokes"; idx: number[] } | { kind: "image"; i: number } | null;
@@ -264,6 +267,8 @@ export function NoteCanvas({
   onSelectionChange,
   onSnipRegion,
   onExplainRegion,
+  onExplainMiss,
+  onHighlightDone,
   onImageAdd,
   onImageUpdate,
   onImageDelete,
@@ -297,6 +302,10 @@ export function NoteCanvas({
   onSnipRegion?: (dataUrl: string, wDoc: number, hDoc: number) => void;
   /** An `explain` lasso finished: a PNG of the circled region + its document bbox. */
   onExplainRegion?: (dataUrl: string, bbox: { x: number; y: number; w: number; h: number }) => void;
+  /** An `explain` tap that landed on nothing explainable (no highlight under it). */
+  onExplainMiss?: () => void;
+  /** A highlighter stroke was committed: the whole highlight it belongs to (document coordinates). */
+  onHighlightDone?: (box: Box) => void;
   onImageAdd?: (img: { data: string; x: number; y: number; width: number; height: number }) => Promise<string | undefined>;
   onImageUpdate?: (id: string, patch: { x?: number; y?: number; width?: number; height?: number; rotation?: number }) => void;
   onImageDelete?: (id: string) => void;
@@ -1016,6 +1025,7 @@ export function NoteCanvas({
         paintContent(octx, null);
         return out.toDataURL("image/png");
       },
+      regionImage: (r) => snapshotRegion(rectPoly(r))?.dataUrl ?? null,
       focusRect: (r, opts) => {
         const el = viewportRef.current;
         const v = viewRef.current;
@@ -1142,6 +1152,8 @@ export function NoteCanvas({
     paintContent(octx, { top: minY - 4, bot: maxY + 4 });
     return { dataUrl: out.toDataURL("image/png"), w, h, bbox: { x: minX, y: minY, w, h } };
   }
+
+  const rectPoly = (r: Box): Point[] => [{ x: r.x, y: r.y }, { x: r.x + r.w, y: r.y }, { x: r.x + r.w, y: r.y + r.h }, { x: r.x, y: r.y + r.h }];
 
   function eraseAt(p: Point) {
     const r = Math.max(settings.current.width * 3, 14);
@@ -1578,7 +1590,15 @@ export function NoteCanvas({
       const poly = lassoRef.current;
       lassoRef.current = null;
       if (settings.current.tool === "snip" || settings.current.tool === "explain") {
-        if (poly.length >= 3) {
+        const xs = poly.map((q) => q.x), ys = poly.map((q) => q.y);
+        const tapped = Math.max(...xs) - Math.min(...xs) < 14 && Math.max(...ys) - Math.min(...ys) < 14;
+        if (tapped && settings.current.tool === "explain") {
+          // a tap on a highlight explains the whole highlight — no need to circle it
+          const g = highlightGroupAt(strokesRef.current, poly[0]);
+          const snap = g ? snapshotRegion(rectPoly(pad(g.box, 6))) : null;
+          if (g && snap) onExplainRegion?.(snap.dataUrl, g.box);
+          else onExplainMiss?.();
+        } else if (poly.length >= 3) {
           const snap = snapshotRegion(poly);
           if (snap && settings.current.tool === "explain") onExplainRegion?.(snap.dataUrl, snap.bbox);
           else if (snap) onSnipRegion?.(snap.dataUrl, snap.w, snap.h);
@@ -1635,6 +1655,7 @@ export function NoteCanvas({
     }
     pushHistory();
     strokesRef.current.push({ id: newStrokeId(), tool: s.tool as NoteTool, color: s.color, width: s.width, points: packPts(buf) });
+    if (s.tool === "highlighter") onHighlightDone?.(highlightGroup(strokesRef.current, strokesRef.current.length - 1).box);
     // Pen-up used to repaint the whole visible page (~10ms on a big note — a stall
     // right before the next stroke starts). The live render already painted every
     // finalised segment with the exact geometry the committed render uses, so only

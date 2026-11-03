@@ -8,6 +8,7 @@ import { effortFor, maxTokensFor, modelFor, type Effort } from "./ai-cost.ts";
 import { recordUsage, spentThisMonth } from "./ai-ledger";
 import { cachedAi, hashString } from "./ai-cache";
 import { normalizeIssues, type Issue } from "./review-core.ts";
+import { MATHCHECK_SYSTEM, MATHCHECK_USER } from "./mathcheck-core.ts";
 
 export class AiError extends Error {}
 
@@ -285,11 +286,19 @@ export async function readGraphable(region: string): Promise<string[]> {
   return raw.replace(/```\w*/g, "").split("\n").map((l) => l.replace(/^[\s\-*\d.)]+(?=[a-zA-Z(])/, "").trim()).filter(Boolean).slice(0, 6);
 }
 
+/** Math check as you write: the cheap model reads the line just finished (see mathcheck-core.ts). */
+export async function checkMathLine(region: string): Promise<unknown> {
+  // the same picture (an unchanged line) is never checked — or paid for — twice
+  return (await cachedAi("mathcheck", region, async () => extractJson<unknown>(await claude({
+    feature: "mathcheck", maxTokens: 700, timeoutMs: 45_000, system: MATHCHECK_SYSTEM, user: [imageBlock(region), text(MATHCHECK_USER)],
+  })))).value;
+}
+
 export type Shortfall = { what: string; why: string; fix: string };
 export type Explanation = { concept: string; explanation: string; shortfalls: Shortfall[]; followups: string[] };
 
 const EXPLAIN_SYSTEM =
-  "You are a patient tutor. The image is a region a student circled in their own notes (handwriting, possibly over a printed PDF page). " +
+  "You are a patient tutor. The image is a region a student circled or highlighted in their own notes (handwriting, possibly over a printed PDF page such as a research paper). " +
   "Work out the concept it shows and explain it clearly for someone learning it: lead with the core idea in plain words, then the mechanism or a short worked example. " +
   "Then judge the student's OWN writing: list every place their understanding fell short — wrong steps, misconceptions, missing conditions, sloppy notation — " +
   "each with what is wrong, why, and the correct version. Only list real problems you are confident about; if the writing is correct, return an empty list. " +

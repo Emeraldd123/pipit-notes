@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { BookmarkPlus, ChevronLeft, ChevronRight, Check, Layers, ListChecks, Loader2, Pin, Send, X } from "lucide-react";
+import { BookmarkPlus, ChevronLeft, ChevronRight, Check, Layers, ListChecks, Loader2, Pin, PinOff, Send, StickyNote, Trash2, X } from "lucide-react";
 import { Button, Modal } from "@/components/ui";
-import { RichText } from "@/components/blocks";
+import { RichText, STICKY_TINTS } from "@/components/blocks";
+import type { BlockRec } from "@/types";
 import type { Explanation } from "@/lib/ai";
 import type { Issue } from "@/lib/review-core";
 
@@ -9,9 +10,11 @@ import type { Issue } from "@/lib/review-core";
 
 export type Highlight = { id: string; x: number; y: number; w: number; h: number; tone: "issue" | "active" | "explain" | "find"; label?: string };
 
-export function HighlightLayer({ rects, innerRef, camRef }: {
+export function HighlightLayer({ rects, innerRef, camRef, children }: {
   rects: Highlight[]; innerRef: React.RefObject<HTMLDivElement | null>;
   camRef: React.RefObject<{ scale: number; camX: number; camY: number }>;
+  /** more overlays in document coordinates (they may take taps: set pointer-events on them) */
+  children?: React.ReactNode;
 }) {
   // the camera callback only fires on movement — paint the current camera when rects change too
   useEffect(() => {
@@ -35,6 +38,7 @@ export function HighlightLayer({ rects, innerRef, camRef }: {
             </div>
           );
         })}
+        {children}
       </div>
     </div>
   );
@@ -48,22 +52,32 @@ export type ExplainState = {
   error?: string;
   turns: { role: "user" | "assistant"; content: string }[];
   asking: boolean;
+  /** set once it is pinned to the page (the block's id) */
+  pinnedId?: string;
 };
 
-export function ExplainPanel({ state, onAsk, onClose, onPin, onCards, onRetry }: { state: ExplainState; onAsk: (q: string) => void; onClose: () => void; onPin: () => void; onCards: () => void; onRetry: () => void }) {
+export function ExplainPanel({ state, onAsk, onClose, onPin, onUnpin, onCards, onRetry }: { state: ExplainState; onAsk: (q: string) => void; onClose: () => void; onPin: () => void; onUnpin: () => void; onCards: () => void; onRetry: () => void }) {
   const [q, setQ] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { endRef.current?.scrollIntoView({ block: "nearest" }); }, [state.turns.length, state.asking, state.status]);
+  // follow the conversation as it grows, but open (or reopen a pinned one) at the top
+  const seen = useRef({ turns: state.turns.length, asking: state.asking });
+  useEffect(() => {
+    if (seen.current.turns === state.turns.length && seen.current.asking === state.asking) return;
+    seen.current = { turns: state.turns.length, asking: state.asking };
+    endRef.current?.scrollIntoView({ block: "nearest" });
+  }, [state.turns.length, state.asking]);
   const send = (text: string) => { const t = text.trim(); if (!t || state.asking) return; onAsk(t); setQ(""); };
   const d = state.data;
   return (
-    <div className="absolute inset-x-0 bottom-0 z-30 flex max-h-[58%] justify-center px-3 pb-3">
-      <div className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl">
+    <div className={`absolute inset-x-0 bottom-0 z-30 flex justify-center px-3 pb-3 ${d ? "h-1/2" : "max-h-1/2"}`}>
+      <div className={`flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl ${d ? "h-full" : ""}`}>
         <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
           <h3 className="min-w-0 flex-1 truncate text-sm font-semibold">{d ? d.concept : "Explaining…"}</h3>
-          {d && <button onClick={onPin} className="mr-1 flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-primary hover:bg-primary/10" title="Keep this explanation on the page next to your writing"><Pin size={13} /> Pin to note</button>}
+          {d && (state.pinnedId
+            ? <button onClick={onUnpin} className="mr-1 flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-foreground-muted hover:bg-surface-secondary" title="Take the Explain chip off the page"><PinOff size={13} /> Unpin</button>
+            : <button onClick={onPin} className="mr-1 flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-primary hover:bg-primary/10" title="Leave a small Explain chip on what you circled; tap it any time to read this again"><Pin size={13} /> Pin to note</button>)}
           {d && <button onClick={onCards} className="mr-2 flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-primary hover:bg-primary/10" title="Turn this into flashcards"><Layers size={13} /> Flashcards</button>}
-          <button onClick={onClose} className="rounded-md p-1 text-foreground-muted hover:bg-surface-secondary" title="Close"><X size={16} /></button>
+          <button onClick={onClose} className="rounded-md p-1 text-foreground-muted hover:bg-surface-secondary" title={state.pinnedId ? "Close (it stays pinned)" : "Close"}><X size={18} /></button>
         </div>
         <div className="min-h-0 flex-1 space-y-3 overflow-auto px-4 py-3 text-sm leading-relaxed">
           {state.status === "loading" && <p className="flex items-center gap-2 text-foreground-muted"><Loader2 size={14} className="animate-spin" /> Reading what you circled…</p>}
@@ -111,6 +125,64 @@ export function ExplainPanel({ state, onAsk, onClose, onPin, onCards, onRetry }:
         )}
       </div>
     </div>
+  );
+}
+
+// --- sticky note panel -------------------------------------------------------------------------------------------------
+
+export function StickyPanel({ b, onChange, onDelete, onClose }: { b: BlockRec; onChange: (b: BlockRec) => void; onDelete: () => void; onClose: () => void }) {
+  const tint = b.tint ?? STICKY_TINTS[0];
+  return (
+    <div className="absolute inset-x-0 bottom-0 z-30 flex h-1/2 justify-center px-3 pb-3">
+      <div className="flex h-full w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-black/10 shadow-2xl" style={{ background: tint }}>
+        <div className="flex items-center gap-2 border-b border-black/10 px-4 py-2.5 text-neutral-800">
+          <StickyNote size={16} />
+          <h3 className="flex-1 text-sm font-semibold">Sticky note</h3>
+          {STICKY_TINTS.map((c) => (
+            <button key={c} onClick={() => onChange({ ...b, tint: c })} aria-label="Note colour" title="Note colour"
+              className={`h-6 w-6 rounded-full border border-black/20 ${c === tint ? "ring-2 ring-neutral-700 ring-offset-1" : ""}`} style={{ background: c }} />
+          ))}
+          <button onClick={onDelete} className="ml-1 rounded-md p-1.5 text-neutral-700 hover:bg-black/10" title="Delete this sticky note"><Trash2 size={16} /></button>
+          <button onClick={onClose} className="rounded-md p-1.5 text-neutral-700 hover:bg-black/10" title="Close"><X size={18} /></button>
+        </div>
+        <textarea value={b.text} onChange={(e) => onChange({ ...b, text: e.target.value })} autoFocus={!b.text} placeholder="Write a note… (the first line shows on the page)"
+          className="min-h-0 flex-1 resize-none bg-transparent px-4 py-3 text-base leading-relaxed text-neutral-900 outline-none placeholder:text-neutral-600/70"
+          style={{ userSelect: "text", WebkitUserSelect: "text" }} />
+      </div>
+    </div>
+  );
+}
+
+// --- math check marks ---------------------------------------------------------------------------------------------
+
+export type MathMark = { id: string; box: { x: number; y: number; w: number; h: number }; tone: "issue" | "ok"; note?: string; fix?: string };
+
+/** Red boxes on mistakes found as you write (and a brief tick on lines that check out). Tap a label for the fix. */
+export function MathMarks({ marks, onDismiss }: { marks: MathMark[]; onDismiss: (id: string) => void }) {
+  const [open, setOpen] = useState<string | null>(null);
+  return (
+    <>
+      {marks.map((m) => m.tone === "ok" ? (
+        <span key={m.id} className="absolute flex items-center justify-center rounded-full bg-positive text-white shadow" style={{ left: m.box.x + m.box.w + 10, top: m.box.y + m.box.h / 2 - 14, width: 28, height: 28 }}>
+          <Check size={18} />
+        </span>
+      ) : (
+        <div key={m.id}>
+          <div className="absolute rounded-md" style={{ left: m.box.x - 4, top: m.box.y - 4, width: m.box.w + 8, height: m.box.h + 8, background: "rgb(220 38 38 / 0.08)", outline: "3px solid rgb(220 38 38 / 0.85)", pointerEvents: "none" }} />
+          <div onPointerDown={(e) => e.stopPropagation()} onClick={() => setOpen((o) => (o === m.id ? null : m.id))} title="Tap for the fix"
+            className="absolute cursor-pointer rounded-lg bg-negative px-2.5 py-1 text-white shadow-md"
+            style={{ left: m.box.x - 4, top: m.box.y + m.box.h + 8, maxWidth: Math.max(280, m.box.w + 120), fontSize: 17, lineHeight: 1.3, pointerEvents: "auto" }}>
+            <RichText text={m.note ?? "Check this"} />
+            {open === m.id && (
+              <div className="mt-1 border-t border-white/30 pt-1">
+                {m.fix && <p><span className="font-semibold">Should be: </span><RichText text={m.fix} /></p>}
+                <button onClick={(e) => { e.stopPropagation(); setOpen(null); onDismiss(m.id); }} className="mt-1 rounded-md bg-white/20 px-2 py-0.5 font-medium hover:bg-white/30">Dismiss</button>
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+    </>
   );
 }
 

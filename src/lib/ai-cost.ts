@@ -28,10 +28,12 @@ export function costUsd(model: string, u: Usage): number {
 // --- which model / how hard to think, per feature --------------------------------------------------------------
 /** Jobs that are plain reading or short text answers: fine on the cheaper model. */
 export const ROUTINE_FEATURES = new Set(["transcribe", "explain.followup", "map.link", "ask", "test"]);
+/** Jobs that run by themselves while you write: always on the cheaper model, whatever the economy setting. */
+export const ALWAYS_CHEAP = new Set(["mathcheck"]);
 
 const BASE_EFFORT: Record<string, Effort> = {
   transcribe: "low", math: "low", working: "low", text: "low", graph: "low", chem: "low", test: "low",
-  "cards.region": "low", "cards.text": "low", "explain.followup": "low", "map.link": "low", "map.expand": "low", ask: "low",
+  "cards.region": "low", "cards.text": "low", mathcheck: "low", "explain.followup": "low", "map.link": "low", "map.expand": "low", ask: "low",
   cards: "medium", explain: "medium", review: "medium", exam: "medium", "exam.mark": "medium", map: "medium", practice: "medium",
 };
 
@@ -50,13 +52,13 @@ export function maxTokensFor(base: number, effort: Effort | undefined): number {
 }
 
 export function modelFor(feature: string, s: { model: string; economy: boolean; economyModel: string }): string {
-  return s.economy && ROUTINE_FEATURES.has(feature) ? s.economyModel : s.model;
+  return ALWAYS_CHEAP.has(feature) || (s.economy && ROUTINE_FEATURES.has(feature)) ? s.economyModel : s.model;
 }
 
 // --- estimates (rough: for "≈ $0.05" hints before an action) -------------------------------------------------------------
 const PROFILE: Record<string, [number, number]> = {   // [input tokens, output tokens] per unit, before thinking
   transcribe: [2600, 700], math: [1500, 150], working: [1800, 500], text: [1500, 400], graph: [1500, 100], chem: [1500, 300],
-  explain: [1800, 900], "explain.followup": [2000, 400], review: [3000, 900], cards: [6500, 3000], "cards.region": [1800, 900], "cards.text": [1500, 700],
+  explain: [1800, 900], "explain.followup": [2000, 400], review: [3000, 900], cards: [6500, 3000], "cards.region": [1800, 900], "cards.text": [1500, 700], mathcheck: [1200, 250],
   map: [6500, 2000], "map.expand": [2000, 700], "map.link": [1500, 250], exam: [6500, 9000], "exam.mark": [2500, 700], ask: [3000, 500], practice: [6500, 2500],
 };
 const THINK_FACTOR: Record<Effort, number> = { low: 1.15, medium: 1.6, high: 2.2 };
@@ -102,5 +104,5 @@ export const FEATURE_LABEL: Record<string, string> = {
   transcribe: "Reading handwriting for search", math: "Recognising maths", working: "Checking working", text: "Handwriting to text", graph: "Graph it", chem: "Chemistry check",
   explain: "Explain", "explain.followup": "Explain follow-ups", review: "Review for mistakes", cards: "Flashcards from notes", "cards.region": "Flashcards from a lasso",
   "cards.text": "Flashcards from text", map: "Concept maps", "map.expand": "Expanding concepts", "map.link": "Explaining links", exam: "Writing exams", "exam.mark": "Marking exams",
-  ask: "Ask your notes", practice: "Practice questions", test: "Connection tests",
+  ask: "Ask your notes", practice: "Practice questions", test: "Connection tests", mathcheck: "Math check as you write",
 };

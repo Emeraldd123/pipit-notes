@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, ArrowLeftRight, ArrowUpRight, Check, CheckCheck, Circle, Code2, Copy, Download, Eraser, FilePlus2, FileText,
   Compass, Grid3x3, Hand, Plus, Layers as LayersIcon, Share2, Highlighter, History, Layers, Ruler, Waves, Lightbulb, LineChart, ListChecks, ImagePlus, Lasso, Loader2, Maximize2, Minus, MoreHorizontal, MousePointer2, Paintbrush, Pen,
-  Pencil, Printer, Redo2, Columns2, FileCode2, FlaskConical, Network, Shapes, TextCursorInput, Wand2, Scissors, ScanText, Sigma, Square, Trash, Trash2, Type, Undo2, ZoomIn, ZoomOut, Sparkles,
+  Pencil, Printer, Redo2, Columns2, FileCode2, FlaskConical, Network, Shapes, TextCursorInput, Wand2, Scissors, ScanText, Sigma, Square, Trash, Trash2, Type, Undo2, ZoomIn, ZoomOut, Sparkles, StickyNote,
 } from "lucide-react";
 import { NoteCanvas, type CanvasImage, type NoteCanvasHandle, type Stroke, type Tool } from "@/components/note-canvas";
 import { BlocksLayer, BLOCK_DEFAULTS, Latex } from "@/components/blocks";
@@ -17,7 +17,9 @@ import { PresetsButton } from "@/components/presets";
 import { RailMenu } from "@/components/rail-menu";
 import { shareOrDownload, useShareFlow } from "@/components/backup-flow";
 import { PagesPanel } from "@/components/pages-panel";
-import { ExplainPanel, HighlightLayer, ReviewBar, ReviewSetup, type ExplainState, type Highlight, type ReviewState } from "@/components/understanding";
+import { ExplainPanel, HighlightLayer, MathMarks, ReviewBar, ReviewSetup, StickyPanel, type ExplainState, type Highlight, type ReviewState } from "@/components/understanding";
+import { useMathCheck } from "@/components/math-check";
+import { pad, type Box } from "@/lib/ink-groups";
 import { Button, IconButton, Modal, Toast } from "@/components/ui";
 import type { BlockKind, BlockRec, NoteMeta, NotePaper } from "@/types";
 import {
@@ -27,7 +29,7 @@ import {
 import { computeDelta, strokeSig } from "@/lib/delta";
 import { newId } from "@/lib/ids";
 import { saveThumb } from "@/lib/thumbs";
-import { buildNotePdf, safeName, triggerDownload } from "@/lib/export";
+import { buildNotePdf, safeName } from "@/lib/export";
 import { loadExportNote } from "@/lib/note-io";
 import { runPython } from "@/lib/py";
 import { AiError, askAboutRegion, explainRegion, readChemistry, readGraphable, readWorking, recognizeMath, reviewPage, transcribeRegion, type ReadEquation, type WorkingLine } from "@/lib/ai";
@@ -51,6 +53,9 @@ import { go } from "@/router";
 const COLORS = ["#111827", "#2563eb", "#dc2626", "#16a34a", "#d97706", "#7c3aed", "#0891b2", "#db2777"];
 const HIGHLIGHTER_COLORS = ["#fde047", "#fca5a5", "#86efac", "#93c5fd", "#f0abfc", "#fdba74"];
 const WIDTHS = [2, 4, 7, 12];
+/** Each tool remembers its own size (a highlighter is usually much wider than a pen); shapes share one. */
+const widthKey = (t: Tool) => (t === "pen" || t === "pencil" || t === "marker" || t === "highlighter" || t === "eraser" ? t : "shape");
+const DEFAULT_WIDTH: Record<string, number> = { highlighter: 7, eraser: 7 };
 const PAPERS: { id: NotePaper; label: string }[] = [
   { id: "blank", label: "Blank" }, { id: "ruled", label: "Ruled" }, { id: "grid", label: "Grid" }, { id: "dotted", label: "Dotted" }, { id: "cornell", label: "Cornell" },
 ];
@@ -164,7 +169,9 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
   const [color, setColor] = useState(COLORS[0]);
   const [hlColor, setHlColor] = useState(HIGHLIGHTER_COLORS[0]);
   const inkColor = tool === "highlighter" ? hlColor : color;
-  const [width, setWidth] = useState(WIDTHS[1]);
+  const width = settings.toolWidths[widthKey(tool)] ?? DEFAULT_WIDTH[widthKey(tool)] ?? WIDTHS[1];
+  const setWidthFor = (t: Tool, w: number) => updateSettings({ toolWidths: { ...getSettings().toolWidths, [widthKey(t)]: w } });
+  const setWidth = (w: number) => setWidthFor(tool, w);
   const [paper, setPaper] = useState<NotePaper>(note.meta.paper);
   const [title, setTitle] = useState(note.meta.title);
   const [history, setHistory] = useState({ canUndo: false, canRedo: false });
@@ -211,6 +218,9 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
   const [explain, setExplain] = useState<ExplainState | null>(null);
   const explainRegionImg = useRef<string | null>(null);
   const [explainRect, setExplainRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [sticky, setSticky] = useState<string | null>(null);
+  const [hlChip, setHlChip] = useState<Box | null>(null);
+  const hlChipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [review, setReview] = useState<ReviewState | null>(null);
   const [reviewSetup, setReviewSetup] = useState(false);
   const highlightsInner = useRef<HTMLDivElement>(null);
@@ -383,10 +393,10 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
     const w = (el?.clientWidth ?? 800) / scale, h = (el?.clientHeight ?? 600) / scale;
     return { x: camX + w / 2, y: camY + h / 2 };
   }
-  const addBlock = useCallback((kind: BlockKind, at?: { x: number; y: number }, text = "") => {
+  const addBlock = useCallback((kind: BlockKind, at?: { x: number; y: number }, text = "", extra: Partial<BlockRec> = {}) => {
     const d = BLOCK_DEFAULTS[kind];
     const c = at ?? (() => { const v = viewportCenter(); return { x: v.x - d.width / 2, y: v.y - d.height / 2 }; })();
-    const b: BlockRec = { id: newId(), noteId, kind, x: Math.max(0, c.x), y: Math.max(0, c.y), width: d.width, height: d.height, text, lang: kind === "code" ? "python" : undefined, createdAt: Date.now() };
+    const b: BlockRec = { id: newId(), noteId, kind, x: Math.max(0, c.x), y: Math.max(0, c.y), width: d.width, height: d.height, text, lang: kind === "code" ? "python" : undefined, ...extra, createdAt: Date.now() };
     setBlocks((prev) => [...prev, b]);
     void putBlock(b);
     return b;
@@ -481,27 +491,52 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
     doneDownloaded: "PDF downloaded.",
     failed: "Couldn't build the PDF",
   }, (m) => flash(m));
-  useEffect(() => { if (sharePdf.building) setBusy("Building PDF…"); else setBusy((b) => (b === "Building PDF…" ? null : b)); }, [sharePdf.building]);
-  async function exportPdf() {
-    setMenu(false); setBusy("Building PDF…");
-    count("export.pdf");
-    const stop = timer("export.pdf.ms");
-    try {
+  const exportHint = "Tap Save, then pick Save to Files (or AirDrop, Mail, Messages). On a computer it goes to your Downloads folder.";
+  const name = safeName(title, "Note");
+  const sharePng = useShareFlow({
+    build: async () => {
+      count("export.png");
+      const url = canvasRef.current?.previewPage(currentPage, PAGE_W * 2);
+      if (!url) throw new Error("page image unavailable");
+      return new File([await dataUrlToBlob(url)], `${name}-page-${currentPage + 1}.png`, { type: "image/png" });
+    },
+    save: (f) => shareOrDownload(f, title), title: `Page ${currentPage + 1} as an image`, hint: exportHint,
+    doneShared: "Saved.", doneDownloaded: "PNG saved to your Downloads folder.", failed: "Couldn't make the image",
+  }, (m) => flash(m));
+  const shareSvg = useShareFlow({
+    build: async () => {
+      count("export.svg");
       await flush();
       const l = await loadExportNote(noteId);
-      if (!l) return;
-      const bytes = await buildNotePdf(l.note);
-      l.release();
-      triggerDownload(new Blob([bytes.slice()], { type: "application/pdf" }), `${safeName(title, "Note")}.pdf`);
-      stop();
-    } catch (e) { failed("export", e, "PDF export failed"); } finally { setBusy(null); }
-  }
-  function exportPng() {
-    setMenu(false);
-    count("export.png");
-    const url = canvasRef.current?.exportPng();
-    if (url) { const a = document.createElement("a"); a.href = url; a.download = `${safeName(title, "Note")}.png`; document.body.appendChild(a); a.click(); a.remove(); }
-  }
+      if (!l) throw new Error("note not found");
+      try {
+        const imgs = await Promise.all(l.note.images.map(async (i) => ({ dataUrl: await blobUrlToDataUrl(i.data), x: i.x, y: i.y, width: i.width, height: i.height, rotation: i.rotation, zIndex: i.zIndex })));
+        return new File([buildPageSvg(currentPage, l.note.strokes, imgs)], `${name}-page-${currentPage + 1}.svg`, { type: "image/svg+xml" });
+      } finally { l.release(); }
+    },
+    save: (f) => shareOrDownload(f, title), title: `Page ${currentPage + 1} as SVG`, hint: `${exportHint} SVG keeps your ink as sharp vector lines.`,
+    doneShared: "Saved.", doneDownloaded: "SVG saved to your Downloads folder.", failed: "Couldn't make the SVG",
+  }, (m) => flash(m));
+  const shareTex = useShareFlow({
+    build: async () => {
+      if (!ai) throw new Error("LaTeX export reads your handwriting with AI. Turn AI on in Settings first");
+      count("export.latex");
+      await flush();
+      await indexNote(noteId, (pr) => setBusy(`Reading page ${pr.page + 1}/${pr.total}…`));
+      setBusy(null);
+      const texts = await getPageTexts(noteId);
+      const pages = Array.from({ length: pageCount }, (_, i) => {
+        const ink = texts.find((t) => t.page === i && t.source === "ink")?.text;
+        const pdf = texts.find((t) => t.page === i && t.source === "pdf")?.text;
+        return { page: i, text: ink || pdf || "" };
+      });
+      return new File([buildLatexDocument(title, pages)], `${name}.tex`, { type: "application/x-tex" });
+    },
+    save: (f) => shareOrDownload(f, title), title: "LaTeX ready", hint: `${exportHint} Open it in Overleaf, or compile with pdflatex.`,
+    doneShared: "Saved.", doneDownloaded: ".tex saved to your Downloads folder.", failed: "LaTeX export failed",
+  }, (m) => flash(m));
+  const exportBuilding = sharePdf.building || sharePng.building || shareSvg.building || shareTex.building;
+  useEffect(() => { if (exportBuilding) setBusy((b) => b ?? "Preparing your file…"); else setBusy((b) => (b === "Preparing your file…" || b === "Building PDF…" ? null : b)); }, [exportBuilding]);
   function doPrint() { setMenu(false); count("export.print"); printImages(canvasRef.current?.exportPages() ?? []); }
   async function openHistory() { setMenu(false); setVersions(await listVersions(noteId)); }
   async function onRestore(vid: string) {
@@ -521,36 +556,6 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
   async function blobUrlToDataUrl(url: string): Promise<string> {
     const blob = await (await fetch(url)).blob();
     return new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result)); fr.onerror = rej; fr.readAsDataURL(blob); });
-  }
-  async function exportSvg() {
-    setMenu(false); setBusy("Building SVG…");
-    count("export.svg");
-    try {
-      await flush();
-      const l = await loadExportNote(noteId);
-      if (!l) return;
-      const imgs = await Promise.all(l.note.images.map(async (i) => ({ dataUrl: await blobUrlToDataUrl(i.data), x: i.x, y: i.y, width: i.width, height: i.height, rotation: i.rotation, zIndex: i.zIndex })));
-      const svg = buildPageSvg(currentPage, l.note.strokes, imgs);
-      l.release();
-      triggerDownload(new Blob([svg], { type: "image/svg+xml" }), `${safeName(title, "Note")}-page-${currentPage + 1}.svg`);
-    } catch (e) { failed("export", e, "SVG export failed"); } finally { setBusy(null); }
-  }
-  async function exportLatex() {
-    setMenu(false);
-    if (!ai) return flash("LaTeX export reads your handwriting with AI — turn it on in Settings first.");
-    setBusy("Reading your handwriting…");
-    try {
-      await flush();
-      await indexNote(noteId, (p) => setBusy(`Reading page ${p.page + 1}/${p.total}…`));
-      const texts = await getPageTexts(noteId);
-      const pages = Array.from({ length: pageCount }, (_, i) => {
-        const ink = texts.find((t) => t.page === i && t.source === "ink")?.text;
-        const pdf = texts.find((t) => t.page === i && t.source === "pdf")?.text;
-        return { page: i, text: ink || pdf || "" };
-      });
-      triggerDownload(new Blob([buildLatexDocument(title, pages)], { type: "application/x-tex" }), `${safeName(title, "Note")}.tex`);
-      flash("LaTeX exported — compile with pdflatex or paste into Overleaf.");
-    } catch (e) { failed("ai", e, "LaTeX export failed"); } finally { setBusy(null); }
   }
   async function showRelated() {
     setMenu(false);
@@ -655,15 +660,77 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
       flash(n ? `Added ${n} flashcard${n === 1 ? "" : "s"} — find them in Study.` : "No new flashcards from that (you may already have them).");
     } catch (e) { failed("ai", e, "Couldn't make flashcards"); } finally { setBusy(null); }
   }
+  // A pinned explanation is a small "Explain" chip beside what you circled (the area stays lightly tinted). Tapping
+  // the chip opens the full explanation, follow-ups and all, in the bottom half of the screen.
   function pinExplanation() {
     const d = explain?.data;
-    if (!d || !explainRect) return;
-    const lines = [d.concept.toUpperCase(), plainMath(d.explanation)];
-    if (d.shortfalls.length) lines.push("", "Where I went wrong:", ...d.shortfalls.map((s) => `• ${plainMath(s.what)}${s.fix ? ` → ${plainMath(s.fix)}` : ""}`));
-    for (const t of explain!.turns) lines.push("", `${t.role === "user" ? "Q: " : "A: "}${plainMath(t.content)}`);
-    addBlock("text", { x: Math.max(20, explainRect.x), y: explainRect.y + explainRect.h + 24 }, lines.join("\n"));
+    if (!d || !explainRect || !explain) return;
+    const r = explainRect, chipW = BLOCK_DEFAULTS.explain.width;
+    const beside = r.x + r.w + 12 + chipW <= PAGE_W;
+    const at = beside ? { x: r.x + r.w + 12, y: r.y } : { x: Math.max(0, r.x + r.w - chipW), y: Math.max(0, r.y - 56) };
+    const b = addBlock("explain", at, plainMath(d.explanation), {
+      title: d.concept, region: r,
+      explain: { explanation: d.explanation, shortfalls: d.shortfalls, followups: d.followups, turns: explain.turns },
+    });
+    setExplain((s) => (s ? { ...s, pinnedId: b.id } : s));
     count("explain.pinned");
-    flash("Pinned below what you circled — edit or move it like any text block.");
+    flash("Pinned. Tap the Explain chip any time to read it again.");
+  }
+  function unpinExplanation() {
+    const id = explain?.pinnedId;
+    if (!id) return;
+    onBlockDelete(id);
+    setExplain((s) => (s ? { ...s, pinnedId: undefined } : s));
+    count("explain.unpinned");
+  }
+  // follow-up questions asked on a pinned explanation are kept with it
+  useEffect(() => {
+    const id = explain?.pinnedId;
+    if (!id || explain.asking) return;
+    const b = blocks.find((x) => x.id === id);
+    if (b?.explain && b.explain.turns.length !== explain.turns.length) onBlockChange({ ...b, explain: { ...b.explain, turns: explain.turns } });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [explain?.turns, explain?.asking, explain?.pinnedId]);
+  function openPin(b: BlockRec) {
+    if (b.kind === "sticky") { closeExplain(); setReview(null); setSticky(b.id); count("sticky.open"); return; }
+    if (b.kind !== "explain" || !b.explain || !b.region) return;
+    setSticky(null);
+    setReview(null);
+    explainRegionImg.current = canvasRef.current?.regionImage(pad(b.region, 4)) ?? null;
+    setExplainRect(b.region);
+    setExplain({
+      status: "done", asking: false, pinnedId: b.id, turns: b.explain.turns,
+      data: { concept: b.title || "Explanation", explanation: b.explain.explanation, shortfalls: b.explain.shortfalls, followups: b.explain.followups },
+    });
+    canvasRef.current?.focusRect(b.region, { bottomInset: Math.round(window.innerHeight * 0.5) });
+    count("explain.reopened");
+  }
+  function addSticky() {
+    const v = viewportCenter();
+    const b = addBlock("sticky", { x: v.x - BLOCK_DEFAULTS.sticky.width / 2, y: v.y - 120 }, "");
+    closeExplain();
+    setSticky(b.id);
+    count("sticky.add");
+  }
+  function closeSticky() {
+    const b = blocks.find((x) => x.id === sticky);
+    if (b && !b.text.trim()) onBlockDelete(b.id);   // an empty note isn't worth keeping
+    setSticky(null);
+  }
+  const openSticky = blocks.find((x) => x.id === sticky && x.kind === "sticky") ?? null;
+
+  // just highlighted something: offer to explain it right there
+  function onHighlightDone(box: Box) {
+    if (!ai) return;
+    if (hlChipTimer.current) clearTimeout(hlChipTimer.current);
+    setHlChip(box);
+    hlChipTimer.current = setTimeout(() => setHlChip(null), 7000);
+  }
+  function explainHighlight() {
+    const box = hlChip;
+    setHlChip(null);
+    const img = box ? canvasRef.current?.regionImage(pad(box, 6)) : null;
+    if (box && img) { count("explain.fromHighlight"); void explainRegionNow(img, box); }
   }
   async function explanationToCards() {
     const d = explain?.data;
@@ -797,6 +864,22 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
     if (fixed.has(id)) fixed.delete(id); else fixed.add(id);
     return { ...r, fixed };
   });
+  // --- math check as you write ------------------------------------------------------------------------
+  const math = useMathCheck({
+    enabled: settings.mathCheck && ai,
+    getStrokes: () => canvasRef.current?.getStrokes() ?? [],
+    regionImage: (r) => canvasRef.current?.regionImage(r) ?? null,
+    onFail: (m) => flash(`Math check paused: ${m}`),
+  });
+  const mathStrokes = math.onStrokes;
+  const onCommitAll = useCallback((strokes: Stroke[]) => { onCommit(strokes); mathStrokes(strokes); }, [onCommit, mathStrokes]);
+  function toggleMathCheck() {
+    if (!settings.mathCheck && !ai) return flash("Turn on AI in Settings (and add your API key) to use Math check.");
+    updateSettings({ mathCheck: !settings.mathCheck });
+    count(settings.mathCheck ? "mathcheck.off" : "mathcheck.on");
+    if (!settings.mathCheck) flash("Math check is on. Finish a line with = (or a reaction arrow) and it gets checked; mistakes show in red.");
+  }
+
   const highlights: Highlight[] = [
     ...(review ? review.issues.map((x, n): Highlight => ({ id: x.id, ...x.rect, tone: n === review.i ? "active" : "issue", label: n === review.i ? String(n + 1) : undefined })).filter((h) => !review.fixed.has(h.id) || h.tone === "active") : []),
     ...findRects,
@@ -841,7 +924,7 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
   function applyPreset(p: (typeof settings.presets)[number]) {
     setTool(p.tool);
     if (p.tool === "highlighter") setHlColor(p.color); else setColor(p.color);
-    setWidth(p.width);
+    setWidthFor(p.tool, p.width);
     count("pen.presetUsed");
   }
   function rememberColor(c: string) {
@@ -898,11 +981,10 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
                   <MenuItem icon={<Columns2 size={15} />} label="Open another note beside this" onClick={async () => { setMenu(false); setPicking((await listNotes()).filter((n) => n.id !== noteId)); }} />
                 )}
                 <div className="my-1 h-px bg-border" />
-                <MenuItem icon={<Share2 size={15} />} label="Share as PDF…" onClick={() => { setMenu(false); sharePdf.start(); }} />
-                <MenuItem icon={<FileText size={15} />} label="Export as PDF" onClick={exportPdf} />
-                <MenuItem icon={<Download size={15} />} label="Export as PNG" onClick={exportPng} />
-                <MenuItem icon={<Shapes size={15} />} label="Export this page as SVG" onClick={exportSvg} />
-                <MenuItem icon={<FileCode2 size={15} />} label="Export as LaTeX (reads handwriting)" onClick={exportLatex} />
+                <MenuItem icon={<Share2 size={15} />} label="Save or share as PDF (whole note)…" onClick={() => { setMenu(false); sharePdf.start(); }} />
+                <MenuItem icon={<Download size={15} />} label="Save this page as an image (PNG)…" onClick={() => { setMenu(false); sharePng.start(); }} />
+                <MenuItem icon={<Shapes size={15} />} label="Save this page as SVG…" onClick={() => { setMenu(false); shareSvg.start(); }} />
+                <MenuItem icon={<FileCode2 size={15} />} label="Save as LaTeX (reads handwriting)…" onClick={() => { setMenu(false); shareTex.start(); }} />
                 <MenuItem icon={<Printer size={15} />} label="Print" onClick={doPrint} />
                 <div className="my-1 h-px bg-border" />
                 <MenuItem icon={<Trash2 size={15} />} label="Move note to Recently deleted" danger onClick={onDeleteNote} />
@@ -941,6 +1023,7 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
             { icon: <Circle size={17} />, label: "Ellipse", active: tool === "ellipse", onClick: () => setTool("ellipse") },
             { icon: <ArrowUpRight size={17} />, label: "Arrow", hint: "Hold Shift to snap the angle", active: tool === "arrow", onClick: () => setTool("arrow") },
             { group: "On the page", icon: <Type size={17} />, label: "Text", hint: "Tap anywhere on the page and type", active: tool === "text", onClick: () => setTool(tool === "text" ? "pen" : "text") },
+            { icon: <StickyNote size={17} />, label: "Sticky note", hint: "A note that folds into a small chip on the page", onClick: addSticky },
             { icon: <LineChart size={17} />, label: "Graph", hint: "y = x^2 · x^2 + y^2 = 25 · z = sin(x)cos(y)", onClick: () => { count("graph.add"); addBlock("graph", undefined, "y = x^2"); } },
             { icon: <Sigma size={17} />, label: "Maths (LaTeX)", onClick: () => addBlock("math") },
             { icon: <Code2 size={17} />, label: "Python", hint: "Runs code and plots graphs", onClick: () => addBlock("code") },
@@ -950,7 +1033,8 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
             { icon: <Compass size={17} />, label: protractor ? "Hide protractor" : "Protractor", active: !!protractor, onClick: toggleProtractor },
             { group: "Blocks", icon: <Sparkles size={17} />, label: "Edit blocks", hint: "Lets text, maths, graph and code blocks take touch", active: blockMode, onClick: () => setTool(blockMode ? "pen" : "block") },
           ]} />
-          <RailMenu title="Pen assists" icon={<Wand2 size={17} />} side={railSide} active={settings.shapeSnap || settings.scribbleErase} items={[
+          <RailMenu title="Pen assists" icon={<Wand2 size={17} />} side={railSide} active={settings.shapeSnap || settings.scribbleErase || settings.mathCheck} items={[
+            { icon: <Sigma size={17} />, label: settings.mathCheck ? "Math check: on" : "Math check: off", hint: "Checks each finished line of maths or chemistry as you write (cheap model, a fraction of a cent a line)", active: settings.mathCheck, onClick: toggleMathCheck },
             { icon: <Wand2 size={17} />, label: settings.shapeSnap ? "Snap shapes: on" : "Snap shapes: off", hint: "Hold the pen still after a line, circle or box and it straightens", active: settings.shapeSnap, onClick: () => updateSettings({ shapeSnap: !settings.shapeSnap }) },
             { icon: <Waves size={17} />, label: settings.scribbleErase ? "Scribble to erase: on" : "Scribble to erase: off", hint: "Scribble back and forth over ink to delete it", active: settings.scribbleErase, onClick: () => updateSettings({ scribbleErase: !settings.scribbleErase }) },
           ]} />
@@ -1003,7 +1087,7 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
             tool={activeTool}
             color={inkColor}
             width={width}
-            onCommit={onCommit}
+            onCommit={onCommitAll}
             onHistoryChange={setHistory}
             onViewChange={setZoom}
             onCameraChange={onCameraChange}
@@ -1016,12 +1100,29 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
             onSelectionChange={setHasSel}
             onSnipRegion={onSnipRegion}
             onExplainRegion={explainRegionNow}
+            onExplainMiss={() => flash("Circle what you want explained, or tap something you highlighted.")}
+            onHighlightDone={onHighlightDone}
             onImageAdd={persistImageAdd}
             onImageUpdate={(id, patch) => void updateImage(id, patch)}
             onImageDelete={(id) => void deleteImage(id)}
           />
-          <BlocksLayer blocks={blocks} innerRef={blocksInner} interactive={blocksTakeTouch} scaleRef={scaleRef} running={running} onChange={onBlockChange} onDelete={onBlockDelete} onRun={onRunBlock} />
-          <HighlightLayer rects={highlights} innerRef={highlightsInner} camRef={camRef} />
+          <BlocksLayer blocks={blocks} innerRef={blocksInner} interactive={blocksTakeTouch} scaleRef={scaleRef} running={running} onChange={onBlockChange} onDelete={onBlockDelete} onRun={onRunBlock}
+            onOpen={openPin} openId={explain?.pinnedId ?? sticky} />
+          <HighlightLayer rects={highlights} innerRef={highlightsInner} camRef={camRef}>
+            {math.marks.length > 0 && <MathMarks marks={math.marks} onDismiss={math.dismiss} />}
+            {hlChip && !explain && (
+              <button onPointerDown={(e) => e.stopPropagation()} onClick={explainHighlight} title="Explain what you just highlighted"
+                className="absolute flex items-center gap-1.5 rounded-full border border-blue-600/30 bg-white px-3 text-blue-700 shadow-md"
+                style={{ left: Math.min(hlChip.x + hlChip.w - 130, PAGE_W - 140), top: hlChip.y + hlChip.h + 8, height: 40, fontSize: 17, pointerEvents: "auto" }}>
+                <Lightbulb size={17} /> Explain
+              </button>
+            )}
+          </HighlightLayer>
+          {settings.mathCheck && ai && (
+            <div className="pointer-events-none absolute right-3 top-3 z-20 flex items-center gap-1.5 rounded-full border border-border bg-surface/95 px-2.5 py-1 text-[11px] font-medium text-foreground-muted shadow-sm backdrop-blur">
+              {math.checking ? <Loader2 size={12} className="animate-spin text-primary" /> : <Sigma size={12} />} Math check{math.checking ? "ing…" : " on"}
+            </div>
+          )}
           {findRects.length > 0 && (
             <button onClick={() => { setFindRects([]); setFindTerm(""); }} className="absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-surface/95 px-3 py-1 text-xs shadow-md backdrop-blur" title="Clear highlights">
               Matches for “{findTerm}” <span className="text-foreground-muted">✕</span>
@@ -1041,7 +1142,8 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
               onDelete={(p) => { if (confirm(`Delete page ${p + 1}? Its writing goes with it (version history can bring it back).`)) void applyPageOp(deleteMapping(pageCount, p), `Deleted page ${p + 1}.`); }}
               onClose={() => setPagesOpen(false)} />
           )}
-          {explain && <ExplainPanel state={explain} onAsk={askFollowUp} onClose={closeExplain} onPin={pinExplanation} onCards={explanationToCards}
+          {openSticky && <StickyPanel b={openSticky} onChange={onBlockChange} onDelete={() => { onBlockDelete(openSticky.id); setSticky(null); }} onClose={closeSticky} />}
+          {explain && <ExplainPanel state={explain} onAsk={askFollowUp} onClose={closeExplain} onPin={pinExplanation} onUnpin={unpinExplanation} onCards={explanationToCards}
             onRetry={() => { if (explainRegionImg.current && explainRect) { count("report.explain"); void explainRegionNow(explainRegionImg.current, explainRect, true); } }} />}
           {review && <ReviewBar review={review} onGo={goIssue} onToggleFixed={toggleFixed} onDismiss={dismissIssue} onClose={() => setReview(null)} onCard={issueToCard} />}
 
@@ -1054,7 +1156,7 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
               <span className="text-[10px] text-foreground-muted">release to jump</span>
             </div>
           )}
-          <div className={`safe-b absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-full border border-border bg-surface/95 py-1 pl-3 pr-1.5 text-xs font-medium shadow-md backdrop-blur ${explain || review ? "hidden" : ""}`}>
+          <div className={`safe-b absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-full border border-border bg-surface/95 py-1 pl-3 pr-1.5 text-xs font-medium shadow-md backdrop-blur ${explain || review || openSticky ? "hidden" : ""}`}>
             <span onPointerDown={onScrubDown} onPointerMove={onScrubMove} onPointerUp={onScrubUp} onPointerCancel={onScrubUp}
               title={pageCount > 1 ? "Hold and drag to jump to a page" : undefined} style={{ touchAction: "none" }}
               className={`select-none rounded-full px-1 py-0.5 text-foreground-muted ${pageCount > 1 ? "cursor-ew-resize hover:bg-surface-secondary" : ""} ${scrub !== null ? "bg-surface-secondary text-foreground" : ""}`}>
@@ -1135,6 +1237,9 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
         </Modal>
       )}
       {sharePdf.modal}
+      {sharePng.modal}
+      {shareSvg.modal}
+      {shareTex.modal}
       {reviewSetup && <ReviewSetup pageCount={pageCount} currentPage={currentPage} inkPages={inkPages()} costHint={(n) => formatUsd(estimateUsd("review", n, getSettings()))} thumb={(p) => { try { return canvasRef.current?.previewPage(p, 180) ?? null; } catch { return null; } }} onStart={runReview} onClose={() => setReviewSetup(false)} />}
       {chem && <ChemModal items={chem} onClose={() => setChem(null)} />}
       {check && <CheckModal check={check} onClose={() => setCheck(null)} />}
