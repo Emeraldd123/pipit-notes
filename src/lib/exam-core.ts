@@ -37,6 +37,8 @@ export type Exam = {
   sections: Section[]; totalMarks: number; createdAt: number;
   /** questions the student reported as broken (question id -> reason); they don't count toward the score */
   reported?: Record<string, ReportReason>;
+  /** the real exam whose format this one copies (shown with its credit, as its licence asks) */
+  styleFrom?: { title: string; credit?: string; source?: string };
 };
 
 export type ReportReason = "unanswerable" | "figure" | "wrong-answer" | "not-covered" | "other";

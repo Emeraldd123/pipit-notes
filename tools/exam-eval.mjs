@@ -5,13 +5,14 @@
 //   node --env-file=.env.local tools/exam-eval.mjs --runs 2 --only bio,econ --no-judge
 //
 // Options: --dry (check prompts only), --runs N (exams per subject), --only a,b, --model ID, --no-judge, --questions N,
+//   --builtin: copy the format of the built-in MIT exam the app would pick for each subject.
 //   --style exam.pdf|exam.txt[,more]: a real past exam (e.g. MIT OCW) whose FORMAT the paper should copy. The judge then also
 //   scores how well the paper matches it and whether anything was copied. Keep such files in data/ (gitignored; OCW is CC BY-NC-SA).
 // The key is read from the environment and only sent to api.anthropic.com. Reports go to data/exam-eval/ (gitignored).
 // Each exam costs roughly what one in the app does (~$0.10–0.20 on the default model); the judge adds a few cents.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
-import { pickPastExams } from "../src/lib/past-exams.ts";
+import { chooseStyleExamples, pickPastExams } from "../src/lib/past-exams.ts";
 import { buildExamPrompt, EXAM_MAX_TOKENS } from "../src/lib/exam-prompt.ts";
 import { effortFor, maxTokensFor } from "../src/lib/ai-cost.ts";
 import { parseModelJson } from "../src/lib/json-repair.ts";
@@ -43,6 +44,8 @@ async function pdfPages(path) {
 }
 const STYLE_FILES = arg("style", "")?.split(",").filter(Boolean) ?? [];
 const PAST = [];
+// --builtin: the app's built-in MIT exams, chosen per subject exactly as the app does
+const BUILTIN = process.argv.includes("--builtin") ? JSON.parse(readFileSync("public/ocw/exams.json", "utf8")).exams : [];
 for (const f of STYLE_FILES) PAST.push({ id: f, title: basename(f).replace(/\.(pdf|txt)$/i, ""), pages: /\.pdf$/i.test(f) ? await pdfPages(f) : readFileSync(f, "utf8").split(/\f|\n-{3,} ?page break ?-{3,}\n/i) });
 
 // one dropped connection or overloaded reply shouldn't lose a whole subject: retry a couple of times
@@ -105,7 +108,7 @@ const lines = [`# Exam-writer evaluation — ${new Date().toISOString()}`, `mode
 for (const f of subjects) {
   for (let r = 0; r < RUNS; r++) {
     const excerpts = f.pages.map((text, i) => ({ n: i + 1, noteTitle: f.title, page: i, text }));
-    const past = PAST.length ? pickPastExams(f.pages, PAST, 9000) : [];
+    const past = PAST.length ? pickPastExams(f.pages, PAST, 9000) : BUILTIN.length ? chooseStyleExamples(f.pages, [], BUILTIN) : [];
     const { system, content } = buildExamPrompt({ excerpts, questions: QUESTIONS, difficulty: "same", style: f.style, figures: true, cases: true, pastExams: past });
     if (DRY) { console.log(`${f.id}: system ${system.length} chars, user ${content.map((c) => c.text ?? "").join("").length} chars, case rules ${system.includes("CASE-STUDY") ? "on" : "OFF"}, past exams ${past.map((e) => `${e.title} (${e.text.length} chars)`).join(", ") || "none"}`); continue; }
     const t0 = Date.now();
@@ -152,7 +155,7 @@ for (const f of subjects) {
   }
 }
 
-const keys = ["subject", "run", "questions", "cases", "caseShare", "dropped", "stretch", "withFigure", "noFigure", "mcqs", "keyLetters", "lint", "realistic", "applied", "selfContained", "oneAnswer", "accurate", "distractors", ...(PAST.length ? ["styleMatch", "copied"] : []), "error"];
+const keys = ["subject", "run", "questions", "cases", "caseShare", "dropped", "stretch", "withFigure", "noFigure", "mcqs", "keyLetters", "lint", "realistic", "applied", "selfContained", "oneAnswer", "accurate", "distractors", ...(PAST.length || BUILTIN.length ? ["styleMatch", "copied"] : []), "error"];
 lines.splice(3, 0, "| " + keys.join(" | ") + " |", "|" + keys.map(() => "---").join("|") + "|", ...results.map((r) => "| " + keys.map((k) => r[k] ?? "").join(" | ") + " |"), "");
 if (DRY) process.exit(0);
 mkdirSync("data/exam-eval", { recursive: true });

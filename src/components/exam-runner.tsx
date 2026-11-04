@@ -56,6 +56,7 @@ export function ExamRunner({ exam, onSubmit, onExit, onReport }: {
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold">{exam.title}</p>
           <p className="text-xs text-foreground-muted">{exam.totalMarks} marks · {exam.durationMin} min</p>
+          {exam.styleFrom && <p className="text-[11px] text-foreground-muted">Format based on {exam.styleFrom.source ? <a href={exam.styleFrom.source} target="_blank" rel="noreferrer" className="underline">{exam.styleFrom.title}</a> : exam.styleFrom.title}{exam.styleFrom.credit ? ` (${exam.styleFrom.credit})` : ""}. New questions from your notes.</p>}
         </div>
         <button onClick={() => setPaused((p) => !p)} className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-semibold tabular-nums ${remaining < 300 ? "bg-negative/10 text-negative" : "bg-surface-secondary"}`} title={paused ? "Resume" : "Pause"}>
           <Clock size={14} /> {remaining < 0 ? "+" : ""}{fmtClock(remaining)} {paused ? <Play size={12} /> : <Pause size={12} />}

@@ -15,7 +15,8 @@ import { count } from "./telemetry";
 import { hashString } from "./ai-cache";
 import { getMeta, setMeta } from "./db";
 import { pickTextbookPages, textbookChunks } from "./coverage";
-import { pickPastExams, type PastExam, type StyleExample } from "./past-exams";
+import { chooseStyleExamples, type PastExam, type StyleExample } from "./past-exams";
+import { builtinExams } from "./builtin-exams";
 
 const CARDS_SRC = "cards:src";
 
@@ -32,13 +33,12 @@ export async function scopeNoteIds(scope: string): Promise<string[] | null> {
 /** Past exams to show the exam writer as format examples: the closest to these notes, or the one you picked. */
 export async function pastExamsFor(notes: Excerpt[], chosen?: string, maxChars = 9000): Promise<StyleExample[]> {
   const metas = (await listNotes()).filter((n) => n.isPastExam && !n.deletedAt);
-  if (!metas.length) return [];
-  const texts = (await getPageTexts()).filter((t) => metas.some((m) => m.id === t.noteId));
+  const texts = metas.length ? (await getPageTexts()).filter((t) => metas.some((m) => m.id === t.noteId)) : [];
   const exams: PastExam[] = metas.map((m) => ({
     id: m.id, title: m.title,
     pages: texts.filter((t) => t.noteId === m.id).sort((a, b) => a.page - b.page).map((t) => t.text),
   }));
-  return pickPastExams(notes.map((e) => e.text), exams, maxChars, chosen);
+  return chooseStyleExamples(notes.map((e) => e.text), exams, await builtinExams(), { chosen, maxChars });
 }
 
 /**

@@ -39,7 +39,7 @@ export default defineConfig({
       },
       workbox: {
         maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
-        globPatterns: ["**/*.{js,css,html,svg,png,woff2,mjs,wasm}"],
+        globPatterns: ["**/*.{js,css,html,svg,png,woff2,mjs,wasm,json}"],
         navigateFallback: "/index.html",
         // never answer the reporting endpoint (or any Netlify function) with the app shell
         navigateFallbackDenylist: [/^\/\.netlify\//],

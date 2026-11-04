@@ -42,3 +42,23 @@ test("the prompt shows past exams as a format reference and switches on the styl
   assert.doesNotMatch(plain.system, /PAST EXAMS/);
   assert.match(plain.content.map((c) => c.text ?? "").join(""), /in the style of: AP Physics/);
 });
+
+test("built-in exams: matched by subject, never forced on notes from another subject", async () => {
+  const { chooseStyleExamples, detectSubject } = await import("../src/lib/past-exams.ts");
+  const { readFileSync } = await import("node:fs");
+  const builtin = JSON.parse(readFileSync("public/ocw/exams.json", "utf8")).exams;
+  const { FIXTURES } = await import("../tools/exam-fixtures.mjs");
+  const want = { bio: "Biology", chem: "Chemistry", phys: "Physics", econ: "Economics", stats: "Statistics" };
+  for (const f of FIXTURES) assert.equal(detectSubject(f.pages, builtin), want[f.id], f.id);
+  assert.equal(detectSubject(["The French Revolution began in 1789 with the storming of the Bastille; Robespierre and the Terror."], builtin), null);
+  assert.deepEqual(chooseStyleExamples(["Los verbos irregulares en el pretérito."], [], builtin), []);
+  const [ex] = chooseStyleExamples(FIXTURES.find((f) => f.id === "stats").pages, [], builtin);
+  assert.match(ex.title, /^MIT 18\.05/);
+  assert.match(ex.credit, /CC BY-NC-SA 4\.0/);
+  assert.match(ex.text, /SOLUTIONS/);
+  assert.ok(ex.text.length <= 9000);
+  // your own past exams come first; a pick from the built-in list is honoured
+  const mine = [{ id: "u1", title: "My midterm", pages: ["Question 1 (10 marks) Hypothesis testing and p-values for a sample mean."] }];
+  assert.equal(chooseStyleExamples(["anything"], mine, builtin)[0].id, "u1");
+  assert.equal(chooseStyleExamples(["anything"], mine, builtin, { chosen: builtin[0].id })[0].id, builtin[0].id);
+});
