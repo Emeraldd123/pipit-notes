@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  BookOpen, CheckSquare, Clock, Download, RotateCcw, Trash, FileUp, Folder, FolderInput, FolderPlus, GraduationCap, Loader2, Network, NotebookPen, Pencil, Pin, Plus, Search, Settings as SettingsIcon, Tag, Trash2, Upload, X,
+  BookOpen, CheckSquare, ClipboardList, Clock, Download, RotateCcw, Trash, FileUp, Folder, FolderInput, FolderPlus, GraduationCap, Loader2, Network, NotebookPen, Pencil, Pin, Plus, Search, Settings as SettingsIcon, Tag, Trash2, Upload, X,
 } from "lucide-react";
 import type { NoteMeta, NotebookRec } from "@/types";
 import {
@@ -42,6 +42,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
   const pdfRef = useRef<HTMLInputElement>(null);
   const restoreRef = useRef<HTMLInputElement>(null);
   const bookRef = useRef<HTMLInputElement>(null);
+  const examRef = useRef<HTMLInputElement>(null);
   /** textbooks just imported on this device, packed as a small file to move to another device */
   const [pack, setPack] = useState<{ file: File; names: string[] } | null>(null);
 
@@ -169,7 +170,8 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
    * textbook pack (.zip) made on another device, so a book can be imported on a laptop and moved to the iPad
    * as a file of a few MB instead of downloading the whole PDF there.
    */
-  async function onImportTextbooks(e: React.ChangeEvent<HTMLInputElement>) {
+  async function onImportTextbooks(e: React.ChangeEvent<HTMLInputElement>, kind: "textbook" | "exam" = "textbook") {
+    const what = kind === "exam" ? "past exam" : "textbook";
     const files = Array.from(e.target.files ?? []);
     e.target.value = "";
     if (!files.length) return;
@@ -190,11 +192,11 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
         try {
           const pages = await readPdfText(f, (d, t) => setBusy(`${label}Reading “${f.name.replace(/\.pdf$/i, "").slice(0, 30)}” — page ${d}/${t}…`));
           const readable = pages.filter((t) => t.length > 40).length;
-          if (readable < Math.max(3, pages.length * 0.2)) { notes.push(`“${f.name}” looks like a scan (no text layer), so it can't be used as a textbook.`); continue; }
+          if (readable < (kind === "exam" ? 1 : Math.max(3, pages.length * 0.2))) { notes.push(`“${f.name}” looks like a scan (no text layer), so it can't be used as a ${what}.`); continue; }
           const nb = notebook && notebook !== "none" && notebook !== "recent" && notebook !== "trash" ? notebook : null;
           const note = await createNote({ title: f.name.replace(/\.pdf$/i, ""), notebookId: nb, paper: "blank", pageCount: Math.max(1, pages.length) });
           for (let k = 0; k < pages.length; k++) if (pages[k]) await putPageText({ key: `${note.id}:${k}:pdf`, noteId: note.id, page: k, source: "pdf", text: pages[k], hash: "pdf", updatedAt: Date.now(), boxes: [] });
-          await patchNote(note.id, { isTextbook: true }, false);
+          await patchNote(note.id, kind === "exam" ? { isPastExam: true } : { isTextbook: true }, false);
           made.push(note.id); names.push(note.title);
         } catch (err) {
           logError("textbook-import", err, { bytes: f.size });
@@ -202,16 +204,18 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
         }
       }
       if (made.length) {
-        count("library.textbook.import");
+        count(kind === "exam" ? "library.pastExam.import" : "library.textbook.import");
         if (matchMedia("(pointer: fine)").matches) {   // a laptop/desktop: get the file ready to move to the iPad
           setBusy("Packing a copy for your other devices…");
           const zip = await buildBackupZip(made);
-          setPack({ file: new File([zip.slice()], `Textbooks ${new Date().toISOString().slice(0, 10)}.zip`, { type: "application/zip" }), names });
+          setPack({ file: new File([zip.slice()], `${kind === "exam" ? "Past exams" : "Textbooks"} ${new Date().toISOString().slice(0, 10)}.zip`, { type: "application/zip" }), names });
         }
       }
     } finally { setBusy(null); }
     await reload();
-    if (made.length) notes.unshift(`Added ${made.length} textbook${made.length === 1 ? "" : "s"} — practice exams can now use ${made.length === 1 ? "its" : "their"} problems.`);
+    if (made.length) notes.unshift(kind === "exam"
+      ? `Added ${made.length} past exam${made.length === 1 ? "" : "s"}. Practice exams can now copy ${made.length === 1 ? "its" : "their"} format (Study → Exams → “Match my course's past exams”).`
+      : `Added ${made.length} textbook${made.length === 1 ? "" : "s"} — practice exams can now use ${made.length === 1 ? "its" : "their"} problems.`);
     if (notes.length) flash(notes.join(" "));
   }
 
@@ -351,6 +355,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
               <Button onClick={() => (selecting ? stopSelecting() : setSelecting(true))} title="Select several notes"><CheckSquare size={15} /> {selecting ? "Cancel" : "Select"}</Button>
               <Button onClick={() => pdfRef.current?.click()} disabled={!!busy} title="Pick one or several PDFs"><FileUp size={15} /> Import PDFs</Button>
               <Button onClick={() => bookRef.current?.click()} disabled={!!busy} title="Add a textbook PDF (text only) or a textbook file from another device"><BookOpen size={15} /> Add textbook</Button>
+              <Button onClick={() => examRef.current?.click()} disabled={!!busy} title="Add past exams (e.g. from MIT OpenCourseWare) so practice exams copy their format"><ClipboardList size={15} /> Add past exam</Button>
               <Button variant="primary" onClick={newNote}><Plus size={15} /> New note</Button>
             </div>
           </header>
@@ -397,7 +402,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
 
           {pack && (
             <Card className="mb-5 flex flex-wrap items-center justify-between gap-3 border-primary/40 bg-primary/5 px-4 py-3">
-              <p className="min-w-0 flex-1 text-sm"><strong>Move {pack.names.length === 1 ? `“${pack.names[0]}”` : `these ${pack.names.length} textbooks`} to your iPad:</strong> save this small file ({Math.max(0.1, pack.file.size / 1e6).toFixed(1)} MB, text only) to iCloud Drive, OneDrive or Google Drive, or email it to yourself. Then on the iPad tap <b>Add textbook</b> and pick it.</p>
+              <p className="min-w-0 flex-1 text-sm"><strong>Move {pack.names.length === 1 ? `“${pack.names[0]}”` : `these ${pack.names.length} files`} to your iPad:</strong> save this small file ({Math.max(0.1, pack.file.size / 1e6).toFixed(1)} MB, text only) to iCloud Drive, OneDrive or Google Drive, or email it to yourself. Then on the iPad tap <b>Add textbook</b> (or <b>Add past exam</b>) and pick it.</p>
               <div className="flex gap-2">
                 <Button variant="primary" onClick={() => void shareOrDownload(pack.file, "Textbooks")}><Download size={14} /> Save file</Button>
                 <Button onClick={() => setPack(null)}>Done</Button>
@@ -428,7 +433,8 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
       </main>
 
       <input ref={pdfRef} type="file" accept="application/pdf" multiple hidden onChange={onImportPdf} />
-      <input ref={bookRef} type="file" accept="application/pdf,.pdf,.zip,application/zip" multiple hidden onChange={onImportTextbooks} />
+      <input ref={bookRef} type="file" accept="application/pdf,.pdf,.zip,application/zip" multiple hidden onChange={(e) => void onImportTextbooks(e)} />
+      <input ref={examRef} type="file" accept="application/pdf,.pdf,.zip,application/zip" multiple hidden onChange={(e) => void onImportTextbooks(e, "exam")} />
       <input ref={restoreRef} type="file" accept=".zip,application/zip" multiple hidden onChange={onRestore} />
       {selecting && (
         <div className="safe-b fixed inset-x-0 bottom-4 z-40 flex justify-center px-3">
@@ -496,11 +502,12 @@ function Empty({ onNew, onPdf, onRestore, hasAny }: { onNew: () => void; onPdf: 
 
 function NoteTile({ note, notebook, notebooks, onChange, flash, selecting, picked, onPick, trashed, onTrash, onRestore, onPurge }: { note: NoteMeta; notebook?: NotebookRec; notebooks: NotebookRec[]; onChange: () => void; flash: (m: string) => void; selecting: boolean; picked: boolean; onPick: () => void; trashed: boolean; onTrash: () => void; onRestore: () => void; onPurge: () => void }) {
   const [thumb, setThumb] = useState<string | null>(null);
-  const textOnly = !!note.isTextbook && !note.imageCount && !note.strokeCount;
+  const reference = !!note.isTextbook || !!note.isPastExam;
+  const textOnly = reference && !note.imageCount && !note.strokeCount;
   useEffect(() => {
     let alive = true;
     let url: string | null = null;
-    if (note.isTextbook && !note.imageCount && !note.strokeCount) return;
+    if (reference && !note.imageCount && !note.strokeCount) return;
     void ensureThumb(note.id).then((b) => {
       if (!alive || !b) return;
       url = URL.createObjectURL(b); // our own URL — safe to revoke on cleanup
@@ -524,17 +531,22 @@ function NoteTile({ note, notebook, notebooks, onChange, flash, selecting, picke
   }
   async function togglePin() { await patchNote(note.id, { isPinned: !note.isPinned }, false); onChange(); }
   async function toggleTextbook() {
-    await patchNote(note.id, { isTextbook: !note.isTextbook || undefined }, false);
+    await patchNote(note.id, { isTextbook: !note.isTextbook || undefined, isPastExam: undefined }, false);
     flash(note.isTextbook ? "Back to being one of your notes." : "Marked as a textbook — practice exams can use its problems, limited to what your notes cover. It's left out of flashcards.");
+    onChange();
+  }
+  async function togglePastExam() {
+    await patchNote(note.id, { isPastExam: !note.isPastExam || undefined, isTextbook: undefined }, false);
+    flash(note.isPastExam ? "Back to being one of your notes." : "Marked as a past exam: practice exams can copy its format (never its questions). It's left out of flashcards.");
     onChange();
   }
 
   return (
     <div className="group relative">
       <div className="relative">
-        <button onClick={() => (selecting ? onPick() : textOnly ? flash(`“${note.title}” is a text-only textbook (${note.pageCount} pages). Practice exams use its problems — there's nothing to write on.`) : go({ name: "note", id: note.id }))}
+        <button onClick={() => (selecting ? onPick() : textOnly ? flash(note.isPastExam ? `“${note.title}” is a text-only past exam. Practice exams copy its format — there's nothing to write on.` : `“${note.title}” is a text-only textbook (${note.pageCount} pages). Practice exams use its problems — there's nothing to write on.`) : go({ name: "note", id: note.id }))}
           className={`block aspect-[1240/1754] w-full overflow-hidden rounded-xl border bg-white shadow-sm transition-shadow hover:shadow-md ${picked ? "border-primary ring-4 ring-primary/40" : "border-border"}`}>
-          {textOnly ? <div className="flex h-full flex-col items-center justify-center gap-2 bg-primary/5 px-3 text-center text-xs text-primary"><BookOpen size={28} /><span>Textbook · text only</span></div> : thumb ? <img src={thumb} alt="" className="h-full w-full object-cover object-top" draggable={false} /> : <div className="flex h-full items-center justify-center text-xs text-foreground-muted">{note.strokeCount || note.imageCount ? "Loading preview…" : "Blank"}</div>}
+          {textOnly ? <div className="flex h-full flex-col items-center justify-center gap-2 bg-primary/5 px-3 text-center text-xs text-primary">{note.isPastExam ? <ClipboardList size={28} /> : <BookOpen size={28} />}<span>{note.isPastExam ? "Past exam" : "Textbook"} · text only</span></div> : thumb ? <img src={thumb} alt="" className="h-full w-full object-cover object-top" draggable={false} /> : <div className="flex h-full items-center justify-center text-xs text-foreground-muted">{note.strokeCount || note.imageCount ? "Loading preview…" : "Blank"}</div>}
         </button>
         {selecting && <span className={`pointer-events-none absolute left-2 top-2 flex h-6 w-6 items-center justify-center rounded-full border-2 text-white ${picked ? "border-primary bg-primary" : "border-white bg-black/30"}`}>{picked ? "✓" : ""}</span>}
         {trashed ? (
@@ -548,6 +560,7 @@ function NoteTile({ note, notebook, notebooks, onChange, flash, selecting, picke
               <Mini title={note.isPinned ? "Unpin" : "Pin"} onClick={togglePin} active={note.isPinned}><Pin size={13} /></Mini>
               <Mini title="Move to notebook" onClick={() => setMoving((v) => !v)} active={moving}><FolderInput size={13} /></Mini>
               <Mini title={note.isTextbook ? "Textbook — tap to make it a normal note" : "Mark as a textbook"} onClick={toggleTextbook} active={note.isTextbook}><BookOpen size={13} /></Mini>
+              <Mini title={note.isPastExam ? "Past exam — tap to make it a normal note" : "Mark as a past exam (practice exams copy its format)"} onClick={togglePastExam} active={note.isPastExam}><ClipboardList size={13} /></Mini>
               <Mini title="Tags" onClick={editTags}><Tag size={13} /></Mini>
               <Mini title="Rename" onClick={rename}><Pencil size={13} /></Mini>
             </div>
@@ -574,6 +587,7 @@ function NoteTile({ note, notebook, notebooks, onChange, flash, selecting, picke
         <p className="flex items-center gap-1.5 truncate text-xs text-foreground-muted">
           {notebook && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: notebook.color }} />}
           {note.isTextbook && <span className="font-medium text-primary">Textbook ·</span>}
+          {note.isPastExam && <span className="font-medium text-primary">Past exam ·</span>}
           {note.pageCount} page{note.pageCount === 1 ? "" : "s"} · {timeAgo(note.updatedAt)}
         </p>
         {note.tags.length > 0 && <p className="mt-0.5 truncate text-[11px] text-primary/80">{note.tags.map((t) => `#${t}`).join(" ")}</p>}

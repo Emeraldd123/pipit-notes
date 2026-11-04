@@ -4,10 +4,14 @@
 //   ANTHROPIC_API_KEY=sk-ant-... node tools/exam-eval.mjs            (5 subjects, 1 exam each)
 //   node --env-file=.env.local tools/exam-eval.mjs --runs 2 --only bio,econ --no-judge
 //
-// Options: --dry (check prompts only), --runs N (exams per subject), --only a,b, --model ID, --no-judge, --questions N.
+// Options: --dry (check prompts only), --runs N (exams per subject), --only a,b, --model ID, --no-judge, --questions N,
+//   --style exam.pdf|exam.txt[,more]: a real past exam (e.g. MIT OCW) whose FORMAT the paper should copy. The judge then also
+//   scores how well the paper matches it and whether anything was copied. Keep such files in data/ (gitignored; OCW is CC BY-NC-SA).
 // The key is read from the environment and only sent to api.anthropic.com. Reports go to data/exam-eval/ (gitignored).
 // Each exam costs roughly what one in the app does (~$0.10–0.20 on the default model); the judge adds a few cents.
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename } from "node:path";
+import { pickPastExams } from "../src/lib/past-exams.ts";
 import { buildExamPrompt, EXAM_MAX_TOKENS } from "../src/lib/exam-prompt.ts";
 import { effortFor, maxTokensFor } from "../src/lib/ai-cost.ts";
 import { parseModelJson } from "../src/lib/json-repair.ts";
@@ -25,6 +29,21 @@ const QUESTIONS = Number(arg("questions", "8"));
 const JUDGE = !process.argv.includes("--no-judge");
 const only = arg("only", "")?.split(",").filter(Boolean);
 const subjects = FIXTURES.filter((f) => !only?.length || only.includes(f.id));
+
+// past exams to match (read locally; PDFs through the same text extraction idea as the app: text layer, line by line)
+async function pdfPages(path) {
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(path)), useSystemFonts: true }).promise;
+  const pages = [];
+  for (let i = 1; i <= doc.numPages; i++) {
+    const tc = await (await doc.getPage(i)).getTextContent();
+    pages.push(tc.items.map((it) => it.str + (it.hasEOL ? "\n" : " ")).join("").replace(/[ \t]+\n/g, "\n").trim());
+  }
+  return pages;
+}
+const STYLE_FILES = arg("style", "")?.split(",").filter(Boolean) ?? [];
+const PAST = [];
+for (const f of STYLE_FILES) PAST.push({ id: f, title: basename(f).replace(/\.(pdf|txt)$/i, ""), pages: /\.pdf$/i.test(f) ? await pdfPages(f) : readFileSync(f, "utf8").split(/\f|\n-{3,} ?page break ?-{3,}\n/i) });
 
 // one dropped connection or overloaded reply shouldn't lose a whole subject: retry a couple of times
 async function call(system, content, maxTokens, effort) {
@@ -63,6 +82,13 @@ For each question, judge it as a REAL exam question would be judged by a harsh h
 Then "fix": one sentence on the single most important improvement, or "" if none. Be honest; most questions should NOT get perfect scores.
 Return STRICT JSON only: {"items":[{"id":"q1","realistic":2,"applied":1,"self_contained":2,"one_answer":2,"accurate":2,"distractors":null,"fix":"..."}]}`;
 
+const JUDGE_STYLE = `
+A PAST EXAM from the same course is also given. Judge the whole paper against it and add a top-level "paper" object:
+"paper":{"style_match":0-2,"copied":true|false,"style_fix":"..."}
+- style_match: 2 = it would pass as another exam from that course (same shape, points scheme, numbering, kinds of task, voice, length and difficulty of parts); 1 = recognisably similar but generic in places; 0 = a generic exam that ignores the past exam's format.
+- copied: true if ANY question reuses a past-exam question, scenario, dataset or wording (format reuse is fine; content reuse is not).
+- style_fix: the single most important change to match the format better, or "".`;
+
 // the judge must SEE the figures (tables, plotted functions, chart data) or it can't tell whether a question is answerable
 const figText = (f) => (f ? `\n     FIGURE: ${JSON.stringify({ ...f, src: undefined }).slice(0, 1500)}` : "");
 const REFS_FIGURE = /\b(below|as shown|shown in|the (graph|table|chart|diagram|data|figure|readings|results))\b/i;
@@ -79,8 +105,9 @@ const lines = [`# Exam-writer evaluation — ${new Date().toISOString()}`, `mode
 for (const f of subjects) {
   for (let r = 0; r < RUNS; r++) {
     const excerpts = f.pages.map((text, i) => ({ n: i + 1, noteTitle: f.title, page: i, text }));
-    const { system, content } = buildExamPrompt({ excerpts, questions: QUESTIONS, difficulty: "same", style: f.style, figures: true, cases: true });
-    if (DRY) { console.log(`${f.id}: system ${system.length} chars, user ${content.map((c) => c.text ?? "").join("").length} chars, case rules ${system.includes("CASE-STUDY") ? "on" : "OFF"}`); continue; }
+    const past = PAST.length ? pickPastExams(f.pages, PAST, 9000) : [];
+    const { system, content } = buildExamPrompt({ excerpts, questions: QUESTIONS, difficulty: "same", style: f.style, figures: true, cases: true, pastExams: past });
+    if (DRY) { console.log(`${f.id}: system ${system.length} chars, user ${content.map((c) => c.text ?? "").join("").length} chars, case rules ${system.includes("CASE-STUDY") ? "on" : "OFF"}, past exams ${past.map((e) => `${e.title} (${e.text.length} chars)`).join(", ") || "none"}`); continue; }
     const t0 = Date.now();
     let row = { subject: f.id, run: r + 1 };
     try {
@@ -102,8 +129,15 @@ for (const f of subjects) {
       };
       lines.push(`## ${f.title} — run ${r + 1}`, "", "```", ...qs.map(questionText), "```", "");
       if (JUDGE) {
-        const j = await call(JUDGE_SYSTEM, [{ type: "text", text: `Student's notes:\n${excerpts.map((e) => `[${e.n}] ${e.text}`).join("\n\n")}\n\nQuestions:\n${qs.map(questionText).join("\n\n")}` }], 4000, "low");
-        const items = parseModelJson(j.text)?.items ?? [];
+        const pastText = past.length ? `\n\nPAST EXAM the paper was asked to copy the FORMAT of (not the questions):\n${past.map((e) => `[${e.title}]\n${e.text}`).join("\n\n")}` : "";
+        const paperMeta = `Paper: ${c.exam.title} · ${c.exam.durationMin ?? "?"} min · instructions: ${c.exam.instructions ?? ""} · sections: ${c.exam.sections.map((sct) => `${sct.title} (${sct.questions.reduce((n, q) => n + q.parts.reduce((m, pt) => m + pt.marks, 0), 0)} marks)`).join("; ")}`;
+        const j = await call(JUDGE_SYSTEM + (past.length ? JUDGE_STYLE : ""), [{ type: "text", text: `Student's notes:\n${excerpts.map((e) => `[${e.n}] ${e.text}`).join("\n\n")}${pastText}\n\n${paperMeta}\n\nQuestions:\n${qs.map(questionText).join("\n\n")}` }], 4000, "low");
+        const judged = parseModelJson(j.text) ?? {};
+        const items = judged.items ?? [];
+        if (past.length && judged.paper) {
+          Object.assign(row, { styleMatch: judged.paper.style_match, copied: judged.paper.copied ? "YES" : "no" });
+          lines.push(`Format match vs ${past.map((e) => e.title).join(", ")}: ${judged.paper.style_match}/2${judged.paper.copied ? " · COPIED a past question" : ""}${judged.paper.style_fix ? ` — ${judged.paper.style_fix}` : ""}`, "");
+        }
         const avg = (k, pick = () => true) => { const v = items.filter(pick).map((x) => x[k]).filter((x) => typeof x === "number"); return v.length ? +(v.reduce((a, b) => a + b, 0) / v.length).toFixed(2) : null; };
         const isCase = (x) => cases.some((q) => q.id === x.id);
         Object.assign(row, {
@@ -118,7 +152,7 @@ for (const f of subjects) {
   }
 }
 
-const keys = ["subject", "run", "questions", "cases", "caseShare", "dropped", "stretch", "withFigure", "noFigure", "mcqs", "keyLetters", "lint", "realistic", "applied", "selfContained", "oneAnswer", "accurate", "distractors", "error"];
+const keys = ["subject", "run", "questions", "cases", "caseShare", "dropped", "stretch", "withFigure", "noFigure", "mcqs", "keyLetters", "lint", "realistic", "applied", "selfContained", "oneAnswer", "accurate", "distractors", ...(PAST.length ? ["styleMatch", "copied"] : []), "error"];
 lines.splice(3, 0, "| " + keys.join(" | ") + " |", "|" + keys.map(() => "---").join("|") + "|", ...results.map((r) => "| " + keys.map((k) => r[k] ?? "").join(" | ") + " |"), "");
 if (DRY) process.exit(0);
 mkdirSync("data/exam-eval", { recursive: true });

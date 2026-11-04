@@ -23,7 +23,7 @@ import { AiError } from "@/lib/ai";
 import { aiReady, getSettings, useSettings } from "@/lib/settings";
 import { estimateUsd, formatUsd } from "@/lib/ai-cost";
 import { corpusExcerpts } from "@/lib/search";
-import { cardFromMistake, gatherPageImages, improveAnswerChoices, makeCardsFromNotes, needsChoices, resolveCrops, scopeNoteIds, textbookPagesFor } from "@/lib/study-actions";
+import { cardFromMistake, gatherPageImages, improveAnswerChoices, makeCardsFromNotes, needsChoices, resolveCrops, scopeNoteIds, textbookPagesFor, pastExamsFor } from "@/lib/study-actions";
 import { checkSolvable } from "@/lib/coverage";
 import { markObjective } from "@/lib/exam-core";
 import { count, logError } from "@/lib/telemetry";
@@ -677,7 +677,7 @@ function ScopeSelect({ value, onChange, notes, notebooks }: { value: string; onC
     <select value={value} onChange={(e) => onChange(e.target.value)} className="mt-1 block w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground">
       <option value="all">All my notes</option>
       {notebooks.length > 0 && <optgroup label="Notebooks">{notebooks.map((n) => <option key={n.id} value={`nb:${n.id}`}>{n.name}</option>)}</optgroup>}
-      <optgroup label="Notes">{notes.map((n) => <option key={n.id} value={`note:${n.id}`}>{n.title}{n.isTextbook ? " (textbook)" : ""}</option>)}</optgroup>
+      <optgroup label="Notes">{notes.map((n) => <option key={n.id} value={`note:${n.id}`}>{n.title}{n.isTextbook ? " (textbook)" : n.isPastExam ? " (past exam)" : ""}</option>)}</optgroup>
     </select>
   );
 }
@@ -757,6 +757,9 @@ function ExamModal({ ai, notes, notebooks, onClose, onReady, setBusy, flash }: {
   const books = notes.filter((n) => n.isTextbook);
   const [useBooks, setUseBooks] = useState(books.length > 0);
   const [cases, setCases] = useState(true);
+  const pastExams = notes.filter((n) => n.isPastExam);
+  const [usePast, setUsePast] = useState(pastExams.length > 0);
+  const [pastPick, setPastPick] = useState("best");
   const [err, setErr] = useState<string | null>(null);
   const run = async () => {
     setErr(null); setBusy("Writing your exam — this takes a minute for a full paper…");
@@ -767,8 +770,10 @@ function ExamModal({ ai, notes, notebooks, onClose, onReady, setBusy, flash }: {
       const images = pictures ? await gatherPageImages(scope) : [];
       const textbook = useBooks ? await textbookPagesFor(excerpts) : [];
       if (useBooks && !textbook.length) flash("None of your textbook pages match these notes closely, so this exam uses your notes only.");
+      const past = usePast ? await pastExamsFor(excerpts, pastPick === "best" ? undefined : pastPick) : [];
+      if (past.length) count("study.exam.pastStyle");
       count("study.exam.generate");
-      let exam = await generateExam({ excerpts, questions, difficulty, style, figures, images, textbook, cases });
+      let exam = await generateExam({ excerpts, questions, difficulty, style, figures, images, textbook, cases, pastExams: past.map((e) => ({ title: e.title, text: e.text })) });
       // textbook and case-study questions must rest on something the notes teach (coverage.ts)
       const c = checkSolvable(exam, excerpts, textbook);
       if (!c.exam.sections.length) { setErr("Every question needed material your notes don't cover. Try again, or untick the textbook / case-study options."); return; }
@@ -796,6 +801,19 @@ function ExamModal({ ai, notes, notebooks, onClose, onReady, setBusy, flash }: {
             <input list="exam-styles" value={style} onChange={(e) => setStyle(e.target.value)} placeholder="e.g. AP Physics 1, university chemistry midterm" className={sel} />
             <datalist id="exam-styles">{STYLES.filter(Boolean).map((s) => <option key={s} value={s} />)}</datalist>
           </Field>
+          {pastExams.length > 0 ? (
+            <div className="space-y-1.5">
+              <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={usePast} onChange={(e) => setUsePast(e.target.checked)} /><span><b>Match my course&apos;s past exams</b> — same format, points, numbering and kinds of problem as {pastExams.length === 1 ? `“${pastExams[0].title}”` : "your past exams"}, with new questions on your notes</span></label>
+              {usePast && pastExams.length > 1 && (
+                <select value={pastPick} onChange={(e) => setPastPick(e.target.value)} className={`${sel} ml-6 w-auto`}>
+                  <option value="best">The closest past exam to these notes</option>
+                  {pastExams.map((n) => <option key={n.id} value={n.id}>{n.title}</option>)}
+                </select>
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-foreground-muted">Tip: add a real past exam for this course (e.g. from MIT OpenCourseWare) with <b>Add past exam</b> in the Library, and practice exams will copy its format.</p>
+          )}
           <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={figures} onChange={(e) => setFigures(e.target.checked)} /><span><b>Lots of figures</b> — graphs, data tables, charts and diagrams to read and calculate from</span></label>
           <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={pictures} onChange={(e) => setPictures(e.target.checked)} /><span><b>Use pictures from my notes</b> — slides and diagrams from your PDFs can appear in questions <span className="text-foreground-muted">(sends a few page images; costs more)</span></span></label>
           <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={cases} onChange={(e) => setCases(e.target.checked)} /><span><b>Case studies &amp; real research</b> — about a third of the questions put what you learned into real experiments, applications and data your notes don&apos;t mention, like a real exam would. Everything new is explained in the question.</span></label>

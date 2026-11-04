@@ -15,6 +15,7 @@ import { count } from "./telemetry";
 import { hashString } from "./ai-cache";
 import { getMeta, setMeta } from "./db";
 import { pickTextbookPages, textbookChunks } from "./coverage";
+import { pickPastExams, type PastExam, type StyleExample } from "./past-exams";
 
 const CARDS_SRC = "cards:src";
 
@@ -22,8 +23,22 @@ const CARDS_SRC = "cards:src";
 export async function scopeNoteIds(scope: string): Promise<string[] | null> {
   if (scope.startsWith("note:")) return [scope.slice(5)];
   const notes = await listNotes();
-  if (scope === "all") return notes.some((n) => n.isTextbook) ? notes.filter((n) => !n.isTextbook).map((n) => n.id) : null;
-  return notes.filter((n) => n.notebookId === scope.slice(3) && !n.isTextbook).map((n) => n.id);
+  // textbooks and past exams are reference material: never studied as if they were your notes
+  const ref = (n: { isTextbook?: boolean; isPastExam?: boolean }) => n.isTextbook || n.isPastExam;
+  if (scope === "all") return notes.some(ref) ? notes.filter((n) => !ref(n)).map((n) => n.id) : null;
+  return notes.filter((n) => n.notebookId === scope.slice(3) && !ref(n)).map((n) => n.id);
+}
+
+/** Past exams to show the exam writer as format examples: the closest to these notes, or the one you picked. */
+export async function pastExamsFor(notes: Excerpt[], chosen?: string, maxChars = 9000): Promise<StyleExample[]> {
+  const metas = (await listNotes()).filter((n) => n.isPastExam && !n.deletedAt);
+  if (!metas.length) return [];
+  const texts = (await getPageTexts()).filter((t) => metas.some((m) => m.id === t.noteId));
+  const exams: PastExam[] = metas.map((m) => ({
+    id: m.id, title: m.title,
+    pages: texts.filter((t) => t.noteId === m.id).sort((a, b) => a.page - b.page).map((t) => t.text),
+  }));
+  return pickPastExams(notes.map((e) => e.text), exams, maxChars, chosen);
 }
 
 /**

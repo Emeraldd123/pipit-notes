@@ -26,6 +26,8 @@ export type NoteMeta = {
   openedAt?: number;
   /** a textbook / reference PDF: a question source for exams, not the student's own notes */
   isTextbook?: boolean;
+  /** a past exam from the course (e.g. MIT OpenCourseWare): a FORMAT example for practice exams, not study material */
+  isPastExam?: boolean;
   /** set when the note was moved to "Recently deleted" (removed for good after 30 days) */
   deletedAt?: number;
 };

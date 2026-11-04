@@ -22,7 +22,18 @@ export type ExamSpec = {
   images?: { label: string; dataUrl: string }[]; // page images the model may crop figures from
   textbook?: Excerpt[];              // reference pages (numbered T1, T2…) the writer may adapt problems from
   cases?: boolean;                   // include case-study / applied-research questions (CASE_RULES)
+  pastExams?: { title: string; text: string }[]; // real past exams from the course (e.g. MIT OCW), labelled E1, E2…: FORMAT only (STYLE_RULES)
 };
+
+// Matching a real course's exams: copy how the paper is built, never what it asks.
+export const STYLE_RULES = `PAST EXAMS (labelled [E1], [E2]…) are real exams from this course. They are a FORMAT reference only: write a NEW paper on the student's notes that would look at home next to them.
+Match, as closely as the notes allow:
+- the overall shape: how many problems, sections or none, the total points and how points are split between problems and parts, the time allowed, and the cover instructions (what is allowed, how to show work);
+- numbering and layout: "Problem 1", "1.", "(a)", "(i)"…, and whether parts build on each other or stand alone;
+- the KIND of task: derivations, "show that…", estimations, proofs, numerical calculations with given constants, sketches, short conceptual explanations, multiple choice — in roughly the same proportions;
+- the voice and wording: how setups are described, how much is given, whether constants and formulas are provided, how answers are requested ("in terms of…", "to two significant figures", "justify your answer");
+- the difficulty and length of a typical part.
+Never copy a past exam's questions, scenarios, data, figures or wording: every question must be new, and must test what the STUDENT'S NOTES teach (the past exam may cover topics the notes don't; skip those). If the past exam uses points, give each part's marks on the same scale. If it includes solutions, write your model answers and marking schemes in the same manner. Ignore page headers, footers and copyright lines. Where these rules conflict with the multiple-choice or section guidance above, follow the past exam's format instead (e.g. no multiple-choice section if the past exams have none).`;
 
 // How real examiners test transfer: a principle from the course, applied to a situation the student hasn't seen.
 // Subject-neutral on purpose: the model picks cases that fit the notes' subject.
@@ -78,17 +89,18 @@ export type PromptBlock = { type: "text"; text: string } | { type: "image"; data
 /** The exact system prompt and user content the app sends to write an exam (shared with tools/exam-eval.mjs). */
 export function buildExamPrompt(spec: ExamSpec): { system: string; content: PromptBlock[] } {
   const ctx = spec.excerpts.map((e) => `[${e.n}] ${e.noteTitle} — page ${e.page + 1}\n${e.text}`).join("\n\n");
+  const past = spec.pastExams?.length ? `\n\nPast exams from this course (FORMAT reference only, see PAST EXAMS rules):\n\n${spec.pastExams.map((e, i) => `[E${i + 1}] ${e.title}\n${e.text}`).join("\n\n")}` : "";
   const book = spec.textbook?.length ? `\n\nTextbook pages (reference only):\n\n${spec.textbook.map((e, i) => `[T${i + 1}] ${e.noteTitle} — page ${e.page + 1}\n${e.text}`).join("\n\n")}` : "";
   const content: PromptBlock[] = [];
   for (const im of spec.images ?? []) content.push({ type: "text", text: `Image ${im.label}:` }, { type: "image", dataUrl: im.dataUrl });
   content.push({ type: "text", text:
-    `Student's notes:\n\n${ctx}${book}\n\nWrite an exam of about ${spec.questions} numbered questions in the style of: ${spec.style || "a typical course exam for this material"}. ` +
+    `Student's notes:\n\n${ctx}${book}${past}\n\nWrite an exam of about ${spec.questions} numbered questions${past ? " (or fewer, longer multi-part problems if that is how the past exams are built)" : ""} in the style of: ${past ? "the past exams [E1]" + (spec.pastExams!.length > 1 ? "–[E" + spec.pastExams!.length + "]" : "") + (spec.style ? ` (${spec.style})` : "") : spec.style || "a typical course exam for this material"}. ` +
     `Difficulty: ${spec.difficulty === "harder" ? "harder than the notes' own examples" : spec.difficulty === "easier" ? "gentler than a real exam — good for a first attempt" : "like a real exam on this material"}. ` +
     (spec.figures ? "Lean heavily on figures, data and applied scenarios — at least half the questions should need one. " : "Include figures where they genuinely help. ") +
     (spec.images?.length ? "You may crop figures from the attached page images where one is clearly relevant. " : "") +
     (spec.cases ? `Make exactly ${Math.max(1, Math.round(spec.questions / 3))} of the ${spec.questions} questions CASE-STUDY questions (including most extended ones and at least one multiple choice), following the CASE-STUDY rules and using cases that fit this subject; the rest test the notes directly. ` : "") +
     (book ? "Take or adapt roughly a third of the questions from the textbook pages, following the TEXTBOOK PAGES rules. " : ""),
   });
-  const system = [EXAM_SYSTEM, spec.cases ? CASE_RULES : "", book ? TEXTBOOK_RULES : ""].filter(Boolean).join("\n");
+  const system = [EXAM_SYSTEM, spec.cases ? CASE_RULES : "", book ? TEXTBOOK_RULES : "", past ? STYLE_RULES : ""].filter(Boolean).join("\n");
   return { system, content };
 }
