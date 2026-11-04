@@ -10,6 +10,7 @@ const NOTES: { title: string; body: string }[] = [
   { title: "Sizes stick per tool", body: "Pens, pencils, markers and highlighters each remember the size you last used." },
   { title: "Math check", body: "Turn it on under the wand. Each line of maths or chemistry you finish with = or an arrow is checked, and mistakes are boxed in red. Tap the red label for the fix. It uses the cheap model, a fraction of a cent per line." },
   { title: "Exports you can find", body: "PNG, SVG, LaTeX and PDF now open the share sheet, so pick Save to Files (or AirDrop, Mail)." },
+  { title: "LaTeX that looks typeset", body: "Save as LaTeX now keeps headings, lines up working at the = signs, and makes real tables, chemical equations and boxed definitions. Graphs, charts, flowcharts and simple circuits are redrawn neatly. Other drawings come in as clean pictures without the ruled lines. You check each diagram first. It saves a .zip: in Overleaf use New Project → Upload Project." },
   { title: "Tools moved into two menus", body: "Shapes, text, graph, maths, Python, images, templates, the ruler and the protractor are under the ＋ Insert button in the tool rail. Snap-to-shape and scribble-to-erase are under the wand." },
   { title: "Left-handed?", body: "Put the tool rail on the right in Settings → Appearance & handedness." },
   { title: "Deleting is undoable", body: "Deleted notes wait in “Recently deleted” for 30 days, and every delete has an Undo." },

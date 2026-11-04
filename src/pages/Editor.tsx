@@ -19,6 +19,7 @@ import { shareOrDownload, useShareFlow } from "@/components/backup-flow";
 import { PagesPanel } from "@/components/pages-panel";
 import { ExplainPanel, HighlightLayer, MathMarks, ReviewBar, ReviewSetup, StickyPanel, type ExplainState, type Highlight, type ReviewState } from "@/components/understanding";
 import { useMathCheck } from "@/components/math-check";
+import { LatexExport } from "@/components/latex-export";
 import { pad, type Box } from "@/lib/ink-groups";
 import { Button, IconButton, Modal, Toast } from "@/components/ui";
 import type { BlockKind, BlockRec, NoteMeta, NotePaper } from "@/types";
@@ -517,25 +518,8 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
     save: (f) => shareOrDownload(f, title), title: `Page ${currentPage + 1} as SVG`, hint: `${exportHint} SVG keeps your ink as sharp vector lines.`,
     doneShared: "Saved.", doneDownloaded: "SVG saved to your Downloads folder.", failed: "Couldn't make the SVG",
   }, (m) => flash(m));
-  const shareTex = useShareFlow({
-    build: async () => {
-      if (!ai) throw new Error("LaTeX export reads your handwriting with AI. Turn AI on in Settings first");
-      count("export.latex");
-      await flush();
-      await indexNote(noteId, (pr) => setBusy(`Reading page ${pr.page + 1}/${pr.total}…`));
-      setBusy(null);
-      const texts = await getPageTexts(noteId);
-      const pages = Array.from({ length: pageCount }, (_, i) => {
-        const ink = texts.find((t) => t.page === i && t.source === "ink")?.text;
-        const pdf = texts.find((t) => t.page === i && t.source === "pdf")?.text;
-        return { page: i, text: ink || pdf || "" };
-      });
-      return new File([buildLatexDocument(title, pages)], `${name}.tex`, { type: "application/x-tex" });
-    },
-    save: (f) => shareOrDownload(f, title), title: "LaTeX ready", hint: `${exportHint} Open it in Overleaf, or compile with pdflatex.`,
-    doneShared: "Saved.", doneDownloaded: ".tex saved to your Downloads folder.", failed: "LaTeX export failed",
-  }, (m) => flash(m));
-  const exportBuilding = sharePdf.building || sharePng.building || shareSvg.building || shareTex.building;
+  const [latexOpen, setLatexOpen] = useState(false);
+  const exportBuilding = sharePdf.building || sharePng.building || shareSvg.building;
   useEffect(() => { if (exportBuilding) setBusy((b) => b ?? "Preparing your file…"); else setBusy((b) => (b === "Preparing your file…" || b === "Building PDF…" ? null : b)); }, [exportBuilding]);
   function doPrint() { setMenu(false); count("export.print"); printImages(canvasRef.current?.exportPages() ?? []); }
   async function openHistory() { setMenu(false); setVersions(await listVersions(noteId)); }
@@ -984,7 +968,7 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
                 <MenuItem icon={<Share2 size={15} />} label="Save or share as PDF (whole note)…" onClick={() => { setMenu(false); sharePdf.start(); }} />
                 <MenuItem icon={<Download size={15} />} label="Save this page as an image (PNG)…" onClick={() => { setMenu(false); sharePng.start(); }} />
                 <MenuItem icon={<Shapes size={15} />} label="Save this page as SVG…" onClick={() => { setMenu(false); shareSvg.start(); }} />
-                <MenuItem icon={<FileCode2 size={15} />} label="Save as LaTeX (reads handwriting)…" onClick={() => { setMenu(false); shareTex.start(); }} />
+                <MenuItem icon={<FileCode2 size={15} />} label="Save as LaTeX (Overleaf project)…" onClick={() => { setMenu(false); if (!ai) flash("LaTeX export reads your handwriting with AI. Turn AI on in Settings first."); else setLatexOpen(true); }} />
                 <MenuItem icon={<Printer size={15} />} label="Print" onClick={doPrint} />
                 <div className="my-1 h-px bg-border" />
                 <MenuItem icon={<Trash2 size={15} />} label="Move note to Recently deleted" danger onClick={onDeleteNote} />
@@ -1239,7 +1223,14 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
       {sharePdf.modal}
       {sharePng.modal}
       {shareSvg.modal}
-      {shareTex.modal}
+      {latexOpen && (
+        <LatexExport title={title} pageCount={pageCount} currentPage={currentPage} blocks={blocks}
+          inkPages={pageFingerprints({ strokes: canvasRef.current?.getStrokes() ?? [], images: [] }, pageCount).map((f) => f.strokes > 0)}
+          printPages={Array.from({ length: pageCount }, (_, p) => note.images.some((im) => im.width >= PAGE_W * 0.5 && Math.floor((im.y + im.height / 2) / (PAGE_H + PAGE_GAP)) === p))}
+          pageImage={(p) => canvasRef.current?.previewPage(p, 1110) ?? null}
+          regionImage={(r) => canvasRef.current?.regionImage(r, { paper: false }) ?? null}
+          onClose={() => setLatexOpen(false)} onDone={flash} />
+      )}
       {reviewSetup && <ReviewSetup pageCount={pageCount} currentPage={currentPage} inkPages={inkPages()} costHint={(n) => formatUsd(estimateUsd("review", n, getSettings()))} thumb={(p) => { try { return canvasRef.current?.previewPage(p, 180) ?? null; } catch { return null; } }} onStart={runReview} onClose={() => setReviewSetup(false)} />}
       {chem && <ChemModal items={chem} onClose={() => setChem(null)} />}
       {check && <CheckModal check={check} onClose={() => setCheck(null)} />}

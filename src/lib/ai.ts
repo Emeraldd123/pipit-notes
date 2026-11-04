@@ -9,6 +9,7 @@ import { recordUsage, spentThisMonth } from "./ai-ledger";
 import { cachedAi, hashString } from "./ai-cache";
 import { normalizeIssues, type Issue } from "./review-core.ts";
 import { MATHCHECK_SYSTEM, MATHCHECK_USER } from "./mathcheck-core.ts";
+import { latexSystem, normalizeLatexPage, type LatexPage } from "./latex-doc.ts";
 
 export class AiError extends Error {}
 
@@ -284,6 +285,17 @@ export async function readGraphable(region: string): Promise<string[]> {
     user: [imageBlock(region), text("Which equations should be graphed?")],
   });
   return raw.replace(/```\w*/g, "").split("\n").map((l) => l.replace(/^[\s\-*\d.)]+(?=[a-zA-Z(])/, "").trim()).filter(Boolean).slice(0, 6);
+}
+
+/**
+ * LaTeX export: read one page into structured elements (see latex-doc.ts), on the main model at full page size.
+ * An unchanged page is never read (or paid for) twice.
+ */
+export async function readPageForLatex(pageImage: string, page: number, inkOnly: boolean): Promise<LatexPage> {
+  const { value } = await cachedAi(inkOnly ? "latex.ink" : "latex", pageImage, async () => extractJson<unknown>(await claude({
+    feature: "latex", maxTokens: 6000, system: latexSystem(inkOnly), user: [imageBlock(pageImage), text("Convert this page.")],
+  })));
+  return normalizeLatexPage(value, page);
 }
 
 /** Math check as you write: the cheap model reads the line just finished (see mathcheck-core.ts). */

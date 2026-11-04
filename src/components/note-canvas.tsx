@@ -87,8 +87,9 @@ export type NoteCanvasHandle = {
   deletePageContent: (pageIdx: number) => void;
   /** Pan (and zoom out if needed) so a document rect is in view, centred in the upper part of the canvas. */
   focusRect: (r: { x: number; y: number; w: number; h: number }, opts?: { bottomInset?: number }) => void;
-  /** PNG of a document rectangle (paper + PDF page + ink), for explaining or checking it. */
-  regionImage: (r: Box) => string | null;
+  /** PNG of a document rectangle (paper + PDF page + ink), for explaining or checking it. `paper: false` leaves out
+   * the ruled/grid lines (ink and imported pages on plain white), for figures in an export. */
+  regionImage: (r: Box, opts?: { paper?: boolean }) => string | null;
 };
 
 type Selection = { kind: "strokes"; idx: number[] } | { kind: "image"; i: number } | null;
@@ -549,12 +550,13 @@ export function NoteCanvas({
   // coordinates. Shared by the on-screen camera render (with a cull window) and
   // the flattened PNG export (cull = null). Does NOT paint selection/lasso/UI.
   const paintContent = useCallback(
-    (ctx: CanvasRenderingContext2D, cull: { top: number; bot: number } | null) => {
+    (ctx: CanvasRenderingContext2D, cull: { top: number; bot: number } | null, paper = true) => {
       for (let i = 0; i < pageCountRef.current; i++) {
         const top = pageTop(i);
         if (cull && (top + PAGE_H < cull.top || top > cull.bot)) continue;
         ctx.fillStyle = "#ffffff";
         ctx.fillRect(0, top, PAGE_W, PAGE_H);
+        if (!paper) continue;
         ctx.strokeStyle = "rgba(0,0,0,0.08)";
         ctx.lineWidth = 1.5;
         ctx.strokeRect(0, top, PAGE_W, PAGE_H);
@@ -1025,7 +1027,7 @@ export function NoteCanvas({
         paintContent(octx, null);
         return out.toDataURL("image/png");
       },
-      regionImage: (r) => snapshotRegion(rectPoly(r))?.dataUrl ?? null,
+      regionImage: (r, opts) => snapshotRegion(rectPoly(r), opts?.paper ?? true)?.dataUrl ?? null,
       focusRect: (r, opts) => {
         const el = viewportRef.current;
         const v = viewRef.current;
@@ -1122,7 +1124,7 @@ export function NoteCanvas({
   // Snapshot the lassoed region (paper + background PDF page + ink) to a PNG,
   // clipped to the polygon. Used by the `snip` tool to lift a piece of a page
   // (e.g. a homework question) onto a fresh page.
-  function snapshotRegion(poly: Point[]): { dataUrl: string; w: number; h: number; bbox: { x: number; y: number; w: number; h: number } } | null {
+  function snapshotRegion(poly: Point[], paper = true): { dataUrl: string; w: number; h: number; bbox: { x: number; y: number; w: number; h: number } } | null {
     let minX = Infinity,
       minY = Infinity,
       maxX = -Infinity,
@@ -1149,7 +1151,7 @@ export function NoteCanvas({
     for (const p of poly) octx.lineTo(p.x, p.y);
     octx.closePath();
     octx.clip();
-    paintContent(octx, { top: minY - 4, bot: maxY + 4 });
+    paintContent(octx, { top: minY - 4, bot: maxY + 4 }, paper);
     return { dataUrl: out.toDataURL("image/png"), w, h, bbox: { x: minX, y: minY, w, h } };
   }
 
