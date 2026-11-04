@@ -11,7 +11,9 @@
 //
 // Budget: every call is checked against its WORST case before it is sent (tools/exam-lab.mjs), and the loop keeps
 // enough in reserve for the held-out check, so the total can't pass the cap. Output: data/exam-tune/<run>/ (gitignored).
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { execSync } from "node:child_process";
+import { writeTuned } from "./exam-tuned-file.mjs";
 import { exec } from "node:child_process";
 import { buildExamPrompt, EXAM_MAX_TOKENS } from "../src/lib/exam-prompt.ts";
 import { effortFor } from "../src/lib/ai-cost.ts";
@@ -78,7 +80,24 @@ async function round(fixtures, rules, history) {
 const IMPROVER = `You improve the HOUSE RULES appended to an exam-writing prompt (the BASE PROMPT is shown). The goal is papers that a strict head of department rates as realistic, correct, self-contained, with strong multiple-choice distractors and the real past exam's format, AND that are VARIED: each new paper for the same notes must use different scenarios, data, cases and question types from earlier papers, spread across all of the notes, and never fall back on a few favourite questions.
 Rules must be GENERAL (they must work for any subject: biology, history, languages, maths…), short imperative lines starting with "- ", at most 12 rules and 1500 characters in total. Don't repeat or contradict the base prompt; fix what the evidence shows is going wrong. Never name a specific topic, case, substance, experiment, formula or example.
 Human reviewer notes, when present, outrank the automatic judge.
-Return STRICT JSON only: {"rules":"- …\\n- …","changes":"what you changed and why, in two sentences"}`;
+Reply in exactly this format, nothing else:
+<rules>
+- first rule
+- second rule
+</rules>
+<changes>what you changed and why, in two sentences</changes>`;
+
+/** The rewriter's reply -> rule lines and a summary. Tagged blocks (no JSON to break); JSON or a bare list also work. */
+function parseRewrite(text) {
+  const tag = (t) => new RegExp(`<${t}>([\\s\\S]*?)(?:</${t}>|$)`, "i").exec(text)?.[1]?.trim();
+  let rules = tag("rules"), changes = tag("changes") ?? "";
+  if (rules == null) {
+    try { const j = parseModelJson(text); rules = Array.isArray(j.rules) ? j.rules.map((r) => `- ${String(r).replace(/^\s*-\s*/, "")}`).join("\n") : String(j.rules ?? ""); changes = String(j.changes ?? ""); }
+    catch { rules = text.split("\n").filter((l) => /^\s*[-•*]\s+/.test(l)).join("\n"); }
+  }
+  const lines = String(rules).split("\n").map((l) => l.trim()).filter((l) => l && !/^<\/?\w+>$/.test(l)).map((l) => (/^[-•*]\s/.test(l) ? `- ${l.replace(/^[-•*]\s+/, "")}` : `- ${l}`));
+  return { lines, changes };
+}
 
 function evidence(r, rules, best, lastTried) {
   const ok = r.papers.filter((p) => !p.error);
@@ -112,12 +131,13 @@ function evidence(r, rules, best, lastTried) {
 }
 
 async function improve(r, rules, best, lastTried) {
-  for (let tries = 0; tries < 2; tries++) {
-    const j = await api.call(IMPROVER, [{ type: "text", text: evidence(r, rules, best, lastTried) + (tries ? "\n\nYour previous answer named specific topics from the notes. Rewrite the rules so they are general." : "") }], 2500, "medium");
-    const out = parseModelJson(j.text) ?? {};
-    const raw = Array.isArray(out.rules) ? out.rules.map((r) => `- ${String(r).replace(/^\s*-\s*/, "")}`).join("\n") : String(out.rules ?? "");
-    const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
-    if (!lines.length) { console.log(`  the rewriter's reply had no rules (${j.text.slice(0, 80).replace(/\s+/g, " ")}…)`); continue; }
+  let note = "";
+  for (let tries = 0; tries < 3; tries++) {
+    const j = await api.call(IMPROVER, [{ type: "text", text: evidence(r, rules, best, lastTried) + note }], 2500, "medium");
+    const { lines, changes } = parseRewrite(j.text);
+    const out = { changes };
+    if (!lines.length) { console.log(`  the rewriter's reply had no rules; asking again (${j.text.slice(0, 80).replace(/\s+/g, " ")}…)`); note = "\n\nYour last reply had no rules in the <rules> block. Use the exact reply format."; continue; }
+    note = "\n\nYour previous answer named specific topics from the notes. Rewrite the rules so they are general.";
     // a rule that names two or more topic words from the sample notes is about those topics, not exams in general
     const topical = lines.filter((l) => leaks(l, distinct, base).length >= 2);
     if (topical.length >= 3) { console.log(`  rejected: ${topical.length} rules name specific topics (${topical.map((l) => leaks(l, distinct, base).slice(0, 2).join("+")).join(", ")})`); continue; }
@@ -129,7 +149,16 @@ async function improve(r, rules, best, lastTried) {
 }
 
 // --- resuming an earlier run: its rounds (papers, judge reviews, scores) are reused, not paid for again -------------
-const resumeDir = arg("resume", "")?.replace(/[\\/]+$/, "").replace(/[\\/]review\.html$/, "");
+// --auto: no review step; good rules go straight into the app and it is rebuilt. --resume latest: the newest real run.
+const AUTO = process.argv.includes("--auto");
+function latestRun() {
+  try {
+    return readdirSync("data/exam-tune").filter((d) => !d.endsWith("-mock")).sort().reverse().map((d) => `data/exam-tune/${d}`)
+      .find((d) => { try { readFileSync(`${d}/run.json`); return true; } catch { return false; } }) ?? "";
+  } catch { return ""; }
+}
+const resumeArg = arg("resume", "") === "latest" ? latestRun() : arg("resume", "");
+const resumeDir = resumeArg?.replace(/[\\/]+$/, "").replace(/[\\/]review\.html$/, "");
 const resumed = resumeDir ? JSON.parse(readFileSync(`${resumeDir}/run.json`, "utf8")) : null;
 function revive(p) {
   if (p.error) return p;
@@ -257,5 +286,14 @@ writeFileSync(`${OUT}/run.json`, JSON.stringify(run, null, 1));
 buildReview(OUT);
 console.log(`\nDone: spent $${api.ledger.spent.toFixed(2)} of $${BUDGET} (${api.ledger.calls} calls). Stopped: ${stopReason}.`);
 console.log(`Best: round ${best.round}, score ${best.score.toFixed(3)} (round 1: ${(rounds[0]?.score ?? 0).toFixed(3)}). Recommendation: ${run.recommendation}.`);
-console.log(`Review it: ${OUT}/review.html${process.argv.includes("--no-open") ? "" : "  (opening it now)"}`);
-if (!process.argv.includes("--no-open")) exec(process.platform === "win32" ? `start "" "${OUT}/review.html"` : `open "${OUT}/review.html"`);
+if (AUTO) {
+  // hands-off: only rules that beat the starting ones on the tuned AND the held-out units go into the app
+  if (run.recommendation === "apply" && !MOCK) {
+    writeTuned(best.rules, { date: new Date().toISOString().slice(0, 10), trainScore: +best.score.toFixed(3), holdoutBefore: +holdout.before.toFixed(3), holdoutAfter: +holdout.after.toFixed(3), spentUsd: +(api.ledger.spent + (run.previousSpent ?? 0)).toFixed(2) });
+    console.log(`\nAuto: the new rules beat the old ones (held-out ${holdout.before.toFixed(3)} → ${holdout.after.toFixed(3)}), so they're now in src/lib/exam-tuned.ts. Rebuilding the app…`);
+    try { execSync("npm run check", { stdio: "inherit" }); console.log("\nDone. Drag the dist folder onto bensnotes to put the new rules on your iPad."); }
+    catch { console.log("\nThe rebuild failed; the rules are saved, run npm run check to see why."); }
+  } else console.log(`\nAuto: ${MOCK ? "mock run, nothing applied" : "the new rules didn't clearly beat the old ones, so the app keeps its current rules"}. Details: ${OUT}/review.html`);
+}
+console.log(`Review it: ${OUT}/review.html${process.argv.includes("--no-open") || AUTO ? "" : "  (opening it now)"}`);
+if (!process.argv.includes("--no-open") && !AUTO) exec(process.platform === "win32" ? `start "" "${OUT}/review.html"` : `open "${OUT}/review.html"`);

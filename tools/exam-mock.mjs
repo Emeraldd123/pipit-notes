@@ -26,7 +26,7 @@ export async function mockFetch(_url, init) {
     const ids = [...user.matchAll(/^(q\d+)/gm)].map((m) => m[1]);
     const s = () => pick([1, 2, 2, 2]);
     text = JSON.stringify({ items: ids.map((id) => ({ id, realistic: s(), applied: null, self_contained: s(), one_answer: s(), accurate: s(), distractors: s(), fix: pick(["", "State the units.", "The data in the stem doesn't match the answer."]) })), ...(sys.includes("PAST EXAM") ? { paper: { style_match: s(), copied: false, style_fix: "Use the course's point values." } } : {}) });
-  } else text = JSON.stringify({ rules: `- Mock rule ${++n}: vary the kind of task across the paper.\n- Give every value the answer needs in the stem.`, changes: "Mock: varied the tasks." });
+  } else text = `Here are the new rules.\n<rules>\n- Mock rule ${++n}: vary the kind of task across the paper.\n- Give every value the answer needs in the stem.\n</rules>\n<changes>Mock (tagged reply): varied the tasks.</changes>`;
   await new Promise((r) => setTimeout(r, 20));
   return { ok: true, status: 200, json: async () => ({ content: [{ type: "text", text }], stop_reason: "end_turn", usage: { input_tokens: Math.round((sys.length + user.length) / 3.6), output_tokens: Math.round(text.length / 3.5) + 2500 } }) };
 }

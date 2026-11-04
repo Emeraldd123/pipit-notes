@@ -2,19 +2,14 @@
 // rewrites src/lib/exam-tuned.ts, which every exam prompt includes. No API key, no cost.
 //   npm run tune:apply -- path/to/review-<run>.json
 //   npm run tune:apply -- --clear        (back to no tuned rules)
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
+import { TUNED_FILE, writeTuned } from "./exam-tuned-file.mjs";
 import { buildExamPrompt } from "../src/lib/exam-prompt.ts";
 import { FIXTURES, HOLDOUT } from "./exam-fixtures.mjs";
 import { distinctiveWords, generalTexts, leaks } from "./exam-variety.mjs";
 
-const FILE = "src/lib/exam-tuned.ts";
-const write = (rules, meta) => writeFileSync(FILE, `// Extra exam-writing rules found by the tuning loop (tools/exam-tune.mjs) and added to every exam prompt.
-// Written by tools/exam-tune-apply.mjs from a review you approved. Empty means "no tuned rules yet".
-export const TUNED_RULES = ${JSON.stringify(rules)};
-
-/** What the tuning run measured (for the record; not sent to the model). */
-export const TUNED_META: { date: string; trainScore: number; holdoutBefore: number; holdoutAfter: number; spentUsd: number } | null = ${meta ? JSON.stringify(meta) : "null"};
-`);
+const FILE = TUNED_FILE;
+const write = writeTuned;
 
 if (process.argv.includes("--clear")) { write("", null); console.log(`Cleared the tuned rules in ${FILE}.`); process.exit(0); }
 const path = process.argv.slice(2).find((a) => !a.startsWith("--"));
