@@ -84,12 +84,19 @@ export function paperScore({ avg, paper }, stats, variety, target = 8) {
 }
 
 /** Words of the sample notes that only one subject uses: tuned rules mentioning several of them are topic-specific. */
-export function distinctiveWords(fixtures) {
+// `general` (optional): texts from several subjects (e.g. the built-in exams, one string per subject). A word that shows
+// up in two or more of them is ordinary vocabulary ("standard", "larger", "conditions"), not a topic.
+export function distinctiveWords(fixtures, general = []) {
   const per = fixtures.map((f) => new Set(tokens(f.pages.join(" ")).filter((w) => w.length > 4)));
+  const gen = general.map((t) => new Set(tokens(t)));
+  const common = (w) => gen.filter((s) => s.has(w)).length >= 2;
   const out = new Set();
-  per.forEach((s, i) => { for (const w of s) if (per.every((o, j) => j === i || !o.has(w))) out.add(w); });
+  per.forEach((s, i) => { for (const w of s) if (per.every((o, j) => j === i || !o.has(w)) && !common(w)) out.add(w); });
   return out;
 }
+
+/** The built-in exams pooled per subject: the `general` vocabulary for distinctiveWords. */
+export const generalTexts = (exams) => [...new Set(exams.map((e) => e.subject))].map((s) => exams.filter((e) => e.subject === s).map((e) => [...e.pages, ...(e.solutionPages ?? [])].join("\n")).join("\n"));
 export function leaks(rules, distinct, base) {
   const baseWords = new Set(tokens(base));
   return [...new Set(tokens(rules))].filter((w) => distinct.has(w) && !baseWords.has(w));

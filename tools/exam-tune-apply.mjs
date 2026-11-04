@@ -5,7 +5,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { buildExamPrompt } from "../src/lib/exam-prompt.ts";
 import { FIXTURES, HOLDOUT } from "./exam-fixtures.mjs";
-import { distinctiveWords, leaks } from "./exam-variety.mjs";
+import { distinctiveWords, generalTexts, leaks } from "./exam-variety.mjs";
 
 const FILE = "src/lib/exam-tuned.ts";
 const write = (rules, meta) => writeFileSync(FILE, `// Extra exam-writing rules found by the tuning loop (tools/exam-tune.mjs) and added to every exam prompt.
@@ -27,8 +27,10 @@ if (review.decision !== "apply" && !process.argv.includes("--force")) {
 const rules = String(review.rules ?? "").trim();
 if (rules.length > 2500) { console.error(`The rules are ${rules.length} characters; keep them under 2500 so they don't crowd the prompt.`); process.exit(1); }
 const base = buildExamPrompt({ excerpts: [], questions: 8, difficulty: "same", style: "", figures: true, cases: true, extraRules: "" }).system;
-const leaked = leaks(rules, distinctiveWords([...FIXTURES, ...HOLDOUT]), base);
-if (leaked.length >= 3) console.warn(`Warning: the rules mention topic words from the sample notes (${leaked.join(", ")}). They should be general for any subject.`);
+const exams = JSON.parse(readFileSync("public/ocw/exams.json", "utf8")).exams;
+const distinct = distinctiveWords([...FIXTURES, ...HOLDOUT], generalTexts(exams));
+const leaked = rules.split("\n").filter((l) => leaks(l, distinct, base).length >= 2);
+if (leaked.length) console.warn(`Warning: ${leaked.length} rule(s) name specific topics from the sample notes:\n${leaked.join("\n")}\nRules should be general for any subject.`);
 const s = review.scores ?? {};
 write(rules, { date: review.savedAt?.slice(0, 10) ?? new Date().toISOString().slice(0, 10), trainScore: +(s.best ?? 0).toFixed(3), holdoutBefore: +(s.holdoutBefore ?? 0).toFixed(3), holdoutAfter: +(s.holdoutAfter ?? 0).toFixed(3), spentUsd: +(s.spent ?? 0).toFixed(2) });
 console.log(`Applied ${rules.split("\n").filter(Boolean).length} rules to ${FILE}${review.rulesEdited ? " (your edited version)" : ""}.`);

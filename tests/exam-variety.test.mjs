@@ -41,4 +41,12 @@ test("rules that name the sample notes' topics are caught", async () => {
   const d = distinctiveWords(FIXTURES);
   assert.ok(leaks("Ask about pyruvate and the Krebs cycle and phosphofructokinase.", d, base).length >= 3);
   assert.ok(leaks("Vary the kind of task across the paper; give every value the answer needs, and mix short and long parts.", d, base).length < 3);
+  // the words that wrongly stopped the first real run: ordinary vocabulary, one per rule line, must pass the line check
+  const { generalTexts } = await import("../tools/exam-variety.mjs");
+  const { HOLDOUT } = await import("../tools/exam-fixtures.mjs");
+  const { readFileSync } = await import("node:fs");
+  const d2 = distinctiveWords([...FIXTURES, ...HOLDOUT], generalTexts(JSON.parse(readFileSync("public/ocw/exams.json", "utf8")).exams));
+  for (const line of ["- State the conditions a method needs before using it.", "- Treat each part as standalone where the past exam does.", "- Say whose data a figure shows; give larger samples where it matters.", "- Follow the course's rules for significant figures and square units."])
+    assert.ok(leaks(line, d2, base).length < 2, line);
+  assert.ok(leaks("- Ask about pyruvate and the Krebs cycle.", d2, base).length >= 2);
 });

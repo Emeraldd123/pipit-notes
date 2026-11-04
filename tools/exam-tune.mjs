@@ -20,7 +20,8 @@ import { chooseStyleExamples } from "../src/lib/past-exams.ts";
 import { TUNED_RULES } from "../src/lib/exam-tuned.ts";
 import { BudgetError, excerptsOf, judgeExam, makeApi, questionText, writeExam } from "./exam-lab.mjs";
 import { FIXTURES, HOLDOUT } from "./exam-fixtures.mjs";
-import { distinctiveWords, leaks, paperScore, varietyScore } from "./exam-variety.mjs";
+import { distinctiveWords, generalTexts, leaks, paperScore, varietyScore } from "./exam-variety.mjs";
+import { buildReview } from "./tune-review-build.mjs";
 
 const arg = (name, dflt) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : dflt; };
 const DRY = process.argv.includes("--dry");
@@ -39,7 +40,7 @@ const api = makeApi({ key: KEY, model: MODEL, budget: BUDGET, log: console.log, 
 const RUN = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19) + (MOCK ? "-mock" : "");
 const OUT = `data/exam-tune/${RUN}`;
 const base = buildExamPrompt({ excerpts: [], questions: QUESTIONS, difficulty: "same", style: "", figures: true, cases: true, extraRules: "" }).system;
-const distinct = distinctiveWords([...FIXTURES, ...HOLDOUT]);
+const distinct = distinctiveWords([...FIXTURES, ...HOLDOUT], generalTexts(BUILTIN));
 const pastFor = (f) => chooseStyleExamples(f.pages, [], BUILTIN);
 
 // --- worst-case cost of a round, so the loop never starts one it can't finish --------------------------------------
@@ -113,11 +114,15 @@ async function improve(r, rules, best, lastTried) {
   for (let tries = 0; tries < 2; tries++) {
     const j = await api.call(IMPROVER, [{ type: "text", text: evidence(r, rules, best, lastTried) + (tries ? "\n\nYour previous answer named specific topics from the notes. Rewrite the rules so they are general." : "") }], 2500, "medium");
     const out = parseModelJson(j.text) ?? {};
-    const next = String(out.rules ?? "").trim().slice(0, 1800);
-    if (!next) continue;
-    const leaked = leaks(next, distinct, base);
-    if (leaked.length >= 3) { console.log(`  rejected topic-specific rules (${leaked.slice(0, 5).join(", ")})`); continue; }
-    return { rules: next, changes: String(out.changes ?? "") };
+    const raw = Array.isArray(out.rules) ? out.rules.map((r) => `- ${String(r).replace(/^\s*-\s*/, "")}`).join("\n") : String(out.rules ?? "");
+    const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (!lines.length) { console.log(`  the rewriter's reply had no rules (${j.text.slice(0, 80).replace(/\s+/g, " ")}…)`); continue; }
+    // a rule that names two or more topic words from the sample notes is about those topics, not exams in general
+    const topical = lines.filter((l) => leaks(l, distinct, base).length >= 2);
+    if (topical.length >= 3) { console.log(`  rejected: ${topical.length} rules name specific topics (${topical.map((l) => leaks(l, distinct, base).slice(0, 2).join("+")).join(", ")})`); continue; }
+    for (const l of topical) console.log(`  dropped a topic-specific rule: ${l.slice(0, 90)}`);
+    const next = lines.filter((l) => !topical.includes(l)).join("\n").slice(0, 1800);
+    return { rules: next, changes: String(out.changes ?? "") + (topical.length ? ` (${topical.length} topic-specific rule${topical.length === 1 ? "" : "s"} dropped)` : "") };
   }
   return null;
 }
@@ -197,12 +202,14 @@ function slim(p) {
   return { subject: p.subject, title: p.title, past: p.past, total: p.total, quality: p.quality, variety: p.variety, varietyDetail: p.varietyDetail, stats: p.stats,
     examTitle: p.exam.title, durationMin: p.exam.durationMin, judgePaper: p.judge.paper, judgeAvg: p.judge.avg,
     questions: p.qs.map((q) => ({ id: q.id, stem: q.stem, kind: q.basis?.kind, principle: q.basis?.principle, figure: !!(q.figure || q.parts.some((x) => x.figure)), text: questionText(q),
+      // the whole question, so the review page can draw it the way the app does
+      full: { id: q.id, kind: q.basis?.kind, principle: q.basis?.principle, stem: q.stem, figure: q.figure ?? null,
+        parts: q.parts.map((x) => ({ label: x.label, type: x.type, marks: x.marks, prompt: x.prompt, figure: x.figure ?? null, options: x.options, correct: x.correct, why: x.why, answer: x.answer, scheme: x.scheme, numeric: x.numeric })) },
       judge: p.judge.items.find((it) => it.id === q.id) ?? null })) };
 }
 
 writeFileSync(`${OUT}/run.json`, JSON.stringify(run, null, 1));
-const tpl = readFileSync("tools/tune-review.html", "utf8");
-writeFileSync(`${OUT}/review.html`, tpl.replace("/*__RUN__*/null", JSON.stringify(run).replace(/</g, "\\u003c")));
+buildReview(OUT);
 console.log(`\nDone: spent $${api.ledger.spent.toFixed(2)} of $${BUDGET} (${api.ledger.calls} calls). Stopped: ${stopReason}.`);
 console.log(`Best: round ${best.round}, score ${best.score.toFixed(3)} (round 1: ${(rounds[0]?.score ?? 0).toFixed(3)}). Recommendation: ${run.recommendation}.`);
 console.log(`Review it: ${OUT}/review.html${process.argv.includes("--no-open") ? "" : "  (opening it now)"}`);
