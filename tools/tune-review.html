@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Exam tuning review</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<style>
+  :root { --bg: #f7f7f5; --card: #ffffff; --ink: #1c1c1a; --muted: #6b6b66; --line: #e3e2dd; --accent: #2f6f4f; --good: #2f7d32; --warn: #b26a00; --bad: #b3261e; --chip: #efeee9; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #161715; --card: #1f201e; --ink: #ecebe6; --muted: #9b9a94; --line: #34352f; --accent: #7fc19c; --good: #7cc47f; --warn: #e0a24a; --bad: #f08a80; --chip: #2a2b28; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 120px; }
+  h1 { font-size: 24px; margin: 0 0 4px; } h2 { font-size: 18px; margin: 28px 0 10px; } h3 { font-size: 15px; margin: 0; }
+  .muted { color: var(--muted); } .small { font-size: 13px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin: 10px 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .stat b { display: block; font-size: 22px; } .stat span { color: var(--muted); font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; } th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  .chip { display: inline-block; background: var(--chip); border-radius: 999px; padding: 1px 9px; font-size: 12px; margin: 2px 4px 2px 0; }
+  .chip.low { color: var(--bad); } .chip.mid { color: var(--warn); } .chip.hi { color: var(--good); }
+  .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+  .tabs button, .btn { border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+  .tabs button.on { background: var(--accent); color: var(--card); border-color: var(--accent); }
+  .btn.primary { background: var(--accent); color: var(--card); border-color: var(--accent); font-weight: 600; }
+  pre.q { white-space: pre-wrap; word-wrap: break-word; font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg); border-radius: 10px; padding: 10px 12px; margin: 8px 0; max-height: 420px; overflow: auto; }
+  .verdict { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .verdict button { border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 8px; padding: 4px 10px; cursor: pointer; font: inherit; font-size: 13px; }
+  .verdict button.on.good { background: var(--good); color: var(--card); } .verdict button.on.fix { background: var(--warn); color: var(--card); } .verdict button.on.bad { background: var(--bad); color: var(--card); }
+  textarea { width: 100%; border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 10px; padding: 8px 10px; font: inherit; font-size: 14px; }
+  textarea.rules { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; min-height: 220px; }
+  .warn { color: var(--warn); } .bad { color: var(--bad); } .good { color: var(--good); }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  .bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line); padding: 12px 16px; }
+  .bar .in { max-width: 1040px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+  label.choice { display: inline-flex; gap: 6px; align-items: center; margin-right: 14px; font-size: 14px; }
+  code.cmd { background: var(--chip); border-radius: 6px; padding: 2px 6px; font-size: 12px; word-break: break-all; }
+</style>
+</head>
+<body>
+<main id="app"></main>
+<div class="bar"><div class="in">
+  <div>
+    <label class="choice"><input type="radio" name="decision" value="apply"> Apply these rules to the app</label>
+    <label class="choice"><input type="radio" name="decision" value="another"> Run another round with my feedback</label>
+    <label class="choice"><input type="radio" name="decision" value="discard"> Discard</label>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center"><span id="done" class="small muted"></span><button class="btn primary" id="save">Save my review</button></div>
+</div></div>
+<script>
+const RUN = /*__RUN__*/null;
+const app = document.getElementById("app");
+const KEY = `pipit-tune-review:${RUN?.run}`;
+let state = { decision: RUN?.recommendation === "apply" ? "apply" : "another", rules: RUN?.best?.rules ?? "", overall: "", q: {} };
+try { const s = JSON.parse(localStorage.getItem(KEY) || "null"); if (s) state = { ...state, ...s }; } catch {}
+const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {} };
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const f2 = (x) => (typeof x === "number" ? x.toFixed(2) : "–");
+const f3 = (x) => (typeof x === "number" ? x.toFixed(3) : "–");
+const tone = (v, max = 2) => (typeof v !== "number" ? "" : v / max >= 0.9 ? "hi" : v / max >= 0.7 ? "mid" : "low");
+const chip = (label, v, max = 2) => `<span class="chip ${tone(v, max)}">${label} ${typeof v === "number" ? v : "–"}</span>`;
+
+function papersOf(view) {
+  if (view === "holdout-before") return { label: "Held-out, starting rules", papers: RUN.holdout?.papersBefore ?? [] };
+  if (view === "holdout-after") return { label: "Held-out, best rules", papers: RUN.holdout?.papersAfter ?? [] };
+  const r = RUN.rounds.find((x) => String(x.n) === String(view));
+  return { label: `Round ${r.n}`, papers: r.papers, round: r };
+}
+let view = String(RUN?.best?.round || RUN?.rounds?.[0]?.n || 1);
+
+function render() {
+  const h = RUN.holdout;
+  const delta = h ? h.after - h.before : null;
+  app.innerHTML = `
+    <h1>Exam tuning review</h1>
+    <p class="muted">Run ${esc(RUN.run)} · model ${esc(RUN.model)} · stopped: ${esc(RUN.stopReason)}</p>
+    <div class="grid">
+      <div class="card stat"><b>$${RUN.spent.toFixed(2)}</b><span>spent of $${RUN.budget} (${RUN.calls} calls)</span></div>
+      <div class="card stat"><b>${f3(RUN.rounds[0]?.score)} → ${f3(RUN.best.score)}</b><span>round 1 → best (round ${RUN.best.round})</span></div>
+      <div class="card stat"><b>${h ? `${f3(h.before)} → ${f3(h.after)}` : "–"}</b><span>held-out units (never tuned on)</span></div>
+      <div class="card stat"><b class="${RUN.recommendation === "apply" ? "good" : RUN.recommendation === "review" ? "warn" : "muted"}">${RUN.recommendation === "apply" ? "Apply" : RUN.recommendation === "review" ? "Look closely" : "Keep current"}</b><span>loop's recommendation</span></div>
+    </div>
+    ${delta !== null && delta < 0 ? `<p class="warn small">On the held-out units the new rules scored ${Math.abs(delta).toFixed(3)} lower. With one paper per unit that can be noise, but read those papers before applying.</p>` : ""}
+
+    <h2>Rounds</h2>
+    <div class="card"><table>
+      <tr><th>Round</th><th>Score</th><th>Quality</th><th>Variety</th><th>Repeats of earlier papers</th><th></th><th>Spent after</th></tr>
+      ${RUN.rounds.map((r) => `<tr><td>${r.n}</td><td>${f3(r.score)}</td><td>${f3(r.quality)}</td><td>${f3(r.variety)}</td>
+        <td>${r.papers.reduce((n, p) => n + (p.varietyDetail?.repeats?.length ?? 0), 0)}</td>
+        <td>${r.n === RUN.best.round ? '<span class="good">best</span>' : r.accepted ? "improved" : ""}${r.complete ? "" : ' <span class="bad">incomplete</span>'}</td><td>$${r.spentAfter.toFixed(2)}</td></tr>
+        ${r.nextChanges ? `<tr><td></td><td colspan="6" class="small muted">→ next: ${esc(r.nextChanges)}</td></tr>` : ""}`).join("")}
+    </table>
+    <p class="small muted">Score = 70% judge quality (realistic, applied, self-contained, one answer, accurate, distractors, format match) + 30% variety (new vs the previous two rounds' papers for the same notes, type mix, notes covered, no repeats inside a paper).</p></div>
+
+    <h2>Proposed rules <span class="muted small">(edit them; your version is what gets applied)</span></h2>
+    <div class="card">
+      <textarea class="rules" id="rules">${esc(state.rules)}</textarea>
+      <details><summary>Starting rules</summary><pre class="q">${esc(RUN.startRules || "(none: the app used no tuned rules)")}</pre></details>
+      ${RUN.rounds.map((r) => `<details><summary>Rules used in round ${r.n} (score ${f3(r.score)})</summary><pre class="q">${esc(r.rules || "(none)")}</pre></details>`).join("")}
+    </div>
+
+    <h2>Papers</h2>
+    <div class="tabs" id="tabs">
+      ${RUN.rounds.map((r) => `<button data-v="${r.n}" class="${view === String(r.n) ? "on" : ""}">Round ${r.n}${r.n === RUN.best.round ? " ★" : ""}</button>`).join("")}
+      ${h ? `<button data-v="holdout-before" class="${view === "holdout-before" ? "on" : ""}">Held-out · before</button><button data-v="holdout-after" class="${view === "holdout-after" ? "on" : ""}">Held-out · after</button>` : ""}
+    </div>
+    <div id="papers"></div>
+
+    <h2>Overall notes for the next round</h2>
+    <div class="card"><textarea id="overall" rows="4" placeholder="What should change? e.g. too many multiple choice, numbers too clean, the biology cases are all about the same pathway…">${esc(state.overall)}</textarea></div>`;
+  document.getElementById("rules").oninput = (e) => { state.rules = e.target.value; persist(); };
+  document.getElementById("overall").oninput = (e) => { state.overall = e.target.value; persist(); };
+  document.querySelectorAll("#tabs button").forEach((b) => (b.onclick = () => { view = b.dataset.v; render(); }));
+  renderPapers();
+  document.querySelectorAll('input[name="decision"]').forEach((r) => { r.checked = r.value === state.decision; r.onchange = () => { state.decision = r.value; persist(); }; });
+  updateDone();
+  if (window.renderMathInElement) renderMathInElement(document.getElementById("papers"), { delimiters: [{ left: "$$", right: "$$", display: true }, { left: "$", right: "$", display: false }], throwOnError: false });
+}
+
+function renderPapers() {
+  const { papers } = papersOf(view);
+  document.getElementById("papers").innerHTML = papers.map((p) => p.error ? `<div class="card"><h3>${esc(p.subject)}</h3><p class="bad">Error: ${esc(p.error)}</p></div>` : `
+    <div class="card">
+      <h3>${esc(p.title)} <span class="muted small">· ${esc(p.examTitle)} · ${p.stats.questions} questions${p.past?.length ? ` · format of ${esc(p.past.join(", "))}` : ""}</span></h3>
+      <p class="small">Score <b>${f3(p.total)}</b> · quality ${f3(p.quality)} · variety ${f3(p.variety)}
+        (new vs earlier ${f2(p.varietyDetail.novelty)}, type mix ${f2(p.varietyDetail.typeMix)}, notes covered ${f2(p.varietyDetail.coverage)})</p>
+      <p class="small">${chip("realistic", p.judgeAvg.realistic)}${chip("applied", p.judgeAvg.applied)}${chip("self-contained", p.judgeAvg.selfContained)}${chip("one answer", p.judgeAvg.oneAnswer)}${chip("accurate", p.judgeAvg.accurate)}${chip("distractors", p.judgeAvg.distractors)}${p.judgePaper ? chip("format match", p.judgePaper.style_match) : ""}
+        ${p.judgePaper?.copied ? '<span class="chip low">COPIED a past-exam question</span>' : ""}</p>
+      ${p.judgePaper?.style_fix ? `<p class="small muted">Format: ${esc(p.judgePaper.style_fix)}</p>` : ""}
+      ${p.varietyDetail.repeats?.length ? `<p class="small warn">Repeats an earlier paper: ${p.varietyDetail.repeats.map((r) => `“${esc(r.stem)}” ≈ “${esc(r.earlier)}” (${r.sim})`).join("; ")}</p>` : ""}
+      ${p.questions.map((q) => question(p, q)).join("")}
+    </div>`).join("") || '<p class="muted">No papers here.</p>';
+  document.querySelectorAll("[data-verdict]").forEach((b) => (b.onclick = () => {
+    const k = b.dataset.key; const cur = state.q[k] ?? {}; state.q[k] = { ...cur, ...meta(k), verdict: cur.verdict === b.dataset.verdict ? undefined : b.dataset.verdict }; persist(); renderPapers();
+    if (window.renderMathInElement) renderMathInElement(document.getElementById("papers"), { delimiters: [{ left: "$", right: "$", display: false }], throwOnError: false });
+  }));
+  document.querySelectorAll("[data-comment]").forEach((t) => (t.oninput = () => { const k = t.dataset.key; state.q[k] = { ...(state.q[k] ?? {}), ...meta(k), comment: t.value }; persist(); updateDone(); }));
+}
+
+const metaCache = {};
+function question(p, q) {
+  const key = `${view}|${p.subject}|${q.id}`;
+  metaCache[key] = { view, subject: p.subject, id: q.id, stem: q.stem };
+  const mine = state.q[key] ?? {};
+  const j = q.judge;
+  return `<div style="border-top:1px solid var(--line);padding-top:10px;margin-top:10px">
+    <div class="small">${q.kind === "case" ? '<span class="chip">case study</span>' : ""}${q.figure ? '<span class="chip">figure</span>' : ""}${j ? `${chip("realistic", j.realistic)}${chip("self-contained", j.self_contained)}${chip("one answer", j.one_answer)}${chip("accurate", j.accurate)}${j.distractors != null ? chip("distractors", j.distractors) : ""}` : ""}</div>
+    <pre class="q">${esc(q.text)}</pre>
+    ${j?.fix ? `<p class="small"><b>Judge:</b> ${esc(j.fix)}</p>` : ""}
+    <div class="verdict">
+      <button data-key="${esc(key)}" data-verdict="good" class="good ${mine.verdict === "good" ? "on" : ""}">Good</button>
+      <button data-key="${esc(key)}" data-verdict="fix" class="fix ${mine.verdict === "fix" ? "on" : ""}">Needs work</button>
+      <button data-key="${esc(key)}" data-verdict="bad" class="bad ${mine.verdict === "bad" ? "on" : ""}">Bad</button>
+      <span class="small muted">${j && mine.verdict ? (mine.verdict === "good") === (["realistic", "one_answer", "accurate"].every((k) => (j[k] ?? 2) >= 2)) ? "agrees with the judge" : "you and the judge disagree" : ""}</span>
+    </div>
+    <textarea data-comment data-key="${esc(key)}" rows="2" placeholder="Your note or correction (optional)" style="margin-top:6px">${esc(mine.comment ?? "")}</textarea>
+  </div>`;
+}
+const meta = (k) => metaCache[k] ?? {};
+
+function updateDone() {
+  const n = Object.values(state.q).filter((x) => x.verdict || x.comment).length;
+  document.getElementById("done").textContent = n ? `${n} question${n === 1 ? "" : "s"} reviewed` : "";
+}
+
+document.getElementById("save").onclick = () => {
+  const review = {
+    kind: "pipit-exam-tune-review", run: RUN.run, savedAt: new Date().toISOString(), decision: state.decision,
+    rules: state.rules.trim(), rulesEdited: state.rules.trim() !== (RUN.best.rules ?? "").trim(), overall: state.overall.trim(),
+    scores: { round1: RUN.rounds[0]?.score, best: RUN.best.score, bestRound: RUN.best.round, holdoutBefore: RUN.holdout?.before, holdoutAfter: RUN.holdout?.after, spent: RUN.spent },
+    questions: Object.values(state.q).filter((x) => x.verdict || x.comment),
+  };
+  const blob = new Blob([JSON.stringify(review, null, 1)], { type: "application/json" });
+  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: `review-${RUN.run}.json` });
+  document.body.appendChild(a); a.click(); a.remove();
+  const next = state.decision === "apply" ? `npm run tune:apply -- <path to review-${RUN.run}.json>` : state.decision === "another" ? `npm run tune:exam -- --feedback <path to review-${RUN.run}.json>` : "nothing to run";
+  document.getElementById("done").innerHTML = `Saved review-${esc(RUN.run)}.json. Next: <code class="cmd">${esc(next)}</code>`;
+};
+
+if (!RUN) app.innerHTML = "<p>No run data in this page.</p>";
+else { render(); window.addEventListener("load", () => render()); }   // again once KaTeX has loaded, for the maths
+</script>
+</body>
+</html>

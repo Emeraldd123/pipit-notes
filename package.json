@@ -14,6 +14,8 @@
     "check": "npm test && npm run build",
     "preview:ipad": "node node_modules/vite/bin/vite.js preview --host",
     "eval:exam": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-exam-eval.ps1",
+    "tune:exam": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-exam-eval.ps1 tools/exam-tune.mjs",
+    "tune:apply": "node tools/exam-tune-apply.mjs",
     "deploy:test": "npm run check && node ../Pipit/node_modules/netlify-cli/bin/run.js deploy --dir=dist --functions=netlify/functions",
     "deploy:prod": "npm run check && node ../Pipit/node_modules/netlify-cli/bin/run.js deploy --prod --dir=dist --functions=netlify/functions"
   },

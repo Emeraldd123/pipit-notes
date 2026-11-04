@@ -1,6 +1,7 @@
 // The exam writer's instructions, kept free of browser code so the evaluation tool (tools/exam-eval.mjs)
 // sends exactly what the app sends.
 import type { Excerpt } from "./ai.ts";
+import { TUNED_RULES } from "./exam-tuned.ts";
 
 // How a real teacher builds wrong options (item-writing guidance: distractors come from students' typical errors).
 // Used for flashcards and exam multiple choice.
@@ -23,6 +24,7 @@ export type ExamSpec = {
   textbook?: Excerpt[];              // reference pages (numbered T1, T2…) the writer may adapt problems from
   cases?: boolean;                   // include case-study / applied-research questions (CASE_RULES)
   pastExams?: { title: string; text: string }[]; // real past exams from the course (e.g. MIT OCW), labelled E1, E2…: FORMAT only (STYLE_RULES)
+  extraRules?: string;               // replaces the tuned house rules (the tuning loop uses this to try new ones)
 };
 
 // Matching a real course's exams: copy how the paper is built, never what it asks.
@@ -101,6 +103,8 @@ export function buildExamPrompt(spec: ExamSpec): { system: string; content: Prom
     (spec.cases ? `Make exactly ${Math.max(1, Math.round(spec.questions / 3))} of the ${spec.questions} questions CASE-STUDY questions (including most extended ones and at least one multiple choice), following the CASE-STUDY rules and using cases that fit this subject; the rest test the notes directly. ` : "") +
     (book ? "Take or adapt roughly a third of the questions from the textbook pages, following the TEXTBOOK PAGES rules. " : ""),
   });
-  const system = [EXAM_SYSTEM, spec.cases ? CASE_RULES : "", book ? TEXTBOOK_RULES : "", past ? STYLE_RULES : ""].filter(Boolean).join("\n");
+  const house = (spec.extraRules ?? TUNED_RULES).trim();
+  const system = [EXAM_SYSTEM, spec.cases ? CASE_RULES : "", book ? TEXTBOOK_RULES : "", past ? STYLE_RULES : "",
+    house ? `HOUSE RULES (learned from strict reviews of earlier papers; follow them too):\n${house}` : ""].filter(Boolean).join("\n");
   return { system, content };
 }

@@ -1,4 +1,4 @@
-# Asks for your Anthropic API key in a small window, then runs the exam evaluation with it.
+# Asks for your Anthropic API key in a small window, then runs the exam evaluation (or the tuning loop) with it.
 # The key is only held in memory for this run: it is not saved to disk or shown on screen.
 #   npm run eval:exam                    (or: powershell -ExecutionPolicy Bypass -File tools/run-exam-eval.ps1)
 #   npm run eval:exam -- --only bio,econ (extra options are passed to tools/exam-eval.mjs)
@@ -6,7 +6,7 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "Pipit Notes - exam evaluation"
+$form.Text = "Pipit Notes - exam tools"
 $form.Size = New-Object System.Drawing.Size(460, 190)
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
@@ -50,7 +50,11 @@ if ($result -ne [System.Windows.Forms.DialogResult]::OK -or -not $key) { Write-H
 $env:ANTHROPIC_API_KEY = $key
 try {
   Set-Location (Join-Path $PSScriptRoot "..")
-  node tools/exam-eval.mjs @args
+  # the first argument may name the tool to run (npm run tune:exam passes tools/exam-tune.mjs); the rest are its options
+  $script = "tools/exam-eval.mjs"
+  $rest = $args
+  if ($args.Count -gt 0 -and "$($args[0])" -like "*.mjs") { $script = "$($args[0])"; $rest = @($args | Select-Object -Skip 1) }
+  node $script @rest
 } finally {
   Remove-Item Env:ANTHROPIC_API_KEY -ErrorAction SilentlyContinue
   $key = $null

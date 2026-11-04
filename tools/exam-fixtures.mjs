@@ -43,3 +43,32 @@ export const FIXTURES = [
     ],
   },
 ];
+
+// HELD-OUT notes for tools/exam-tune.mjs: never used while tuning, only to check at the end that the tuned rules
+// help on topics the loop never saw (so it can't just get good at the five units above).
+export const HOLDOUT = [
+  {
+    id: "genetics", title: "Bio — Mendelian genetics", style: "AP Biology unit test",
+    pages: [
+      "Genes come in versions called alleles. Genotype = the alleles (e.g. Aa); phenotype = the trait shown. Homozygous AA or aa, heterozygous Aa. A dominant allele shows its trait when one copy is present; a recessive allele only shows when two copies are present (aa). Mendel's law of segregation: the two alleles separate in meiosis so each gamete carries one. Punnett square: Aa x Aa gives 1 AA : 2 Aa : 1 aa, so a 3:1 phenotype ratio.",
+      "Law of independent assortment: genes on different chromosomes sort into gametes independently. Dihybrid cross AaBb x AaBb gives a 9:3:3:1 phenotype ratio. Test cross: cross an unknown dominant-phenotype individual with a homozygous recessive (aa); all dominant offspring means AA, half recessive means Aa. Probability rules: multiply for 'and' (independent events), add for 'or' (mutually exclusive).",
+      "Exceptions to simple dominance: incomplete dominance (heterozygote is intermediate, e.g. red x white -> pink, 1:2:1 ratio), codominance (both alleles show, e.g. AB blood type). Multiple alleles (ABO: IA, IB, i). Sex-linked genes are on the X chromosome: males (XY) have one copy, so recessive X-linked traits show more often in males; a carrier mother passes the allele to half her sons. Linked genes on the same chromosome don't assort independently unless crossing over separates them.",
+    ],
+  },
+  {
+    id: "kinematics", title: "Physics — Kinematics and Newton's laws", style: "AP Physics 1 exam",
+    pages: [
+      "Displacement is a vector (change in position); distance is scalar. Velocity = displacement / time, acceleration = change in velocity / time. Constant acceleration equations: v = u + at, s = ut + 1/2 a t^2, v^2 = u^2 + 2as, s = (u + v)/2 t. Free fall: a = g = 9.8 m/s^2 downward, ignoring air resistance. On a position-time graph the slope is velocity; on a velocity-time graph the slope is acceleration and the area under it is displacement.",
+      "Projectiles: horizontal and vertical motion are independent. Horizontal velocity stays constant (no horizontal force); vertical motion has acceleration g. Time of flight is set by the vertical motion. A ball launched horizontally and one dropped from the same height land at the same time. Range on level ground R = u^2 sin(2 theta) / g, greatest at 45 degrees.",
+      "Newton's first law: an object keeps its velocity unless a net force acts. Second law: F_net = m a (vector). Third law: forces come in equal and opposite pairs acting on DIFFERENT objects. Weight W = mg. Normal force is perpendicular to the surface. Friction opposes sliding: kinetic friction f = mu_k N, static friction up to mu_s N. On an incline the component of weight along the slope is mg sin(theta) and into the slope is mg cos(theta). Draw a free-body diagram before writing F = ma.",
+    ],
+  },
+  {
+    id: "acids", title: "Chem — Acids, bases and pH", style: "university general chemistry midterm",
+    pages: [
+      "Bronsted-Lowry: an acid donates H+, a base accepts H+. Conjugate pairs differ by one H+ (HA / A-). Strong acids (HCl, HNO3, H2SO4) ionise completely; weak acids (CH3COOH, HF) only partly. pH = -log[H3O+], pOH = -log[OH-], pH + pOH = 14 at 25 C. Kw = [H3O+][OH-] = 1.0 x 10^-14 at 25 C. Neutral pH is 7 only at 25 C.",
+      "Weak acid equilibrium: HA + H2O <-> H3O+ + A-, Ka = [H3O+][A-]/[HA]. pKa = -log Ka; smaller pKa = stronger acid. For a weak acid of concentration C, [H3O+] ~ sqrt(Ka C) when ionisation is small. Ka x Kb = Kw for a conjugate pair. Percent ionisation rises as the acid is diluted.",
+      "Buffers: a weak acid plus its conjugate base resists pH change. Henderson-Hasselbalch: pH = pKa + log([A-]/[HA]). Best buffering when pH is near pKa (ratio 1:1). Titration of a weak acid with a strong base: at the half-equivalence point pH = pKa; at the equivalence point the solution contains only A-, so pH > 7. Indicators change colour near their own pKa; choose one whose range covers the equivalence point pH.",
+    ],
+  },
+];
