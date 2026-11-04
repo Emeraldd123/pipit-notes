@@ -62,11 +62,13 @@ export function coverage(questions, pages) {
 /** One variety score in 0..1 and its parts. */
 export function varietyScore(questions, earlier, pages) {
   const nov = novelty(questions, earlier);
-  const mix = typeMix(questions);
-  const cov = coverage(questions, pages);
-  const dup = internalRepeats(questions);
-  const noDup = Math.max(0, 1 - dup / Math.max(1, questions.length / 2));
-  return { score: (nov.novelty * 2 + mix + cov + noDup) / 5, novelty: nov.novelty, repeats: nov.repeats, typeMix: mix, coverage: cov, internalRepeats: dup };
+  const d = { novelty: nov.novelty, repeats: nov.repeats, typeMix: typeMix(questions), coverage: coverage(questions, pages), internalRepeats: internalRepeats(questions) };
+  return { score: combineVariety(d, questions.length), ...d };
+}
+/** The variety score from its parts (novelty counts double). */
+export function combineVariety(d, count) {
+  const noDup = Math.max(0, 1 - d.internalRepeats / Math.max(1, count / 2));
+  return (d.novelty * 2 + d.typeMix + d.coverage + noDup) / 5;
 }
 
 /**

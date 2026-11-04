@@ -20,7 +20,8 @@ import { chooseStyleExamples } from "../src/lib/past-exams.ts";
 import { TUNED_RULES } from "../src/lib/exam-tuned.ts";
 import { BudgetError, excerptsOf, judgeExam, makeApi, questionText, writeExam } from "./exam-lab.mjs";
 import { FIXTURES, HOLDOUT } from "./exam-fixtures.mjs";
-import { distinctiveWords, generalTexts, leaks, paperScore, varietyScore } from "./exam-variety.mjs";
+import { combineVariety, distinctiveWords, generalTexts, leaks, paperScore, varietyScore } from "./exam-variety.mjs";
+import { parseQuestionText } from "./question-html.mjs";
 import { buildReview } from "./tune-review-build.mjs";
 
 const arg = (name, dflt) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : dflt; };
@@ -127,8 +128,21 @@ async function improve(r, rules, best, lastTried) {
   return null;
 }
 
+// --- resuming an earlier run: its rounds (papers, judge reviews, scores) are reused, not paid for again -------------
+const resumeDir = arg("resume", "")?.replace(/[\\/]+$/, "").replace(/[\\/]review\.html$/, "");
+const resumed = resumeDir ? JSON.parse(readFileSync(`${resumeDir}/run.json`, "utf8")) : null;
+function revive(p) {
+  if (p.error) return p;
+  const qs = p.questions.map((q) => {
+    const full = q.full ?? parseQuestionText(q.text);
+    return { ...full, id: q.id, basis: { kind: q.kind, principle: q.principle, notes: full.notes ?? [] } };
+  });
+  return { ...p, qs, revived: true, exam: { title: p.examTitle, durationMin: p.durationMin },
+    judge: { avg: p.judgeAvg, paper: p.judgePaper, items: p.questions.map((q) => q.judge).filter(Boolean) } };
+}
+
 // --- the loop ----------------------------------------------------------------------------------------------------
-const startRules = (feedback?.rules ?? TUNED_RULES).trim();
+const startRules = (resumed?.startRules ?? feedback?.rules ?? TUNED_RULES).trim();
 console.log(`Tuning loop: budget $${BUDGET}, up to ${MAX_ROUNDS} rounds of ${FIXTURES.length} papers, held-out check on ${HOLDOUT.map((f) => f.id).join(", ")}.`);
 console.log(`Worst case: ~$${roundWorst(startRules).toFixed(2)} per round + $${IMPROVE_WORST.toFixed(2)} to rewrite the rules; held-out check ~$${holdoutWorst(startRules, startRules).toFixed(2)}. Real costs are usually well under half of this.`);
 if (DRY) process.exit(0);
@@ -142,7 +156,28 @@ let best = { rules: startRules, score: -1, round: 0 };
 let lastTried = null;
 let rules = startRules;
 let stopReason = `reached ${MAX_ROUNDS} rounds`;
-for (let n = 1; n <= MAX_ROUNDS; n++) {
+let firstRound = 1;
+if (resumed) {
+  for (const r of resumed.rounds) {
+    const papers = r.papers.map(revive);
+    for (const p of papers) if (!p.error) (history[p.subject] ??= []).push(p.qs);
+    rounds.push({ ...r, papers });
+  }
+  best = { ...resumed.best };
+  const last = rounds[rounds.length - 1];
+  if (last && last.n !== best.round) lastTried = { rules: last.rules, score: last.score };
+  firstRound = rounds.length + 1;
+  console.log(`\nResuming ${resumeDir}: ${rounds.length} round${rounds.length === 1 ? "" : "s"} reused (they cost $${resumed.spent.toFixed(2)} then, nothing now). Best so far: round ${best.round}, ${best.score.toFixed(3)}.`);
+  // the next rules come from the last round's evidence (and your review, if given)
+  try {
+    const next = await improve(last, last.rules, best, lastTried);
+    if (!next) { console.error("The rewriter gave no usable rules; nothing more to try."); process.exit(1); }
+    last.nextChanges = next.changes;
+    console.log(`  next rules: ${next.changes}`);
+    rules = next.rules;
+  } catch (e) { console.error(`Couldn't write the next rules: ${e.message}`); process.exit(1); }
+}
+for (let n = firstRound; n < firstRound + MAX_ROUNDS; n++) {
   const need = roundWorst(rules) + IMPROVE_WORST + holdoutWorst(startRules, rules.length > best.rules.length ? rules : best.rules);
   if (api.ledger.spent + need > BUDGET) { stopReason = `budget: another round could cost up to $${need.toFixed(2)} with the held-out check, and $${api.ledger.spent.toFixed(2)} is spent`; break; }
   console.log(`\nRound ${n}${n === 1 ? " (starting rules)" : ""} · spent so far $${api.ledger.spent.toFixed(2)}`);
@@ -155,7 +190,11 @@ for (let n = 1; n <= MAX_ROUNDS; n++) {
     for (const p of r1.papers) {
       if (p.error) continue;
       const f = FIXTURES.find((x) => x.id === p.subject);
-      const v = varietyScore(p.qs, history[p.subject]?.[1] ?? [], f.pages.length);
+      let v = varietyScore(p.qs, history[p.subject]?.[1] ?? [], f.pages.length);
+      if (p.revived) {   // older saves don't record which notes each question used: keep that paper's measured spread
+        const d = { ...v, typeMix: p.varietyDetail.typeMix, coverage: p.varietyDetail.coverage, internalRepeats: p.varietyDetail.internalRepeats };
+        v = { ...d, score: combineVariety(d, p.qs.length) };
+      }
       Object.assign(p, { varietyDetail: v }, paperScore(p.judge, p.stats, v, QUESTIONS));
     }
     const ok = r1.papers.filter((p) => !p.error);
@@ -171,7 +210,7 @@ for (let n = 1; n <= MAX_ROUNDS; n++) {
   if (accepted) best = { rules, score: r.score, round: n };
   else lastTried = { rules, score: r.score };
   if (r.papers.some((p) => p.budget)) { stopReason = "budget reached mid-round"; break; }
-  if (n === MAX_ROUNDS) break;
+  if (n === firstRound + MAX_ROUNDS - 1) break;
   try {
     const next = await improve(r, rules, best, lastTried);
     if (!next) { stopReason = "the rewriter gave no usable rules"; break; }
@@ -185,7 +224,11 @@ for (let n = 1; n <= MAX_ROUNDS; n++) {
 console.log(`\nHeld-out check (${HOLDOUT.map((f) => f.id).join(", ")}) · spent so far $${api.ledger.spent.toFixed(2)}`);
 let holdout = null;
 try {
-  const before = await round(HOLDOUT, startRules, {});
+  // the starting rules' held-out score from the run being resumed is still valid: reuse it
+  const before = resumed?.holdout && resumed.startRules === startRules
+    ? { score: resumed.holdout.before, papers: resumed.holdout.papersBefore.map(revive) }
+    : await round(HOLDOUT, startRules, {});
+  if (resumed?.holdout && resumed.startRules === startRules) console.log(`  starting rules: ${before.score.toFixed(3)} (reused from the earlier run)`);
   const after = best.rules === startRules ? before : await round(HOLDOUT, best.rules, {});
   holdout = { before: before.score, after: after.score, papersBefore: before.papers, papersAfter: after.papers };
   console.log(`  starting rules ${before.score.toFixed(3)} → best rules ${after.score.toFixed(3)}`);
@@ -194,16 +237,18 @@ try {
 const improved = best.rules !== startRules && holdout && holdout.after >= holdout.before - 0.01 && best.score > (rounds[0]?.score ?? 0) + 0.02;
 const run = {
   run: RUN, model: MODEL, budget: BUDGET, spent: api.ledger.spent, calls: api.ledger.calls, stopReason,
+  ...(resumed ? { resumedFrom: resumed.run, previousSpent: +(resumed.spent + (resumed.previousSpent ?? 0)).toFixed(4) } : {}),
   startRules, best, recommendation: improved ? "apply" : best.rules === startRules ? "keep" : "review",
   rounds: rounds.map((r) => ({ ...r, papers: r.papers.map(slim) })), holdout: holdout && { before: holdout.before, after: holdout.after, papersBefore: holdout.papersBefore.map(slim), papersAfter: holdout.papersAfter.map(slim) },
 };
 function slim(p) {
   if (p.error) return p;
+  if (p.revived) { const { qs, judge, revived, exam, ...saved } = p; void qs; void judge; void revived; void exam; return saved; }   // already in saved form
   return { subject: p.subject, title: p.title, past: p.past, total: p.total, quality: p.quality, variety: p.variety, varietyDetail: p.varietyDetail, stats: p.stats,
     examTitle: p.exam.title, durationMin: p.exam.durationMin, judgePaper: p.judge.paper, judgeAvg: p.judge.avg,
     questions: p.qs.map((q) => ({ id: q.id, stem: q.stem, kind: q.basis?.kind, principle: q.basis?.principle, figure: !!(q.figure || q.parts.some((x) => x.figure)), text: questionText(q),
       // the whole question, so the review page can draw it the way the app does
-      full: { id: q.id, kind: q.basis?.kind, principle: q.basis?.principle, stem: q.stem, figure: q.figure ?? null,
+      full: { id: q.id, kind: q.basis?.kind, principle: q.basis?.principle, notes: q.basis?.notes ?? [], stem: q.stem, figure: q.figure ?? null,
         parts: q.parts.map((x) => ({ label: x.label, type: x.type, marks: x.marks, prompt: x.prompt, figure: x.figure ?? null, options: x.options, correct: x.correct, why: x.why, answer: x.answer, scheme: x.scheme, numeric: x.numeric })) },
       judge: p.judge.items.find((it) => it.id === q.id) ?? null })) };
 }
