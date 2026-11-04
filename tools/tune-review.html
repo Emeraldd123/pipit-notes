@@ -171,12 +171,13 @@ function question(p, q) {
     ${q.html ? `<div class="paper">${q.html}</div><details><summary>What the judge read (text)</summary><pre class="q">${esc(q.text)}</pre></details>` : `<pre class="q">${esc(q.text)}</pre>`}
     ${j?.fix ? `<p class="small"><b>Judge:</b> ${esc(j.fix)}</p>` : ""}
     <div class="verdict">
+      <span class="small muted">Your rating of this question:</span>
       <button data-key="${esc(key)}" data-verdict="good" class="good ${mine.verdict === "good" ? "on" : ""}">Good</button>
       <button data-key="${esc(key)}" data-verdict="fix" class="fix ${mine.verdict === "fix" ? "on" : ""}">Needs work</button>
       <button data-key="${esc(key)}" data-verdict="bad" class="bad ${mine.verdict === "bad" ? "on" : ""}">Bad</button>
-      <span class="small muted">${j && mine.verdict ? (mine.verdict === "good") === (["realistic", "one_answer", "accurate"].every((k) => (j[k] ?? 2) >= 2)) ? "agrees with the judge" : "you and the judge disagree" : ""}</span>
+      <span class="small muted">${j && mine.verdict ? (mine.verdict === "good") === (["realistic", "one_answer", "accurate"].every((k) => (j[k] ?? 2) >= 2)) ? "the judge rated it the same way" : "the judge rated it differently" : ""}</span>
     </div>
-    <textarea data-comment data-key="${esc(key)}" rows="2" placeholder="Your note or correction (optional)" style="margin-top:6px">${esc(mine.comment ?? "")}</textarea>
+    <textarea data-comment data-key="${esc(key)}" rows="2" placeholder="Your note or correction (optional). If the judge is wrong, say so here." style="margin-top:6px">${esc(mine.comment ?? "")}</textarea>
   </div>`;
 }
 const meta = (k) => metaCache[k] ?? {};
