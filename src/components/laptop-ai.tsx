@@ -5,26 +5,46 @@ import { Check, Laptop, Loader2 } from "lucide-react";
 import { updateSettings, useSettings } from "@/lib/settings";
 import { testLocal, type LocalTest } from "@/lib/local-ai";
 import { Button } from "@/components/ui";
+import { FEATURE_LABEL } from "@/lib/ai-cost";
+import { budgetFor, localAllowed } from "@/lib/local-ai-core";
 
 /** A small picture of a handwritten-looking sum, so the test shows whether the model can actually read images. */
-function testPicture(): string {
+function testPicture(sum: string): string {
   const c = document.createElement("canvas");
   c.width = 220; c.height = 90;
   const g = c.getContext("2d")!;
   g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height);
-  g.fillStyle = "#1c1c1a"; g.font = "italic 44px Georgia, serif"; g.fillText("17 + 25", 22, 60);
+  g.fillStyle = "#1c1c1a"; g.font = "italic 44px Georgia, serif"; g.fillText(sum, 22, 60);
   return c.toDataURL("image/png");
+}
+
+/** At the measured speed, which jobs the laptop takes and which stay on Claude (so nobody waits a minute for a math check). */
+function SpeedSplit({ ms, scope }: { ms: number; scope: "light" | "most" }) {
+  const jobs = Object.keys(FEATURE_LABEL).filter((f) => localAllowed(f, scope));
+  const laptop = jobs.filter((f) => ms <= budgetFor(f)), claude = jobs.filter((f) => ms > budgetFor(f));
+  const names = (fs: string[]) => fs.map((f) => FEATURE_LABEL[f]).join(", ");
+  return (
+    <span className="mt-1 block text-foreground-muted">
+      {laptop.length ? <>At this speed the laptop takes: {names(laptop)}.</> : <>That&apos;s too slow for any job here.</>}
+      {claude.length > 0 && <> Too slow to wait for, so these stay on Claude: {names(claude)}.</>} It re-measures as you use it.
+    </span>
+  );
 }
 
 export function LaptopAi() {
   const s = useSettings();
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<LocalTest | null>(null);
+  const [sum, setSum] = useState("");
   const field = "mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary";
 
   async function test() {
     setTesting(true); setResult(null);
-    try { setResult(await testLocal(testPicture())); } finally { setTesting(false); }
+    // a new sum each time: the model can't reuse a cached answer (which made the timing look instant), and the
+    // reply shows whether it really read the picture
+    const next = `${10 + Math.floor(Math.random() * 90)} + ${10 + Math.floor(Math.random() * 90)}`;
+    setSum(next);
+    try { setResult(await testLocal(testPicture(next))); } finally { setTesting(false); }
   }
 
   return (
@@ -54,9 +74,10 @@ export function LaptopAi() {
           {result && (
             <span className={`text-xs ${result.ok && result.vision ? "text-positive" : "text-negative"}`}>
               {!result.ok ? `Not reachable: ${result.reason}.`
-                : result.vision ? `Reachable. ${result.model} read the test picture as "${result.reads}" (should be 17 + 25) in ${((result.ms ?? 0) / 1000).toFixed(1)} s.`
+                : result.vision ? `Reachable. ${result.model} read the test picture as "${result.reads}" (it says ${sum}) in ${((result.ms ?? 0) / 1000).toFixed(1)} s.`
                 : `Reachable, but ${result.model}: ${result.reason}.`}
               {result.models.length > 1 && <span className="block text-foreground-muted">On the laptop: {result.models.join(", ")}</span>}
+              {result.vision && result.ms != null && <SpeedSplit ms={result.ms} scope={s.localScope} />}
             </span>
           )}
         </div>

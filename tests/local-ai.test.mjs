@@ -46,3 +46,16 @@ test("a model is picked from what the laptop has", () => {
   assert.equal(pickModel([], "qwen3-vl:8b"), "qwen3-vl:8b");
   assert.equal(pickModel(["nomic-embed-text"], ""), null);
 });
+
+test("a slow laptop is skipped for jobs you're waiting on, but still used for background ones", async () => {
+  const { updateSpeed, fastEnough, localTimeout } = await import("../src/lib/local-ai-core.ts");
+  let s = {};
+  assert.ok(fastEnough("mathcheck", true, s), "unknown speed: try it once");
+  s = updateSpeed(s, true, 50_000);
+  assert.ok(!fastEnough("mathcheck", true, s) && !fastEnough("math", true, s));
+  assert.ok(fastEnough("transcribe", true, s), "search indexing can wait");
+  assert.ok(fastEnough("math", false, s), "text-only jobs are measured separately");
+  s = updateSpeed(s, true, 8_000); s = updateSpeed(s, true, 8_000); s = updateSpeed(s, true, 8_000);
+  assert.ok(fastEnough("math", true, s), "a laptop that gets faster (GPU, smaller model) is used again");
+  assert.equal(localTimeout("mathcheck"), 15_000);
+});

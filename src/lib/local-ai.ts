@@ -4,7 +4,7 @@
 // logged: only counts, timings and the reason for a fallback.
 import { getSettings, type Settings } from "./settings";
 import { count, track, warn } from "./telemetry";
-import { blockedByHttps, cleanReply, hasImage, localAllowed, normalizeBase, pickModel, replyUsable, toChatMessages, type Content } from "./local-ai-core.ts";
+import { blockedByHttps, cleanReply, fastEnough, hasImage, localAllowed, localTimeout, normalizeBase, pickModel, replyUsable, toChatMessages, updateSpeed, type Content, type Speed } from "./local-ai-core.ts";
 import { recordUsage } from "./ai-ledger";
 
 
@@ -51,6 +51,16 @@ export const markLocalDown = () => { if (last) last.probe = { ...last.probe, ok:
 
 export class LocalSkip extends Error {}
 
+// how fast this laptop + model has been (kept across visits; a new address or model starts fresh)
+const SPEED_KEY = "pipit-notes.local-speed.v1";
+const speedId = (s: Settings) => `${normalizeBase(s.localUrl)}|${s.localModel.trim()}`;
+export function getSpeed(s: Settings = getSettings()): Speed {
+  try { const j = JSON.parse(localStorage.getItem(SPEED_KEY) ?? "{}"); return j.id === speedId(s) ? j.speed ?? {} : {}; } catch { return {}; }
+}
+export function noteSpeed(withImage: boolean, ms: number, s: Settings = getSettings()): void {
+  try { localStorage.setItem(SPEED_KEY, JSON.stringify({ id: speedId(s), speed: updateSpeed(getSpeed(s), withImage, ms) })); } catch { /* storage unavailable */ }
+}
+
 /**
  * Try the job on the laptop. Resolves with the reply, or throws LocalSkip (with a content-free reason) when the
  * caller should use Claude instead.
@@ -58,6 +68,8 @@ export class LocalSkip extends Error {}
 export async function tryLocal(opts: { feature: string; system?: string; user: Content[] | string; maxTokens?: number; signal?: AbortSignal; timeoutMs?: number }): Promise<string> {
   const s = getSettings();
   if (!localConfigured(s) || !localAllowed(opts.feature, s.localScope)) throw new LocalSkip("not a local job");
+  const image = hasImage(opts.user);
+  if (!fastEnough(opts.feature, image, getSpeed(s))) { count(`ai.local.fallback.slow`); throw new LocalSkip("too slow"); }
   const probe = await probeLocal();
   if (!probe.ok) throw new LocalSkip("unreachable");
   const model = pickModel(probe.models, s.localModel.trim());
@@ -67,8 +79,9 @@ export async function tryLocal(opts: { feature: string; system?: string; user: C
   const ctrl = new AbortController();
   const onAbort = () => ctrl.abort();
   opts.signal?.addEventListener("abort", onAbort);
-  // a local model is slower than the API; long jobs get longer, but a stuck laptop must not hold you up for ages
-  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? (opts.feature === "mathcheck" ? 30_000 : 150_000));
+  // give up a little past what you'd wait for this job; the time it took (or the timeout) teaches the speed estimate
+  const limit = opts.timeoutMs ?? localTimeout(opts.feature);
+  const timer = setTimeout(() => ctrl.abort(), limit);
   const why = (reason: string) => { count(`ai.local.fallback.${reason}`); warn("ai", "laptop model skipped", { feature: opts.feature, reason, ms: Math.round(performance.now() - t0) }); return new LocalSkip(reason); };
   try {
     let res: Response;
@@ -84,18 +97,20 @@ export async function tryLocal(opts: { feature: string; system?: string; user: C
       });
     } catch {
       if (opts.signal?.aborted) throw new LocalSkip("cancelled");
+      if (ctrl.signal.aborted) { noteSpeed(image, limit, s); throw why("timeout"); }
       markLocalDown();
-      throw why(ctrl.signal.aborted ? "timeout" : "network");
+      throw why("network");
     }
     if (!res.ok) {
       // 400 with an image usually means the chosen model can't see pictures
-      throw why(res.status === 400 && hasImage(opts.user) ? "no-vision" : `http-${res.status}`);
+      throw why(res.status === 400 && image ? "no-vision" : `http-${res.status}`);
     }
     const data = await res.json().catch(() => null);
     const choice = data?.choices?.[0];
     const reply = cleanReply(String(choice?.message?.content ?? ""));
     if (!replyUsable(opts.feature, reply, choice?.finish_reason)) throw why(choice?.finish_reason === "length" ? "cut-off" : "bad-reply");
     const ms = performance.now() - t0;
+    noteSpeed(image, ms, s);
     count(`ai.local.${opts.feature}`);
     track("ai.local.ms", ms);
     track(`ai.local.${opts.feature}.ms`, ms);
@@ -107,7 +122,7 @@ export async function tryLocal(opts: { feature: string; system?: string; user: C
   }
 }
 
-export type LocalTest = { ok: boolean; reason?: string; models: string[]; model?: string; ms?: number; reads?: string; vision?: boolean };
+export type LocalTest = { ok: boolean; reason?: string; models: string[]; model?: string; ms?: number; reads?: string; vision?: boolean; speed?: Speed };
 
 /**
  * Settings → Test: is the laptop reachable, which model will be used, and can it read a picture? The picture is a
@@ -127,9 +142,10 @@ export async function testLocal(picture: string): Promise<LocalTest> {
         messages: toChatMessages(undefined, [{ type: "image", source: { type: "base64", media_type: "image/png", data: picture.split(",")[1] } }, { type: "text", text: "What sum is written in this picture? Reply with just the sum." }]) }),
     });
     const ms = Math.round(performance.now() - t0);
+    if (res.ok) noteSpeed(true, ms, s);
     if (!res.ok) return { ok: true, models: probe.models, model, ms, vision: false, reason: res.status === 400 ? "this model can't read images; pick a vision model" : `the server answered ${res.status}` };
     const data = await res.json().catch(() => null);
-    return { ok: true, models: probe.models, model, ms, vision: true, reads: cleanReply(String(data?.choices?.[0]?.message?.content ?? "")).slice(0, 60) };
+    return { ok: true, models: probe.models, model, ms, vision: true, speed: getSpeed(s), reads: cleanReply(String(data?.choices?.[0]?.message?.content ?? "")).slice(0, 60) };
   } catch {
     return { ok: false, models: probe.models, model, reason: "the model didn't answer" };
   }

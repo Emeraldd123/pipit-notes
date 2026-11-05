@@ -75,3 +75,29 @@ export function pickModel(available: string[], wanted: string): string | null {
   const vision = available.find((m) => /vl|vision|gemma-?[34]|qwen3\.5|pixtral|llava|minicpm-v|ocr/i.test(m) && !/embed/i.test(m));
   return vision ?? available.find((m) => !/embed|rerank|whisper|tts/i.test(m)) ?? null;
 }
+
+// --- speed: a laptop running on its CPU can take ~50 s to read one picture. That's fine for jobs that run in the
+// background (search indexing), not for ones you're waiting on (math check). Each job has a budget; once the laptop's
+// measured speed is over it, that job goes straight to Claude, so you never wait twice.
+/** How long you'd reasonably wait for each job, in ms. Unlisted jobs: 120 s. */
+export const LATENCY_BUDGET: Record<string, number> = {
+  mathcheck: 12_000, math: 20_000, graph: 20_000, text: 30_000, chem: 30_000, working: 40_000,
+  "explain.followup": 45_000, "map.link": 45_000, ask: 60_000, "cards.region": 90_000, "cards.text": 90_000,
+  transcribe: 240_000, practice: 240_000, cards: 300_000, map: 300_000, latex: 300_000,
+};
+export const budgetFor = (feature: string) => LATENCY_BUDGET[feature] ?? 120_000;
+
+export type Speed = { image?: number; text?: number };   // typical ms per job, for jobs with and without a picture
+/** Running estimate (EWMA, recent jobs count most). */
+export function updateSpeed(s: Speed, withImage: boolean, ms: number): Speed {
+  const k = withImage ? "image" : "text";
+  const prev = s[k];
+  return { ...s, [k]: Math.round(prev == null ? ms : prev * 0.6 + ms * 0.4) };
+}
+/** Should this job try the laptop, given how fast it has been? Unknown speed: try (that's how it's measured). */
+export function fastEnough(feature: string, withImage: boolean, s: Speed): boolean {
+  const typical = withImage ? s.image : s.text;
+  return typical == null || typical <= budgetFor(feature);
+}
+/** Give up on the laptop after this long (a bit past the budget), so a slow laptop costs at most one wait. */
+export const localTimeout = (feature: string) => Math.round(budgetFor(feature) * 1.25);
