@@ -7,7 +7,8 @@ import { RichText } from "@/components/blocks";
 import { Button, Card as UiCard, Modal, Toast } from "@/components/ui";
 import { LessonRunner, type LessonResult } from "@/components/lesson";
 import { ExamResults, ExamRunner, MarkingScreen } from "@/components/exam-runner";
-import { listNotebooks, listNotes, type ExamRec, type MistakeRec } from "@/lib/db";
+import { getMeta, listNotebooks, listNotes, setMeta, type ExamRec, type MistakeRec } from "@/lib/db";
+import { avoidList, caseKey, remember, repeats, type CaseRec } from "@/lib/case-memory";
 import {
   addAttempt, deleteCard, deleteExam, rescoreLatestAttempt, updateExamDef, deleteMistake, getProgress, listCards, listExams, listMistakes, patchMistake, putCards, putProgress, resetStudyData, saveExam,
   type ResetWhat,
@@ -779,8 +780,10 @@ function ExamModal({ ai, notes, notebooks, onClose, onReady, setBusy, flash }: {
       const past = usePast ? await pastExamsFor(excerpts, pastPick === "best" ? undefined : pastPick) : [];
       if (past.length) count(past[0].id.startsWith("ocw:") ? "study.exam.pastStyle.builtin" : "study.exam.pastStyle.mine");
       else if (usePast && pastPick === "best") flash(`These notes don't look like ${subjects.length ? subjects.join(", ").toLowerCase() : "a subject with built-in exams"}, so this exam uses a general format. Pick an exam yourself to copy its format anyway.`);
+      // case memory: the scenarios recent exams on these notes used, so this one picks different ones
+      const memory = (await getMeta<CaseRec[]>(caseKey(scope)).catch(() => undefined)) ?? [];
       count("study.exam.generate");
-      let exam = await generateExam({ excerpts, questions, difficulty, style, figures, images, textbook, cases, pastExams: past.map((e) => ({ title: e.title, text: e.text })) });
+      let exam = await generateExam({ excerpts, questions, difficulty, style, figures, images, textbook, cases, avoidCases: avoidList(memory), pastExams: past.map((e) => ({ title: e.title, text: e.text })) });
       // textbook and case-study questions must rest on something the notes teach (coverage.ts)
       const c = checkSolvable(exam, excerpts, textbook);
       if (!c.exam.sections.length) { setErr("Every question needed material your notes don't cover. Try again, or untick the textbook / case-study options."); return; }
@@ -802,6 +805,10 @@ function ExamModal({ ai, notes, notebooks, onClose, onReady, setBusy, flash }: {
       }
       if (images.length) exam = await resolveCrops(exam, images);
       if (past.length) exam = { ...exam, styleFrom: { title: past[0].title, credit: past[0].credit, source: past[0].source } };
+      const reused = repeats(exam, memory);
+      count(memory.length ? (reused.length ? "study.exam.cases.reused" : "study.exam.cases.allNew") : "study.exam.cases.first");
+      for (let i = 0; i < reused.length; i++) count("study.exam.cases.reusedOne");
+      void setMeta(caseKey(scope), remember(memory, exam)).catch(() => undefined);
       onReady(exam);
     } catch (e) { setErr(e instanceof AiError ? e.message : "Something went wrong: " + (e as Error).message); logError("exam", e); } finally { setBusy(null); }
     void flash;

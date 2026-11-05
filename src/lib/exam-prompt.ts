@@ -23,6 +23,7 @@ export type ExamSpec = {
   images?: { label: string; dataUrl: string }[]; // page images the model may crop figures from
   textbook?: Excerpt[];              // reference pages (numbered T1, T2…) the writer may adapt problems from
   cases?: boolean;                   // include case-study / applied-research questions (CASE_RULES)
+  avoidCases?: string[];             // scenarios this student's earlier papers on these notes used (case memory): use different ones
   pastExams?: { title: string; text: string }[]; // real past exams from the course (e.g. MIT OCW), labelled E1, E2…: FORMAT only (STYLE_RULES)
   extraRules?: string;               // replaces the tuned house rules (the tuning loop uses this to try new ones)
 };
@@ -77,12 +78,13 @@ Make it feel like a real paper, not a quiz:
 - When a calculation has competing conventions (simple vs midpoint percentage change, g = 9.8 or 10, significant figures, one- or two-sided, rounding), say which one to use.
 - Test only the principles, methods and facts the notes teach — but you may apply them to situations, data and examples the notes never mention (that is what real exams do). Never require knowledge the notes don't give or the question doesn't supply. Use LaTeX in $...$ for maths and chemistry, and in the JSON write every LaTeX backslash DOUBLED (\\\\Delta, \\\\frac) so the JSON stays valid.
 - Before you finish, check every causal claim in your answers ("because", "so", "this causes"): it must be the actual mechanism, not a plausible-sounding one. If unsure, ask about something else.
+- Every question set in a concrete situation, system, organism, device, market, experiment or dataset gives "basis.scenario": a short label of it, under 10 words (e.g. "a phone charger left plugged in", "yeast in sealed bread dough"); "" if it has none. Use a different scenario for each question.
 - Be economical: keep stems tight and each model answer and marking-scheme point to a line, so the WHOLE exam fits comfortably in one reply (never stop mid-way).
 - Multiple choice and true/false must feel like a real, strict paper. ${DISTRACTOR_RULES} For a 4-option item: one correct, one near miss, one partly right, one weak. For numeric options, compute every wrong value by actually making one specific student error (forgetting a term, using the wrong formula, a unit slip, the inverse, stopping a step early) and name it in "why" — never round numbers chosen for being nearby. True/false statements that are false must be near misses, not obviously silly. Give every mcq part "why": one short reason per option in the same order (why it is right, or exactly which mistake leads to it).
 - Each part has: "type" ("mcq" | "numeric" | "short" | "working" | "tf"), "marks", "prompt", the model "answer", and a marking "scheme" (an array of the points that earn marks: one point per mark, each specific enough that two examiners would agree). mcq parts add "options" and "correct" (index from 0); for mcq the "answer" is the correct option's TEXT plus a short reason, never a letter (the app re-orders options), and the scheme never says "option A". numeric parts add "numeric":{"value":12.5,"tol":0.02,"unit":"m/s"} — tol is relative (0.02 = 2%). "working" = show-your-working or extended response. A one-part question may put these fields on the question itself.
 ${FIGURE_DOC}
 Return STRICT JSON only:
-{"title":"...","subject":"...","durationMin":60,"instructions":"...","sections":[{"title":"Section A — Multiple choice","instructions":"...","questions":[{"topic":"short topic name","basis":{"notes":[1,3],"textbook":null,"solvable":"yes"},"stem":"...","figure":{...},"parts":[{"label":"a","type":"numeric","marks":2,"prompt":"...","answer":"...","numeric":{...},"scheme":["..."]}]}]}]}`;
+{"title":"...","subject":"...","durationMin":60,"instructions":"...","sections":[{"title":"Section A — Multiple choice","instructions":"...","questions":[{"topic":"short topic name","basis":{"notes":[1,3],"textbook":null,"solvable":"yes","scenario":"a phone charger left plugged in"},"stem":"...","figure":{...},"parts":[{"label":"a","type":"numeric","marks":2,"prompt":"...","answer":"...","numeric":{...},"scheme":["..."]}]}]}]}`;
 
 
 // long multi-part papers in a real course format (24–35 parts) can run past 16k: a cut-off exam is a failed exam
@@ -102,6 +104,7 @@ export function buildExamPrompt(spec: ExamSpec): { system: string; content: Prom
     (spec.figures ? "Lean heavily on figures, data and applied scenarios — at least half the questions should need one. " : "Include figures where they genuinely help. ") +
     (spec.images?.length ? "You may crop figures from the attached page images where one is clearly relevant. " : "") +
     (spec.cases ? `Make exactly ${Math.max(1, Math.round(spec.questions / 3))} of the ${spec.questions} questions CASE-STUDY questions (including most extended ones and at least one multiple choice), following the CASE-STUDY rules and using cases that fit this subject; the rest test the notes directly. ` : "") +
+    (spec.avoidCases?.length ? `This student's earlier papers on these notes already used these scenarios. Use DIFFERENT ones (a different system, organism, device, market, setting or dataset, not a reworded version of one of these), still well established and fitting the notes: ${spec.avoidCases.map((c) => `"${c}"`).join("; ")}. ` : "") +
     (book ? "Take or adapt roughly a third of the questions from the textbook pages, following the TEXTBOOK PAGES rules. " : ""),
   });
   const house = (spec.extraRules ?? TUNED_RULES).trim();

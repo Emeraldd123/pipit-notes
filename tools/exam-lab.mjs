@@ -88,9 +88,9 @@ export function questionText(q) {
 export const excerptsOf = (f) => f.pages.map((text, i) => ({ n: i + 1, noteTitle: f.title, page: i, text }));
 
 /** Write one exam for fixture `f` with the app's prompt and validation. */
-export async function writeExam(api, f, { past = [], extraRules, questions = 8 } = {}) {
+export async function writeExam(api, f, { past = [], extraRules, questions = 8, avoidCases } = {}) {
   const excerpts = excerptsOf(f);
-  const { system, content } = buildExamPrompt({ excerpts, questions, difficulty: "same", style: f.style, figures: true, cases: true, pastExams: past, extraRules });
+  const { system, content } = buildExamPrompt({ excerpts, questions, difficulty: "same", style: f.style, figures: true, cases: true, pastExams: past, extraRules, avoidCases });
   const r = await api.call(system, content, EXAM_MAX_TOKENS, effortFor("exam", false, api.model));
   const exam = normalizeExam(parseModelJson(r.text));
   if (!exam) throw new Error(`unreadable exam (stop: ${r.stop})`);

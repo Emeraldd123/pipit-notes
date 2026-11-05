@@ -7,7 +7,7 @@ const sentence = (k) => Array.from({ length: k }, () => pick(words)).join(" ");
 
 function exam() {
   const qs = Array.from({ length: 8 }, (_, i) => ({
-    topic: pick(words), basis: { notes: [1 + (i % 3)], textbook: null, solvable: "yes", ...(i % 3 === 0 ? { kind: "case", principle: sentence(5) } : {}) },
+    topic: pick(words), basis: { notes: [1 + (i % 3)], textbook: null, solvable: "yes", scenario: pick(["a car battery and headlight", "a kettle element", "yeast in bread dough", "a phone charger", "a hospital oxygen tank", "a sprinter's muscle", "a solar panel on a roof", "a bike dynamo"]) + (Math.random() < 0.5 ? "" : ` ${n}`), ...(i % 3 === 0 ? { kind: "case", principle: sentence(5) } : {}) },
     stem: `Mock question ${++n}: ${sentence(14)}.`,
     parts: i % 2
       ? [{ label: "a", type: "mcq", marks: 1, prompt: `Which ${sentence(4)}?`, options: ["one", "two", "three", "four"], correct: 0, answer: "one, because it follows", why: ["right", "slip", "partly", "weak"], scheme: ["one"] }]
