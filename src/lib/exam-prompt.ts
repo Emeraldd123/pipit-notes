@@ -85,7 +85,8 @@ Return STRICT JSON only:
 {"title":"...","subject":"...","durationMin":60,"instructions":"...","sections":[{"title":"Section A — Multiple choice","instructions":"...","questions":[{"topic":"short topic name","basis":{"notes":[1,3],"textbook":null,"solvable":"yes"},"stem":"...","figure":{...},"parts":[{"label":"a","type":"numeric","marks":2,"prompt":"...","answer":"...","numeric":{...},"scheme":["..."]}]}]}]}`;
 
 
-export const EXAM_MAX_TOKENS = 16000;
+// long multi-part papers in a real course format (24–35 parts) can run past 16k: a cut-off exam is a failed exam
+export const EXAM_MAX_TOKENS = 20000;
 export type PromptBlock = { type: "text"; text: string } | { type: "image"; dataUrl: string };
 
 /** The exact system prompt and user content the app sends to write an exam (shared with tools/exam-eval.mjs). */

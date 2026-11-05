@@ -45,9 +45,13 @@ export function normalizeChecks(raw: unknown): Check[] {
   const list = Array.isArray((raw as { checks?: unknown })?.checks) ? (raw as { checks: unknown[] }).checks : [];
   return list.flatMap((c): Check[] => {
     const o = (c ?? {}) as Record<string, unknown>;
-    const verdict = o.verdict === "drop" ? "drop" : o.verdict === "fix" ? "fix" : null;
-    if (!verdict || !str(o.q)) return [];
-    return [{ q: str(o.q), part: str(o.part) || "-", verdict, problem: str(o.problem), fix: o.fix && typeof o.fix === "object" ? (o.fix as Check["fix"]) : undefined }];
+    // forgiving about wording: "Fix", "fixed", "correct", "remove"… and "q3(b)", "3b", "Question 3" all happen
+    const v = str(o.verdict).toLowerCase();
+    const verdict = /^(drop|remove|delete|discard|cut)/.test(v) ? "drop" : /^(fix|correct|amend|repair|change|edit)/.test(v) ? "fix" : null;
+    const qm = /(\d+)\s*\(?([a-z]{1,2}|[ivx]+)?\)?/i.exec(str(o.q) || str(o.question));
+    if (!verdict || !qm) return [];
+    const part = (str(o.part).replace(/[()\s]/g, "").replace(/^q?\d+/i, "") || qm[2] || "-").toLowerCase();
+    return [{ q: `q${qm[1]}`, part, verdict, problem: str(o.problem) || str(o.reason), fix: o.fix && typeof o.fix === "object" ? (o.fix as Check["fix"]) : undefined }];
   });
 }
 

@@ -49,6 +49,17 @@ test("a check on a one-part question applies whatever part label the checker use
   assert.equal(r2.exam.sections[0].questions[0].parts[1].correct, 1);
 });
 
+test("checks are read however the checker words them", () => {
+  const c = normalizeChecks({ checks: [
+    { q: "Q1", part: "(A)", verdict: "Fixed", problem: "p", fix: { answer: "4" } },
+    { question: "Question 2", verdict: "Remove", reason: "broken" },
+    { q: "q1(b)", verdict: "correct", problem: "key", fix: { correct: 1 } },
+    { q: "q1", verdict: "ok" },
+  ] });
+  assert.deepEqual(c.map((x) => [x.q, x.part, x.verdict]), [["q1", "a", "fix"], ["q2", "-", "drop"], ["q1", "b", "fix"]]);
+  assert.equal(c[1].problem, "broken");
+});
+
 test("a fix that can't be applied safely drops the part instead", () => {
   const r = applyChecks(exam(), normalizeChecks({ checks: [{ q: "q1", part: "b", verdict: "fix", problem: "x", fix: { correct: 9 } }] }));
   assert.equal(r.dropped, 1);

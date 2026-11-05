@@ -25,6 +25,9 @@ const MODEL = arg("model", "claude-sonnet-5-5");
 const api = makeApi({ key: KEY, model: MODEL, budget: BUDGET, log: console.log, ...(MOCK ? { fetchImpl: (await import("./exam-mock.mjs")).mockFetch } : {}) });
 const BUILTIN = JSON.parse(readFileSync("public/ocw/exams.json", "utf8")).exams;
 const SUBJECTS = [...FIXTURES, ...HOLDOUT];
+const STAMP = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19) + (MOCK ? "-mock" : "");
+const RAW = `data/exam-ab/${STAMP}-raw`;
+mkdirSync(RAW, { recursive: true });
 
 const JUDGE = `You are a strict head of department. A second examiner checked an exam paper and changed some parts. Judge each change independently: work the part out yourself from the stem, figure and notes first.
 For a FIX you see the part's two versions, "1" and "2", in random order. Say which is better as an exam part ("1", "2" or "same"), and whether each version is correct (the answer follows from the given data, exactly one keyed option is right, the scheme matches).
@@ -36,10 +39,16 @@ const partText = (p) => `[${p.type}, ${p.marks} marks] ${p.prompt}${fig(p.figure
 
 async function sample(f, rep) {
   const past = chooseStyleExamples(f.pages, [], BUILTIN);
-  const w = await writeExam(api, f, { past });
-  const v = await api.call(VERIFY_SYSTEM, [{ type: "text", text: verifyUserText(w.exam, w.excerpts) }], 3000, effortFor("exam.verify", false, MODEL));
-  let checks = [];
-  try { checks = normalizeChecks(parseModelJson(v.text)); } catch { return { subject: f.id, rep, error: "checker reply unreadable" }; }
+  const w = await writeExam(api, f, { past }).catch((e) => { throw new Error(`writing the exam: ${e.message}`); });
+  const v = await api.call(VERIFY_SYSTEM, [{ type: "text", text: verifyUserText(w.exam, w.excerpts) }], 8000, effortFor("exam.verify", false, MODEL));
+  // keep every raw reply, so a surprising result can be looked at instead of guessed at
+  writeFileSync(`${RAW}/${f.id}-${rep}-checker.txt`, `stop: ${v.stop} · output tokens: ${v.usage?.output_tokens}\n\n${v.text}`);
+  let checks = [], flagged = 0;
+  try {
+    const raw = parseModelJson(v.text);
+    flagged = Array.isArray(raw?.checks) ? raw.checks.length : 0;
+    checks = normalizeChecks(raw);
+  } catch { return { subject: f.id, rep, error: `checker reply unreadable (stop: ${v.stop}, ${v.usage?.output_tokens} output tokens)` }; }
   const r = applyChecks(w.exam, checks);
   const before = w.exam.sections.flatMap((s) => s.questions);
   const after = new Map(r.exam.sections.flatMap((s) => s.questions).map((q) => [q.id, q]));
@@ -53,7 +62,7 @@ async function sample(f, rep) {
     changes.push(np ? { kind: "fix", q, p, np, flip, problem: c.problem } : { kind: "drop", q, p, problem: c.problem });
   }
   const parts = before.reduce((n, q) => n + q.parts.length, 0);
-  if (!changes.length) return { subject: f.id, rep, parts, changes: [] };
+  if (!changes.length) return { subject: f.id, rep, parts, flagged, changes: [] };
   const text = changes.map((c, i) => {
     const head = `c${i + 1} (${c.kind.toUpperCase()}) question ${c.q.id}: ${c.q.stem}${fig(c.q.figure)}`;
     if (c.kind === "drop") return `${head}\n  removed part: ${partText(c.p)}`;
@@ -63,7 +72,7 @@ async function sample(f, rep) {
   const j = await api.call(JUDGE, [{ type: "text", text: `Student's notes:\n${w.excerpts.map((e) => `[${e.n}] ${e.text}`).join("\n\n")}\n\nChanges to judge:\n\n${text}` }], 3000, "low");
   const verdicts = parseModelJson(j.text)?.changes ?? [];
   return {
-    subject: f.id, rep, parts,
+    subject: f.id, rep, parts, flagged,
     changes: changes.map((c, i) => {
       const d = verdicts.find((x) => x.id === `c${i + 1}`) ?? {};
       if (c.kind === "drop") return { kind: "drop", problem: c.problem, broken: d.broken === true, stem: c.q.stem.slice(0, 100) };
@@ -81,7 +90,7 @@ outer: for (let rep = 1; rep <= REPS; rep++) {
   for (const [i, s] of settled.entries()) {
     const r = s.status === "fulfilled" ? s.value : { subject: SUBJECTS[i].id, rep, error: String(s.reason?.message ?? s.reason) };
     results.push(r);
-    console.log(r.error ? `  ${r.subject} #${rep}: ERROR ${r.error}` : `  ${r.subject} #${rep}: ${r.changes.length} change${r.changes.length === 1 ? "" : "s"} of ${r.parts} parts`);
+    console.log(r.error ? `  ${r.subject} #${rep}: ERROR ${r.error}` : `  ${r.subject} #${rep}: checker flagged ${r.flagged}, ${r.changes.length} applied, of ${r.parts} parts`);
     if (s.status === "rejected" && s.reason instanceof BudgetError) break outer;
   }
 }
@@ -105,6 +114,6 @@ const lines = [
   ...all.map((c) => `- [${c.kind}] ${c.stem}… — checker: ${c.problem}${c.kind === "fix" ? ` → judge: ${c.better === "fixed" ? "better" : c.better === "original" ? "WORSE" : c.better}${c.origCorrect ? "" : " (original was wrong)"}${c.newCorrect ? "" : " (fixed version still wrong)"}` : ` → judge: ${c.broken ? "rightly removed" : "GOOD PART LOST"}`}`),
 ];
 mkdirSync("data/exam-ab", { recursive: true });
-const out = `data/exam-ab/${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}${MOCK ? "-mock" : ""}.md`;
+const out = `data/exam-ab/${STAMP}.md`;
 writeFileSync(out, lines.join("\n"));
 console.log(`\n${lines.slice(2, 8).join("\n")}\n\nReport: ${out}`);

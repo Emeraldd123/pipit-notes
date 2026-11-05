@@ -108,7 +108,7 @@ export async function generateExam(spec: ExamSpec): Promise<Exam> {
 
 /** A second examiner works every part and fixes or drops the ones whose answer doesn't hold up (exam-verify.ts). */
 export async function verifyExam(exam: Exam, excerpts: Excerpt[]): Promise<VerifyResult> {
-  const raw = await claude({ feature: "exam.verify", maxTokens: 3000, system: VERIFY_SYSTEM, user: verifyUserText(exam, excerpts) });
+  const raw = await claude({ feature: "exam.verify", maxTokens: 8000, system: VERIFY_SYSTEM, user: verifyUserText(exam, excerpts) });
   const r = applyChecks(exam, normalizeChecks(extractJson<unknown>(raw)));
   // a checker that throws out most of the paper has probably misread it: keep the paper as written
   const parts = (e: Exam) => e.sections.reduce((n, s) => n + s.questions.reduce((m, q) => m + q.parts.length, 0), 0);
