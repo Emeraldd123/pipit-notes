@@ -344,6 +344,7 @@ function labelTarget(l: { tx: unknown; ty: unknown; to?: string }, els: DiagramE
 
 /** Text the writer placed so it runs off the edge is moved back inside (roughly 0.56 em per character). */
 function fitText(e: Extract<DiagramEl, { t: "text" }>, W: number, H: number) {
+  if (e.text.length * (e.size ?? 14) * 0.56 > W - 8) e.size = Math.max(9, Math.floor((W - 8) / (e.text.length * 0.56)));
   const size = e.size ?? 14, w = e.text.length * size * 0.56;
   if ((e.anchor ?? "start") === "start") e.x = Math.max(2, Math.min(e.x, W - 4 - w));
   else if (e.anchor === "end") e.x = Math.min(W - 2, Math.max(e.x, 4 + w));

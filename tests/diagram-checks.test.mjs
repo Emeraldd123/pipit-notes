@@ -58,6 +58,16 @@ test("the three faults from the first real run are caught (mitochondrion key, ch
   assert.match(gf, /text "well" sits on a rect outline/);
 });
 
+test("from the second run: a part that describes what it asks for, and a note too long for the frame", () => {
+  const potato = q(examWith({ type: "diagram", width: 400, height: 240, elements: [
+    { t: "rect", x: 100, y: 40, w: 200, h: 150 }, { t: "label", text: "X", x: 40, y: 40, tx: 100, ty: 60 },
+    { t: "text", x: 260, y: 230, text: "Scale: A zone radius 14 mm, B zone radius 6 mm, colonies inside B", size: 14 },
+  ] }, "Structure X is the thick outer layer. Name X and state its role.", "cell wall", "The diagram shows a potato cell in distilled water."));
+  assert.match(checkQuestion(potato).flags.join(" | "), /part . describes X in the same breath/);
+  const note = potato.figure.elements.find((e) => e.t === "text");
+  assert.ok(note.x + note.text.length * note.size * 0.56 <= 400 + 1 && note.size < 14, "a long note is shrunk to fit");
+});
+
 test("labels point at icon parts; unknown parts and labels for missing icons are reported", async () => {
   const { strayLabels } = await import("../tools/diagram-checks.mjs");
   const e = examWith({ type: "diagram", width: 420, height: 240, elements: [

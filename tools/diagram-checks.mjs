@@ -21,7 +21,7 @@ function covered(a, b) {
   return w > 0 && h > 0 ? (w * h) / Math.max(1, Math.min(a.w * a.h, b.w * b.h)) : 0;
 }
 
-const labelsOf = (f) => f.elements.flatMap((e) => [e.label, e.t === "text" ? e.text : undefined]).filter(Boolean).map(String);
+const labelsOf = (f) => f.elements.flatMap((e) => [e.label, e.t === "text" || e.t === "label" ? e.text : undefined]).filter(Boolean).map(String);
 // "structure X", "region Y", "the arrow labelled P", "at A"…: single capital letters the question points at
 const REF = /\b(?:structure|region|label(?:led)?|part|area|organ|organelle|cell|point|arrow|line|position|compartment|molecule|box|layer|site|location|tube|flask|vessel|chamber|side|stage|step|solution|beaker)\s+([A-HJ-Z])\b/g;
 
@@ -53,6 +53,7 @@ export function checkQuestion(q) {
       for (const letter of new Set([...p.prompt.matchAll(/\b([A-HJ-Z])\b/g)].map((m) => m[1]))) {
         if (labels.some((l) => new RegExp(`^${letter}\\s*[:=–-]\\s*\\S{3,}`).test(l))) out.flags.push(`the diagram describes ${letter} in a key, but part ${p.label || "-"} asks the student to name it`);
         if (new RegExp(`\\b${letter} is (the|a|an)\\b`).test(q.stem)) out.flags.push(`the stem describes ${letter}, but part ${p.label || "-"} asks the student to name it`);
+        if (new RegExp(`\\b${letter} is (the|a|an)\\b`).test(p.prompt)) out.flags.push(`part ${p.label || "-"} describes ${letter} in the same breath as asking for its name`);
       }
     }
     // numbers the question says the diagram shows
