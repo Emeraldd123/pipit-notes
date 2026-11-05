@@ -21,8 +21,8 @@
     "eval:cases": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-exam-eval.ps1 tools/exam-cases-test.mjs",
     "eval:ab": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-exam-eval.ps1 tools/exam-ab.mjs",
     "tune:auto": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-exam-eval.ps1 tools/exam-tune.mjs --auto --resume latest",
-    "deploy:test": "npm run check && node ../Pipit/node_modules/netlify-cli/bin/run.js deploy --dir=dist --functions=netlify/functions",
-    "deploy:prod": "npm run check && node ../Pipit/node_modules/netlify-cli/bin/run.js deploy --prod --dir=dist --functions=netlify/functions"
+    "deploy:test": "npm run check && node ../Pipit/node_modules/netlify-cli/bin/run.js deploy --no-build --site bc0e3907-d774-4ffd-9bee-c1c65dd81e2f --dir=dist --functions=netlify/functions",
+    "deploy:prod": "npm run check && node ../Pipit/node_modules/netlify-cli/bin/run.js deploy --prod --no-build --site bc0e3907-d774-4ffd-9bee-c1c65dd81e2f --dir=dist --functions=netlify/functions"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",
