@@ -38,7 +38,9 @@ test("icon names are matched forgivingly; unknown icons become labelled boxes", 
 test("the writer is told which icons exist; the review page draws them with credit", () => {
   const { system } = buildExamPrompt({ excerpts: [], questions: 8, difficulty: "same", style: "", figures: true });
   assert.match(system, /"t":"icon","name":"mitochondrion"/);
-  assert.match(system, /Icon names \(use exactly one of these\): .*mitochondrion.*phospholipid/);
+  assert.match(system, /Parts you can point at: mitochondrion \(outer membrane, cristae, matrix, intermembrane space\)/);
+  assert.match(system, /Icons that come whole[^:]*: .*phospholipid/);
+  assert.match(system, /"t":"label","text":"X","x":30,"y":40,"to":"mitochondrion\.cristae"/);
   const html = figureHtml({ type: "diagram", width: 300, height: 200, elements: [{ t: "icon", name: "mitochondrion", x: 10, y: 10, w: 100, h: 80, label: "X" }] });
   assert.match(html, /<image href="data:image\/svg\+xml;base64,/);
   assert.match(html, /Icons: Bioicons — /);

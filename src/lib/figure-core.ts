@@ -2,7 +2,8 @@
 // hand) and drawn locally as SVG — so graphs are exact, charts are crisp, and nothing needs
 // to be fetched. Pure + unit-tested: everything here returns data, not DOM.
 import { parseEquation } from "./mathexpr.ts";
-import { BIOICON_NAMES } from "./bioicon-names.ts";
+import { BIOICON_ASPECT, BIOICON_NAMES } from "./bioicon-names.ts";
+import { BIOICON_PARTS } from "./bioicon-parts.ts";
 
 export type FigurePoint = { x: number; y: number; label?: string };
 export type GraphFigure = {
@@ -31,7 +32,9 @@ export type DiagramEl =
   | { t: "point"; x: number; y: number; label?: string }
   | { t: "arc"; cx: number; cy: number; r: number; from: number; to: number; label?: string }
   /** a scientific icon from the bundled Bioicons set (bioicon-names.ts), drawn inside the box x,y,w,h */
-  | { t: "icon"; name: string; x: number; y: number; w: number; h: number; label?: string };
+  | { t: "icon"; name: string; x: number; y: number; w: number; h: number; label?: string }
+  /** a letter (or short word) with a thin leader line to the point it labels: a spot, or a named part of an icon */
+  | { t: "label"; text: string; x: number; y: number; tx: number; ty: number; part?: string; unknownPart?: boolean };
 export type DiagramFigure = { type: "diagram"; width: number; height: number; elements: DiagramEl[]; caption?: string };
 /** A picture cut out of one of the student's own pages (the exam builder fills in `src`). */
 export type CropFigure = { type: "crop"; image: number; bbox: [number, number, number, number]; src?: string; caption?: string };
@@ -106,6 +109,7 @@ export function normalizeFigure(raw: unknown): Figure | null {
       const width = fin(r.width) ? Math.min(800, Math.max(120, r.width)) : 400;
       const height = fin(r.height) ? Math.min(600, Math.max(100, r.height)) : 300;
       const els: DiagramEl[] = [];
+      const pending: { text: string; x: number; y: number; tx: unknown; ty: unknown; to?: string }[] = [];
       for (const e of (Array.isArray(r.elements) ? r.elements : []).slice(0, 80) as Record<string, unknown>[]) {
         const n = (k: string) => e[k] as number;
         switch (e?.t) {
@@ -124,8 +128,19 @@ export function normalizeFigure(raw: unknown): Figure | null {
             else els.push({ t: "rect", x: n("x"), y: n("y"), w: n("w"), h: n("h"), label: str(e.label, 24) || str(e.name, 24) });
             break;
           }
+          case "label": {
+            const text = str(e.text, 12) ?? str(e.label, 12);
+            if (text && fin(e.x) && fin(e.y)) pending.push({ text, x: n("x"), y: n("y"), tx: e.tx, ty: e.ty, to: typeof e.to === "string" ? e.to : undefined });
+            break;
+          }
         }
       }
+      for (const l of pending) {
+        const t = labelTarget(l, els);
+        // a label pointing at nothing we can find still shows its letter, so the question isn't left pointing at air
+        els.push(t ? { t: "label", text: l.text, x: l.x, y: l.y, ...t } : { t: "text", x: l.x, y: l.y, text: l.text, size: 15 });
+      }
+      for (const e of els) if (e.t === "text") fitText(e, width, height);
       return els.length ? { type: "diagram", width, height, elements: els, caption } : null;
     }
     case "crop": {
@@ -305,6 +320,37 @@ export function drawChart(f: ChartFigure, W = 520, H = 340): Drawing {
   return { w: W, h: H, prims };
 }
 
+/** Where an icon is actually drawn inside its box (it keeps its shape, centred). */
+export function iconRect(e: { name: string; x: number; y: number; w: number; h: number }) {
+  const a = BIOICON_ASPECT[e.name] ?? e.w / e.h;
+  const w = Math.min(e.w, e.h * a), h = w / a;
+  return { x: e.x + (e.w - w) / 2, y: e.y + (e.h - h) / 2, w, h };
+}
+
+/** The point a label points at: its own tx,ty, or a named part of an icon in the same diagram ("mitochondrion.cristae"). */
+function labelTarget(l: { tx: unknown; ty: unknown; to?: string }, els: DiagramEl[]): { tx: number; ty: number; part?: string; unknownPart?: boolean } | null {
+  if (!l.to) return typeof l.tx === "number" && typeof l.ty === "number" && Number.isFinite(l.tx) && Number.isFinite(l.ty) ? { tx: l.tx, ty: l.ty } : null;
+  const [iconPart, ...rest] = l.to.split(/[.:/>]|→/);
+  const name = iconName(iconPart);
+  const icon = els.find((e): e is Extract<DiagramEl, { t: "icon" }> => e.t === "icon" && e.name === name);
+  if (!icon) return null;
+  const r = iconRect(icon);
+  const want = rest.join(" ").trim().toLowerCase();
+  const parts = BIOICON_PARTS[icon.name] ?? {};
+  const key = Object.keys(parts).find((k) => k === want || k.replace(/s$/, "") === want.replace(/s$/, ""));
+  const [fx, fy] = key ? parts[key] : [0.5, 0.5];
+  return { tx: r.x + fx * r.w, ty: r.y + fy * r.h, part: key, unknownPart: want ? !key : undefined };
+}
+
+/** Text the writer placed so it runs off the edge is moved back inside (roughly 0.56 em per character). */
+function fitText(e: Extract<DiagramEl, { t: "text" }>, W: number, H: number) {
+  const size = e.size ?? 14, w = e.text.length * size * 0.56;
+  if ((e.anchor ?? "start") === "start") e.x = Math.max(2, Math.min(e.x, W - 4 - w));
+  else if (e.anchor === "end") e.x = Math.min(W - 2, Math.max(e.x, 4 + w));
+  else e.x = Math.max(w / 2 + 2, Math.min(e.x, W - w / 2 - 2));
+  e.y = Math.max(size, Math.min(e.y, H - 4));
+}
+
 /** A bundled icon's name from what the writer wrote ("Mitochondria", "test tubes" → "mitochondrion", "test tube"), or null. */
 export function iconName(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
@@ -355,6 +401,14 @@ export function drawDiagram(f: DiagramFigure): Drawing {
         const sweep = ((e.to - e.from + 360) % 360) > 180 ? 1 : 0;
         prims.push({ t: "path", d: `M${p(a0)}A${e.r} ${e.r} 0 ${sweep} 0 ${p(a1)}`, stroke: INK, w: 1.6 });
         if (e.label) { const m = (a0 + a1) / 2; prims.push({ t: "text", x: e.cx + (e.r + 14) * Math.cos(-m), y: e.cy + (e.r + 14) * Math.sin(-m) + 4, s: e.label, size: 13, anchor: "middle" }); }
+        break;
+      }
+      case "label": {
+        // leader line from the letter to a dot on the target; the letter sits just beyond the line's start
+        const dx = e.x - e.tx, dy = e.y - e.ty, len = Math.hypot(dx, dy) || 1;
+        prims.push({ t: "path", d: `M${f2(e.x)} ${f2(e.y)}L${f2(e.tx)} ${f2(e.ty)}`, stroke: INK, w: 1.3 });
+        prims.push({ t: "circle", cx: e.tx, cy: e.ty, r: 3, fill: INK });
+        prims.push({ t: "text", x: e.x + (dx / len) * 10, y: e.y + (dy / len) * 10 + 5, s: e.text, size: 15, anchor: "middle", bold: true });
         break;
       }
       case "icon":

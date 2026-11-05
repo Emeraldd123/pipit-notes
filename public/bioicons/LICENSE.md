@@ -10,7 +10,7 @@ Many CC BY 3.0 icons are by [Servier Medical Art](https://smart.servier.com/), s
 
 | Name in the app | Bioicons file | Author | Licence |
 |---|---|---|---|
-| animal cell | cell-1 | Servier | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
+| epithelial cell | cell-1 | Servier | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
 | mitochondrion | mitochondria | jaiganesh | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
 | nucleus | nucleus-closeup | Servier | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
 | ribosome | ribosome | jaiganesh | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
@@ -61,9 +61,7 @@ Many CC BY 3.0 icons are by [Servier Medical Art](https://smart.servier.com/), s
 | test tube | testtube-pink | Servier | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
 | pipette | pipette-glass | Servier | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
 | micropipette | micropipette | Servier | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
-| microscope | desktop_electron_microscope | DBCLS | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 | petri dish | CC_dish | Marcel Tisch | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
-| burette | burette-clamp | Servier | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
 | thermometer | thermometer | kehan | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
 | bunsen burner | bunsen-burner | Servier | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
 | balance | scale-balanced | Servier | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |

@@ -92,8 +92,9 @@ export async function writeExam(api, f, { past = [], extraRules, questions = 8, 
   const excerpts = excerptsOf(f);
   const { system, content } = buildExamPrompt({ excerpts, questions, difficulty: "same", style: f.style, figures: true, cases: true, pastExams: past, extraRules, avoidCases });
   const r = await api.call(system, content, EXAM_MAX_TOKENS, effortFor("exam", false, api.model));
-  const exam = normalizeExam(parseModelJson(r.text));
-  if (!exam) throw new Error(`unreadable exam (stop: ${r.stop})`);
+  let exam = null;
+  try { exam = normalizeExam(parseModelJson(r.text)); } catch { /* reported below, with the reply attached */ }
+  if (!exam) throw Object.assign(new Error(`unreadable exam (stop: ${r.stop}, ${r.usage?.output_tokens} output tokens)`), { raw: r.text });
   const c = checkSolvable(exam, excerpts, []);
   const qs = c.exam.sections.flatMap((s) => s.questions);
   const parts = allParts(c.exam).map((x) => x.p);

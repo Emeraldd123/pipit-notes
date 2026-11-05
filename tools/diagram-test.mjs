@@ -10,7 +10,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { exec } from "node:child_process";
 import { parseModelJson } from "../src/lib/json-repair.ts";
 import { BudgetError, makeApi, questionText, writeExam } from "./exam-lab.mjs";
-import { checkQuestion, unknownIcons } from "./diagram-checks.mjs";
+import { checkQuestion, strayLabels, unknownIcons } from "./diagram-checks.mjs";
 import { questionHtml } from "./question-html.mjs";
 import { SCENARIOS } from "./diagram-scenarios.mjs";
 
@@ -28,12 +28,14 @@ const OUT = `data/diagram-test/${STAMP}`;
 mkdirSync(OUT, { recursive: true });
 
 async function run(s) {
-  const w = await writeExam(api, s, { questions: QUESTIONS });
+  let w;
+  try { w = await writeExam(api, s, { questions: QUESTIONS }); }
+  catch (e) { if (e.raw) writeFileSync(`${OUT}/${s.id}-raw-FAILED.txt`, e.raw); throw e; }   // keep the reply so a failure can be read
   writeFileSync(`${OUT}/${s.id}-raw.txt`, w.raw);
   let raw = null;
   try { raw = parseModelJson(w.raw); } catch { /* the app's own reading already succeeded */ }
   const qs = w.qs.map((q) => ({ q, c: checkQuestion(q) }));
-  return { s, qs, unknown: raw ? unknownIcons(raw) : [], diagrams: qs.reduce((n, x) => n + x.c.diagrams, 0) };
+  return { s, qs, unknown: raw ? unknownIcons(raw) : [], stray: raw ? strayLabels(raw) : [], diagrams: qs.reduce((n, x) => n + x.c.diagrams, 0) };
 }
 
 console.log(`Diagram test: ${scenarios.length} scenarios × ${QUESTIONS} questions, budget $${BUDGET}.`);
@@ -63,7 +65,7 @@ const withIcons = withDiagram.filter((x) => x.c.icons.length);
 const flagged = withDiagram.filter((x) => x.c.flags.length);
 const summary = [
   `${results.length} scenarios · ${allQs.length} questions · ${withDiagram.length} with a diagram · ${withIcons.length} of those use icons · ${flagged.length} flagged · spent $${api.ledger.spent.toFixed(2)}`,
-  `Unknown icon names tried: ${[...new Set(results.flatMap((r) => r.unknown))].join(", ") || "none"}`,
+  `Unknown icon names tried: ${[...new Set(results.flatMap((r) => r.unknown))].join(", ") || "none"} · labels pointing at icons not in the diagram: ${[...new Set(results.flatMap((r) => r.stray))].join(", ") || "none"}`,
 ];
 const section = (r) => {
   const used = [...new Set(r.qs.flatMap((x) => x.c.icons))];

@@ -3,6 +3,11 @@
 import type { Excerpt } from "./ai.ts";
 import { TUNED_RULES } from "./exam-tuned.ts";
 import { BIOICON_NAMES } from "./bioicon-names.ts";
+import { BIOICON_PARTS } from "./bioicon-parts.ts";
+
+// what the writer may point at inside icons, and the icons that only come whole
+const ICON_PARTS = Object.entries(BIOICON_PARTS).map(([n, parts]) => `${n} (${Object.keys(parts).join(", ")})`).join("; ");
+const WHOLE_ICONS = BIOICON_NAMES.filter((n) => !BIOICON_PARTS[n]).join(", ");
 
 // How a real teacher builds wrong options (item-writing guidance: distractors come from students' typical errors).
 // Used for flashcards and exam multiple choice.
@@ -65,7 +70,9 @@ FIGURES (drawn by the app from your JSON — they must be CORRECT and must match
 - Data table: {"type":"table","headers":["Trial","Time (s)"],"rows":[[1,2.31],[2,2.28]]}
 - Diagram on a width×height canvas (y grows DOWNWARD): {"type":"diagram","width":400,"height":260,"elements":[{"t":"line","x1":20,"y1":200,"x2":380,"y2":200,"label":"ground"},{"t":"rect","x":150,"y":150,"w":60,"h":50,"label":"m"},{"t":"line","x1":180,"y1":150,"x2":180,"y2":80,"arrow":true,"label":"N"},{"t":"circle","cx":100,"cy":100,"r":30},{"t":"poly","points":[[20,200],[120,200],[20,120]]},{"t":"point","x":60,"y":60,"label":"A"},{"t":"arc","cx":20,"cy":200,"r":30,"from":0,"to":37,"label":"θ"},{"t":"text","x":200,"y":30,"text":"label"}]}
   Use diagrams for geometry (triangles with side labels, circles with chords), free-body diagrams (arrows), ramps and pulleys, circuits (lines/rects/circles), ray diagrams, cell/organ sketches, energy-level or reaction-coordinate sketches. Keep labels short.
-  Real scientific icons can be placed in a diagram: {"t":"icon","name":"mitochondrion","x":40,"y":60,"w":120,"h":80,"label":"X"} draws that icon inside the box (label below it). Use them for cells, organelles, membranes, molecules, organisms, organs and lab apparatus, and draw what no icon shows with rects, lines, arrows and text (e.g. a membrane as two parallel lines with complexes as labelled rects across it and H+ arrows through them; the "ion channel" icon already includes a short membrane section). When a question asks the student to identify a structure, label it with a letter, not its name. Icon names (use exactly one of these): ${BIOICON_NAMES.join(", ")}.
+  LABELS: point at a structure with {"t":"label","text":"X","x":30,"y":40,"tx":120,"ty":90}: the letter sits at x,y with a thin leader line (no arrowhead) to the point tx,ty. Use a label element for every lettered structure, placed in the margin beside the drawing. Use arrows (a line with "arrow":true) only for movement or flow (H+ moving, blood flow, electrons), never to point at a label.
+  ICONS: {"t":"icon","name":"mitochondrion","x":160,"y":40,"w":160,"h":140} draws a real scientific icon inside that box, keeping its shape. To label a PART of an icon use {"t":"label","text":"X","x":30,"y":40,"to":"mitochondrion.cristae"} and the app finds where that part is. Parts you can point at: ${ICON_PARTS}. Icons that come whole (label the whole icon, or draw the detail yourself): ${WHOLE_ICONS}. Draw anything no icon shows with rects, lines and text (a membrane as two parallel lines with labelled rects across it; a light microscope or burette from rects and lines). When the layout matters, arrange icons the way the real thing is (organelles inside a drawn cell outline, organs in body order), not in a row.
+  DIAGRAM RULES: when a part asks the student to name or identify a lettered structure, nothing in the diagram, a key or the stem may name or describe it (no "X: folded inner membrane"). Every value a question needs (distances, readings, sizes, times) must be written in the figure or the stem: never say "shown in the diagram" for numbers the diagram doesn't show. Keep every piece of text inside the frame and at least 8 px clear of lines and shapes.
 - Pictures from the student's own pages (only if images are attached): {"type":"crop","image":2,"bbox":[0.1,0.25,0.8,0.4]} where image is the attached image number and bbox is [x,y,width,height] as fractions of that image. Crop only a clear diagram, graph or figure — never plain text.
 A question or an individual part may carry a "figure". Put the figure on the question when all parts use it.`;
 
