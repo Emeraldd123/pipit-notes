@@ -758,7 +758,8 @@ function ExamModal({ ai, notes, notebooks, onClose, onReady, setBusy, flash }: {
   const books = notes.filter((n) => n.isTextbook);
   const [useBooks, setUseBooks] = useState(books.length > 0);
   const [cases, setCases] = useState(true);
-  const [doubleCheck, setDoubleCheck] = useState(true);
+  // off by default: in testing the checker changed nothing, and much of what the judge flagged were nitpicks, not errors
+  const [doubleCheck, setDoubleCheck] = useState(false);
   const pastExams = notes.filter((n) => n.isPastExam);
   const [usePast, setUsePast] = useState(true);
   const [pastPick, setPastPick] = useState("best");
