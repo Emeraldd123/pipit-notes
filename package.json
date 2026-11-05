@@ -17,6 +17,7 @@
     "tune:exam": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-exam-eval.ps1 tools/exam-tune.mjs",
     "tune:apply": "node tools/exam-tune-apply.mjs",
     "tune:review": "node tools/tune-review-build.mjs",
+    "eval:ab": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-exam-eval.ps1 tools/exam-ab.mjs",
     "tune:auto": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-exam-eval.ps1 tools/exam-tune.mjs --auto --resume latest",
     "deploy:test": "npm run check && node ../Pipit/node_modules/netlify-cli/bin/run.js deploy --dir=dist --functions=netlify/functions",
     "deploy:prod": "npm run check && node ../Pipit/node_modules/netlify-cli/bin/run.js deploy --prod --dir=dist --functions=netlify/functions"

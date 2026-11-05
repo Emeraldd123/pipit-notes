@@ -18,7 +18,7 @@ import {
 } from "@/lib/study-core";
 import { crownOf, isDue, isNew } from "@/lib/srs";
 import { allParts, buildResult, reportQuestion, type Exam, type Part, type PartAnswer, type PartMark, type Question, type ReportReason } from "@/lib/exam-core";
-import { generateExam, markWithAi } from "@/lib/ai-study";
+import { generateExam, markWithAi, verifyExam } from "@/lib/ai-study";
 import { AiError } from "@/lib/ai";
 import { aiReady, getSettings, useSettings } from "@/lib/settings";
 import { estimateUsd, formatUsd } from "@/lib/ai-cost";
@@ -758,6 +758,7 @@ function ExamModal({ ai, notes, notebooks, onClose, onReady, setBusy, flash }: {
   const books = notes.filter((n) => n.isTextbook);
   const [useBooks, setUseBooks] = useState(books.length > 0);
   const [cases, setCases] = useState(true);
+  const [doubleCheck, setDoubleCheck] = useState(true);
   const pastExams = notes.filter((n) => n.isPastExam);
   const [usePast, setUsePast] = useState(true);
   const [pastPick, setPastPick] = useState("best");
@@ -787,6 +788,17 @@ function ExamModal({ ai, notes, notebooks, onClose, onReady, setBusy, flash }: {
       if (c.cases) count("study.exam.cases");
       for (let i = 0; i < c.dropped; i++) count("study.exam.unsupported.dropped");
       if (c.dropped) flash(`Left out ${c.dropped} question${c.dropped === 1 ? "" : "s"} that didn't rest on anything in your notes.`);
+      if (doubleCheck) {
+        setBusy("Double-checking every answer…");
+        try {
+          const v = await verifyExam(exam, excerpts);
+          exam = v.exam;
+          count(v.fixed || v.dropped ? "study.exam.verify.changed" : "study.exam.verify.clean");
+          for (let i = 0; i < v.fixed; i++) count("study.exam.verify.fixed");
+          for (let i = 0; i < v.dropped; i++) count("study.exam.verify.dropped");
+          if (v.fixed || v.dropped) flash(`Double-checked: ${[v.fixed ? `fixed ${v.fixed} answer${v.fixed === 1 ? "" : "s"}` : "", v.dropped ? `left out ${v.dropped} part${v.dropped === 1 ? "" : "s"} that didn't hold up` : ""].filter(Boolean).join(", ")}.`);
+        } catch (e) { if (!(e instanceof AiError)) logError("exam.verify", e); count("study.exam.verify.failed"); }
+      }
       if (images.length) exam = await resolveCrops(exam, images);
       if (past.length) exam = { ...exam, styleFrom: { title: past[0].title, credit: past[0].credit, source: past[0].source } };
       onReady(exam);
@@ -824,6 +836,7 @@ function ExamModal({ ai, notes, notebooks, onClose, onReady, setBusy, flash }: {
           </div>
           <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={figures} onChange={(e) => setFigures(e.target.checked)} /><span><b>Lots of figures</b> — graphs, data tables, charts and diagrams to read and calculate from</span></label>
           <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={pictures} onChange={(e) => setPictures(e.target.checked)} /><span><b>Use pictures from my notes</b> — slides and diagrams from your PDFs can appear in questions <span className="text-foreground-muted">(sends a few page images; costs more)</span></span></label>
+          <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={doubleCheck} onChange={(e) => setDoubleCheck(e.target.checked)} /><span><b>Double-check answers</b> — a second examiner works every question and fixes or removes any whose answer doesn&apos;t follow from the data <span className="text-foreground-muted">(about {formatUsd(estimateUsd("exam.verify", 1, getSettings()))} more)</span></span></label>
           <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={cases} onChange={(e) => setCases(e.target.checked)} /><span><b>Case studies &amp; real research</b> — about a third of the questions put what you learned into real experiments, applications and data your notes don&apos;t mention, like a real exam would. Everything new is explained in the question.</span></label>
           {books.length > 0 ? (
             <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={useBooks} onChange={(e) => setUseBooks(e.target.checked)} /><span><b>Use questions from my textbooks</b> — real problems from {books.length === 1 ? `“${books[0].title}”` : `your ${books.length} textbooks`}, but only ones your notes give you what you need to solve <span className="text-foreground-muted">(costs a little more)</span></span></label>

@@ -26,6 +26,15 @@ export async function mockFetch(_url, init) {
     const ids = [...user.matchAll(/^(q\d+)/gm)].map((m) => m[1]);
     const s = () => pick([1, 2, 2, 2]);
     text = JSON.stringify({ items: ids.map((id) => ({ id, realistic: s(), applied: null, self_contained: s(), one_answer: s(), accurate: s(), distractors: s(), fix: pick(["", "State the units.", "The data in the stem doesn't match the answer."]) })), ...(sys.includes("PAST EXAM") ? { paper: { style_match: s(), copied: false, style_fix: "Use the course's point values." } } : {}) });
+  } else if (sys.startsWith("You are the second examiner")) {
+    const ids = [...user.matchAll(/^(q\d+):/gm)].map((m) => m[1]);
+    text = JSON.stringify({ checks: [
+      ...(ids[0] ? [{ q: ids[0], part: "a", verdict: "fix", problem: "Mock: the answer doesn't follow from the data.", fix: { answer: "corrected answer", scheme: ["corrected point"] } }] : []),
+      ...(ids[3] && Math.random() < 0.5 ? [{ q: ids[3], part: "a", verdict: "drop", problem: "Mock: two defensible answers." }] : []),
+    ] });
+  } else if (sys.startsWith("You are a strict head of department")) {
+    const ids = [...user.matchAll(/^(c\d+) \((FIX|DROP)\)/gm)];
+    text = JSON.stringify({ changes: ids.map(([, id, kind]) => (kind === "DROP" ? { id, broken: Math.random() < 0.7 } : { id, better: pick(["1", "2", "same"]), v1_correct: Math.random() < 0.6, v2_correct: Math.random() < 0.8 })) });
   } else text = `Here are the new rules.\n<rules>\n- Mock rule ${++n}: vary the kind of task across the paper.\n- Give every value the answer needs in the stem.\n</rules>\n<changes>Mock (tagged reply): varied the tasks.</changes>`;
   await new Promise((r) => setTimeout(r, 20));
   return { ok: true, status: 200, json: async () => ({ content: [{ type: "text", text }], stop_reason: "end_turn", usage: { input_tokens: Math.round((sys.length + user.length) / 3.6), output_tokens: Math.round(text.length / 3.5) + 2500 } }) };

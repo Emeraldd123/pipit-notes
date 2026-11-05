@@ -5,6 +5,7 @@ import { AiError, claude, extractJson, imageBlock, text, type Content, type Exce
 import { normalizeExam, needsAi, type Exam, type Part, type PartAnswer, type PartMark, type Question } from "./exam-core";
 import type { CardKind } from "./study-core";
 import { buildExamPrompt, DISTRACTOR_RULES, EXAM_MAX_TOKENS, type ExamSpec } from "./exam-prompt.ts";
+import { applyChecks, normalizeChecks, verifyUserText, VERIFY_SYSTEM, type VerifyResult } from "./exam-verify.ts";
 export { CASE_RULES, DISTRACTOR_RULES, type ExamSpec } from "./exam-prompt.ts";
 
 // --- flashcards -------------------------------------------------------------------------------------------------------
@@ -103,6 +104,15 @@ export async function generateExam(spec: ExamSpec): Promise<Exam> {
   const exam = normalizeExam(extractJson<unknown>(raw));
   if (!exam) throw new AiError("The model's exam couldn't be read. Try again (a smaller exam often helps).");
   return exam;
+}
+
+/** A second examiner works every part and fixes or drops the ones whose answer doesn't hold up (exam-verify.ts). */
+export async function verifyExam(exam: Exam, excerpts: Excerpt[]): Promise<VerifyResult> {
+  const raw = await claude({ feature: "exam.verify", maxTokens: 3000, system: VERIFY_SYSTEM, user: verifyUserText(exam, excerpts) });
+  const r = applyChecks(exam, normalizeChecks(extractJson<unknown>(raw)));
+  // a checker that throws out most of the paper has probably misread it: keep the paper as written
+  const parts = (e: Exam) => e.sections.reduce((n, s) => n + s.questions.reduce((m, q) => m + q.parts.length, 0), 0);
+  return parts(r.exam) < parts(exam) * 0.5 ? { exam, fixed: 0, dropped: 0, checks: r.checks } : r;
 }
 
 // --- marking ----------------------------------------------------------------------------------------------------------------
