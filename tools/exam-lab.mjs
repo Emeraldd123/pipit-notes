@@ -99,7 +99,7 @@ export async function writeExam(api, f, { past = [], extraRules, questions = 8, 
   const parts = allParts(c.exam).map((x) => x.p);
   const mcqs = parts.filter((p) => p.type === "mcq");
   return {
-    excerpts, exam: c.exam, qs, check: c, stop: r.stop, usage: r.usage,
+    excerpts, exam: c.exam, qs, check: c, stop: r.stop, usage: r.usage, raw: r.text,
     stats: {
       questions: qs.length, cases: qs.filter((q) => q.basis?.kind === "case").length, dropped: c.dropped, stretch: c.stretch,
       withFigure: qs.filter((q) => q.figure || q.parts.some((p) => p.figure)).length, noFigure: qs.filter(refsMissingFigure).length,

@@ -9,6 +9,9 @@ function exam() {
   const qs = Array.from({ length: 8 }, (_, i) => ({
     topic: pick(words), basis: { notes: [1 + (i % 3)], textbook: null, solvable: "yes", scenario: pick(["a car battery and headlight", "a kettle element", "yeast in bread dough", "a phone charger", "a hospital oxygen tank", "a sprinter's muscle", "a solar panel on a roof", "a bike dynamo"]) + (Math.random() < 0.5 ? "" : ` ${n}`), ...(i % 3 === 0 ? { kind: "case", principle: sentence(5) } : {}) },
     stem: `Mock question ${++n}: ${sentence(14)}.`,
+    ...(i === 0 ? { figure: { type: "diagram", width: 420, height: 240, elements: [
+      { t: "icon", name: "mitochondrion", x: 20, y: 30, w: 140, h: 90, label: "X" }, { t: "icon", name: "chloroplast", x: 200, y: 30, w: 120, h: 90, label: "Y" },
+      { t: "line", x1: 160, y1: 75, x2: 200, y2: 75, arrow: true } ] } } : {}),
     parts: i % 2
       ? [{ label: "a", type: "mcq", marks: 1, prompt: `Which ${sentence(4)}?`, options: ["one", "two", "three", "four"], correct: 0, answer: "one, because it follows", why: ["right", "slip", "partly", "weak"], scheme: ["one"] }]
       : [{ label: "a", type: pick(["short", "numeric", "working"]), marks: 3, prompt: `Explain ${sentence(6)}.`, answer: sentence(8), scheme: [sentence(4), sentence(4), sentence(4)], numeric: { value: 2, tol: 0.05, unit: "m" } }],

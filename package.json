@@ -19,6 +19,7 @@
     "tune:review": "node tools/tune-review-build.mjs",
     "eval:check": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-exam-eval.ps1 tools/exam-check-test.mjs",
     "eval:cases": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-exam-eval.ps1 tools/exam-cases-test.mjs",
+    "eval:diagrams": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-exam-eval.ps1 tools/diagram-test.mjs",
     "eval:ab": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-exam-eval.ps1 tools/exam-ab.mjs",
     "tune:auto": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-exam-eval.ps1 tools/exam-tune.mjs --auto --resume latest",
     "deploy:test": "npm run check && node ../Pipit/node_modules/netlify-cli/bin/run.js deploy --no-build --site bc0e3907-d774-4ffd-9bee-c1c65dd81e2f --dir=dist --functions=netlify/functions",
