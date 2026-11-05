@@ -5,6 +5,7 @@ import { APP } from "@/lib/telemetry";
 
 /** Shown once after an update that moves things around, so nothing feels "gone". Bump the list with the version. */
 const NOTES: { title: string; body: string }[] = [
+  { title: "Fresh cases every exam", body: "Practice exams now remember the real-world situations they used, so the next exam on the same notes picks different ones. You practise the ideas, not a few favourite examples." },
   { title: "Explanations fold away", body: "A pinned explanation is now a small “Explain” chip on what you circled. Tap it to read it in the bottom half of the screen. Highlighted something? Tap the Explain button that pops up, or tap the highlight with the Explain tool." },
   { title: "Sticky notes", body: "＋ Insert → Sticky note. It sits on the page as a small chip and opens when you tap it." },
   { title: "Sizes stick per tool", body: "Pens, pencils, markers and highlighters each remember the size you last used." },
