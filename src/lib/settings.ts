@@ -41,6 +41,14 @@ export type Settings = {
   toolWidths: Record<string, number>;
   /** Check each finished line of maths or chemistry as you write (cheap model), and mark mistakes in red. */
   mathCheck: boolean;
+  /** Try a model on your own laptop first for the jobs it can do, then Claude. */
+  localEnabled: boolean;
+  /** The laptop's address, e.g. https://zenbook.tail1234.ts.net (Tailscale Serve in front of Ollama). */
+  localUrl: string;
+  /** Which model on the laptop to use (empty = the first one that can see images). */
+  localModel: string;
+  /** "light": reading and short answers. "most": also Explain, flashcards, maps, review and LaTeX. Exams always use Claude. */
+  localScope: "light" | "most";
 };
 
 const KEY = "pipit-notes.settings.v1";
@@ -64,6 +72,10 @@ export const DEFAULT_SETTINGS: Settings = {
   scribbleErase: false,
   toolWidths: {},
   mathCheck: false,
+  localEnabled: false,
+  localUrl: "",
+  localModel: "",
+  localScope: "light",
 };
 
 let cache: Settings | null = null;
@@ -112,7 +124,10 @@ export function useSettings(): Settings {
   );
 }
 
-/** True when AI features are switched on AND a key is present. */
+/** True when AI features are switched on AND there is somewhere to send them (a key, or a laptop model). */
 export function aiReady(s: Settings = read()): boolean {
-  return s.aiEnabled && s.apiKey.trim().length > 10;
+  return s.aiEnabled && (hasKey(s) || (s.localEnabled && s.localUrl.trim().length > 0));
+}
+export function hasKey(s: Settings = read()): boolean {
+  return s.apiKey.trim().length > 10;
 }

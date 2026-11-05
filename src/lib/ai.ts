@@ -1,7 +1,8 @@
 // AI features, called straight from the device to the Anthropic API with the key
 // stored in Settings. Nothing is sent unless AI is switched on AND the user takes
 // an action that needs it (read a page, ask a question, check working, …).
-import { aiReady, getSettings } from "./settings";
+import { aiReady, getSettings, hasKey } from "./settings";
+import { LocalSkip, tryLocal } from "./local-ai";
 import { count, error as logErr, track, warn } from "./telemetry";
 import { JsonReplyError, parseModelJson } from "./json-repair.ts";
 import { effortFor, maxTokensFor, modelFor, type Effort } from "./ai-cost.ts";
@@ -42,6 +43,14 @@ async function claudeOnce(opts: {
   const s = getSettings();
   if (!aiReady(s)) throw new AiError("AI features are off. Turn them on and add an API key in Settings.");
   const feature = opts.feature ?? "other";
+  // laptop first, for the jobs it is allowed to do (local-ai-core.ts); anything wrong and the job goes to Claude below
+  let skip = "";
+  try { return await tryLocal({ feature, system: opts.system, user: opts.user, maxTokens: opts.maxTokens, signal: opts.signal }); }
+  catch (e) { if (!(e instanceof LocalSkip)) throw e; if (e.message === "cancelled") throw new AiError("Cancelled."); skip = e.message; }
+  if (!hasKey(s)) throw new AiError(skip === "not a local job"
+    ? "This needs Claude (your laptop only does reading and short answers). Add an Anthropic key in Settings to use it."
+    : skip === "unreachable" ? "Your laptop's AI isn't reachable right now, and there's no Anthropic key to fall back on. Check the laptop, or add a key in Settings."
+    : "Your laptop's AI couldn't do this one, and there's no Anthropic key to fall back on. Add a key in Settings, or try again.");
   if (s.monthlyBudgetUsd > 0) {
     const spent = await spentThisMonth();
     if (spent >= s.monthlyBudgetUsd) throw new AiError(`You've reached your monthly AI budget (${usd(spent)} of ${usd(s.monthlyBudgetUsd)}). Raise it in Settings → AI features to keep going.`);

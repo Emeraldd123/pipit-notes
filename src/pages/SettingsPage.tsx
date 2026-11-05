@@ -5,12 +5,13 @@ import { importBackups, lastBackupAt } from "@/lib/backup";
 import { useBackupFlow } from "@/components/backup-flow";
 import { requestPersistentStorage } from "@/lib/db";
 import { formatBytes, timeAgo } from "@/lib/format";
-import { aiReady, updateSettings, useSettings } from "@/lib/settings";
+import { aiReady, hasKey, updateSettings, useSettings } from "@/lib/settings";
 import { claude } from "@/lib/ai";
 import { FEATURE_LABEL, monthByFeature, monthKey, monthTotal, type Ledger } from "@/lib/ai-cost";
 import { loadLedger, onLedgerChange, resetLedger } from "@/lib/ai-ledger";
 import { Button, Card, Modal, Toast } from "@/components/ui";
 import { PenTest } from "@/components/pentest";
+import { LaptopAi } from "@/components/laptop-ai";
 import { useDiagFlow } from "@/components/diag-flow";
 import { runHealthChecks } from "@/lib/health";
 import { sendReport } from "@/lib/report";
@@ -143,9 +144,10 @@ export function SettingsPage() {
           </label>
           <AiUsagePanel budget={s.monthlyBudgetUsd} />
           <div className="mt-3 flex items-center gap-3">
-            <Button onClick={testKey} disabled={testing || !aiReady(s)}>{testing ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Test connection</Button>
+            <Button onClick={testKey} disabled={testing || !aiReady(s) || !hasKey(s)}>{testing ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Test connection</Button>
             <span className="text-xs text-foreground-muted">The key is stored only on this device.</span>
           </div>
+          <LaptopAi />
         </Section>
 
         <Section icon={<Activity size={16} />} title="Health & diagnostics">

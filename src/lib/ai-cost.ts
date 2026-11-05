@@ -9,6 +9,7 @@ export type Effort = "low" | "medium" | "high";
 
 /** USD per million tokens [input, output] — Anthropic's published rates (Haiku 5.5 for prompts up to 100K). */
 const PRICES: [RegExp, [number, number]][] = [
+  [/^local:/, [0, 0]],   // a model on your own laptop: free
   [/^claude-haiku-5/, [0.1, 0.5]],
   [/^claude-haiku-4/, [1, 5]],
   [/^claude-sonnet-5/, [2, 10]],
