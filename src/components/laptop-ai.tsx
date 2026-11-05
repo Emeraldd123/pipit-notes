@@ -40,7 +40,7 @@ export function LaptopAi() {
           <input value={s.localUrl} onChange={(e) => updateSettings({ localUrl: e.target.value })} placeholder="https://zenbook.tail1234.ts.net" autoCapitalize="off" autoCorrect="off" spellCheck={false} className={`${field} font-mono`} />
         </label>
         <label className="mt-3 block text-xs text-foreground-muted">Model on the laptop (leave empty to use the first one that can read images)
-          <input value={s.localModel} onChange={(e) => updateSettings({ localModel: e.target.value })} placeholder="qwen3-vl:8b" list="laptop-models" autoCapitalize="off" autoCorrect="off" spellCheck={false} className={`${field} font-mono`} />
+          <input value={s.localModel} onChange={(e) => updateSettings({ localModel: e.target.value })} placeholder="qwen3-vl:8b-instruct" list="laptop-models" autoCapitalize="off" autoCorrect="off" spellCheck={false} className={`${field} font-mono`} />
           <datalist id="laptop-models">{result?.models.map((m) => <option key={m} value={m} />)}</datalist>
         </label>
         <label className="mt-3 block text-xs text-foreground-muted">What it does
@@ -63,8 +63,8 @@ export function LaptopAi() {
         <details className="mt-3 text-xs text-foreground-muted">
           <summary className="cursor-pointer">How to set it up (about 15 minutes, once)</summary>
           <ol className="mt-2 list-decimal space-y-1.5 pl-5">
-            <li>On the laptop, install <strong>Ollama</strong> (ollama.com; it runs natively on Snapdragon). In a terminal: <code>ollama pull qwen3-vl:8b</code> (reads handwriting and maths, about 6 GB). For quicker but rougher reading, also try <code>gemma4:e4b</code> (about 3 GB).</li>
-            <li>Let this app talk to it: in Windows, open <em>Edit environment variables for your account</em>, add <code>OLLAMA_ORIGINS</code> = <code>{typeof location !== "undefined" ? location.origin : "https://bensnotes.netlify.app"}</code>, then quit Ollama from the tray and start it again.</li>
+            <li>On the laptop, install <strong>Ollama</strong> (ollama.com; it runs natively on Snapdragon). In a terminal: <code>ollama pull qwen3-vl:8b-instruct</code> (reads handwriting and maths, 6.2 GB). For quicker but rougher reading, also try <code>qwen3-vl:4b-instruct</code> (3.3 GB). The instruct versions answer straight away instead of thinking first, which matters on a laptop.</li>
+            <li>Let this app talk to it: in Windows, open <em>Edit environment variables for your account</em>, add <code>OLLAMA_ORIGINS</code> = <code>{typeof location !== "undefined" ? location.origin : "https://bensnotes.netlify.app"}</code> and <code>OLLAMA_CONTEXT_LENGTH</code> = <code>16384</code> (the default of 4096 is too small for a page picture plus its answer), then quit Ollama from the tray and start it again.</li>
             <li>Install <strong>Tailscale</strong> on the laptop and the iPad and sign in to the same account on both. On the laptop run <code>tailscale serve --bg 11434</code>. It prints an address like <code>https://zenbook.tail1234.ts.net</code>: paste it above. (The app is https, so a plain http:// address would be blocked; Tailscale gives it a proper certificate, and it works away from home too.)</li>
             <li>Tap <strong>Test the laptop</strong>. If it says the server answered 403, also add <code>OLLAMA_HOST</code> = <code>0.0.0.0:11434</code> and restart Ollama.</li>
             <li>Keep the laptop plugged in and set not to sleep while you study. If it&apos;s off, everything still works through Claude.</li>
