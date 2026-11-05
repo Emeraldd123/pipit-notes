@@ -2,6 +2,7 @@
 // hand) and drawn locally as SVG — so graphs are exact, charts are crisp, and nothing needs
 // to be fetched. Pure + unit-tested: everything here returns data, not DOM.
 import { parseEquation } from "./mathexpr.ts";
+import { BIOICON_NAMES } from "./bioicon-names.ts";
 
 export type FigurePoint = { x: number; y: number; label?: string };
 export type GraphFigure = {
@@ -28,7 +29,9 @@ export type DiagramEl =
   | { t: "poly"; points: [number, number][]; fill?: string; label?: string }
   | { t: "text"; x: number; y: number; text: string; size?: number; anchor?: "start" | "middle" | "end" }
   | { t: "point"; x: number; y: number; label?: string }
-  | { t: "arc"; cx: number; cy: number; r: number; from: number; to: number; label?: string };
+  | { t: "arc"; cx: number; cy: number; r: number; from: number; to: number; label?: string }
+  /** a scientific icon from the bundled Bioicons set (bioicon-names.ts), drawn inside the box x,y,w,h */
+  | { t: "icon"; name: string; x: number; y: number; w: number; h: number; label?: string };
 export type DiagramFigure = { type: "diagram"; width: number; height: number; elements: DiagramEl[]; caption?: string };
 /** A picture cut out of one of the student's own pages (the exam builder fills in `src`). */
 export type CropFigure = { type: "crop"; image: number; bbox: [number, number, number, number]; src?: string; caption?: string };
@@ -37,7 +40,9 @@ export type Figure = GraphFigure | ChartFigure | TableFigure | DiagramFigure | C
 export type Prim =
   | { t: "path"; d: string; stroke?: string; fill?: string; w?: number; dash?: boolean; op?: number; clip?: boolean }
   | { t: "text"; x: number; y: number; s: string; size?: number; anchor?: "start" | "middle" | "end"; rotate?: number; fill?: string; bold?: boolean }
-  | { t: "circle"; cx: number; cy: number; r: number; fill?: string; stroke?: string };
+  | { t: "circle"; cx: number; cy: number; r: number; fill?: string; stroke?: string }
+  /** a bundled icon by name; the renderer looks up its picture (and its credit) */
+  | { t: "image"; name: string; x: number; y: number; w: number; h: number };
 export type Drawing = { w: number; h: number; prims: Prim[]; clip?: { x: number; y: number; w: number; h: number } };
 
 export const PALETTE = ["#2563eb", "#dc2626", "#16a34a", "#9333ea", "#ea580c", "#0891b2"];
@@ -111,6 +116,14 @@ export function normalizeFigure(raw: unknown): Figure | null {
           case "text": if (fin(e.x) && fin(e.y) && str(e.text, 60)) els.push({ t: "text", x: n("x"), y: n("y"), text: str(e.text, 60)!, size: fin(e.size) ? Math.min(32, Math.max(8, e.size)) : undefined, anchor: ["start", "middle", "end"].includes(e.anchor as string) ? (e.anchor as "start") : undefined }); break;
           case "point": if (fin(e.x) && fin(e.y)) els.push({ t: "point", x: n("x"), y: n("y"), label: str(e.label, 24) }); break;
           case "arc": if ([n("cx"), n("cy"), n("r"), n("from"), n("to")].every(fin) && n("r") > 0) els.push({ t: "arc", cx: n("cx"), cy: n("cy"), r: n("r"), from: n("from"), to: n("to"), label: str(e.label, 24) }); break;
+          case "icon": {
+            if (![n("x"), n("y"), n("w"), n("h")].every(fin) || n("w") <= 0 || n("h") <= 0) break;
+            const name = iconName(e.name);
+            // an icon we don't have becomes a labelled box, so the diagram still says what is there
+            if (name) els.push({ t: "icon", name, x: n("x"), y: n("y"), w: Math.min(400, n("w")), h: Math.min(400, n("h")), label: str(e.label, 24) });
+            else els.push({ t: "rect", x: n("x"), y: n("y"), w: n("w"), h: n("h"), label: str(e.label, 24) || str(e.name, 24) });
+            break;
+          }
         }
       }
       return els.length ? { type: "diagram", width, height, elements: els, caption } : null;
@@ -292,6 +305,14 @@ export function drawChart(f: ChartFigure, W = 520, H = 340): Drawing {
   return { w: W, h: H, prims };
 }
 
+/** A bundled icon's name from what the writer wrote ("Mitochondria", "test tubes" → "mitochondrion", "test tube"), or null. */
+export function iconName(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const want = raw.trim().toLowerCase().replace(/[_-]+/g, " ");
+  const forms = [want, want.replace(/ies$/, "y"), want.replace(/es$/, ""), want.replace(/s$/, ""), want.replace(/ia$/, "ion"), want.replace(/a$/, "um")];
+  return BIOICON_NAMES.find((n) => forms.includes(n)) ?? null;
+}
+
 export function drawDiagram(f: DiagramFigure): Drawing {
   const prims: Prim[] = [];
   const rad = (d: number) => (d * Math.PI) / 180;
@@ -336,6 +357,10 @@ export function drawDiagram(f: DiagramFigure): Drawing {
         if (e.label) { const m = (a0 + a1) / 2; prims.push({ t: "text", x: e.cx + (e.r + 14) * Math.cos(-m), y: e.cy + (e.r + 14) * Math.sin(-m) + 4, s: e.label, size: 13, anchor: "middle" }); }
         break;
       }
+      case "icon":
+        prims.push({ t: "image", name: e.name, x: e.x, y: e.y, w: e.w, h: e.h });
+        if (e.label) prims.push({ t: "text", x: e.x + e.w / 2, y: e.y + e.h + 16, s: e.label, size: 14, anchor: "middle", bold: true });
+        break;
     }
   }
   return { w: f.width, h: f.height, prims };

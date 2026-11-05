@@ -4,6 +4,12 @@
 // Also reads questions back out of the judge's plain-text form, for runs saved before questions were stored whole.
 import { drawFigure, normalizeFigure } from "../src/lib/figure-core.ts";
 import { parseModelJson } from "../src/lib/json-repair.ts";
+import { readFileSync } from "node:fs";
+
+// the bundled Bioicons, for icons placed in diagrams
+let ICONS = new Map();
+try { ICONS = new Map(JSON.parse(readFileSync("public/bioicons/icons.json", "utf8")).icons.map((i) => [i.name, i])); } catch { /* no icon set built */ }
+const LIC = { "cc-0": "CC0", "cc-by-3.0": "CC BY 3.0", "cc-by-4.0": "CC BY 4.0", mit: "MIT", bsd: "BSD" };
 
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const LETTERS = "ABCDEFGH";
@@ -22,11 +28,14 @@ export function figureHtml(raw) {
   const id = `c${Math.random().toString(36).slice(2, 8)}`;
   const prims = d.prims.map((p) => {
     if (p.t === "path") return `<path d="${esc(p.d)}" stroke="${p.stroke ?? "none"}" fill="${p.fill ?? "none"}" stroke-width="${p.w ?? 1}"${p.dash ? ' stroke-dasharray="6 5"' : ""}${p.op != null ? ` opacity="${p.op}"` : ""} stroke-linejoin="round" stroke-linecap="round"${p.clip && d.clip ? ` clip-path="url(#${id})"` : ""}/>`;
+    if (p.t === "image") { const ic = ICONS.get(p.name); return ic ? `<image href="${ic.src}" x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" preserveAspectRatio="xMidYMid meet"/>` : `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" fill="#f3f4f6" stroke="#d1d5db"/>`; }
     if (p.t === "circle") return `<circle cx="${p.cx}" cy="${p.cy}" r="${p.r}" fill="${p.fill ?? "none"}"${p.stroke ? ` stroke="${p.stroke}"` : ""}/>`;
     return `<text x="${p.x}" y="${p.y}" font-size="${p.size ?? 12}" text-anchor="${p.anchor ?? "start"}" fill="${p.fill ?? "#111827"}"${p.bold ? ' font-weight="700"' : ""}${p.rotate ? ` transform="rotate(${p.rotate} ${p.x} ${p.y})"` : ""}>${esc(p.s)}</text>`;
   }).join("");
   const clip = d.clip ? `<clipPath id="${id}"><rect x="${d.clip.x}" y="${d.clip.y}" width="${d.clip.w}" height="${d.clip.h}"/></clipPath>` : "";
-  return `<figure class="fig"><svg viewBox="0 0 ${d.w} ${d.h}" font-family="ui-sans-serif, system-ui, sans-serif">${clip}${prims}</svg>${cap}</figure>`;
+  const used = [...new Set(d.prims.filter((p) => p.t === "image").map((p) => p.name))].map((n) => ICONS.get(n)).filter(Boolean);
+  const credit = used.length ? `<figcaption class="small muted">Icons: Bioicons — ${[...new Set(used.map((i) => `${i.author} (${LIC[i.licence] ?? i.licence})`))].join(", ")}</figcaption>` : "";
+  return `<figure class="fig"><svg viewBox="0 0 ${d.w} ${d.h}" font-family="ui-sans-serif, system-ui, sans-serif">${clip}${prims}</svg>${cap}${credit}</figure>`;
 }
 
 /** A question (the app's structure: stem, figure, parts) as the student and the marker would see it. */

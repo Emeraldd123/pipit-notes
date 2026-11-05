@@ -2,6 +2,7 @@
 // sends exactly what the app sends.
 import type { Excerpt } from "./ai.ts";
 import { TUNED_RULES } from "./exam-tuned.ts";
+import { BIOICON_NAMES } from "./bioicon-names.ts";
 
 // How a real teacher builds wrong options (item-writing guidance: distractors come from students' typical errors).
 // Used for flashcards and exam multiple choice.
@@ -64,6 +65,7 @@ FIGURES (drawn by the app from your JSON — they must be CORRECT and must match
 - Data table: {"type":"table","headers":["Trial","Time (s)"],"rows":[[1,2.31],[2,2.28]]}
 - Diagram on a width×height canvas (y grows DOWNWARD): {"type":"diagram","width":400,"height":260,"elements":[{"t":"line","x1":20,"y1":200,"x2":380,"y2":200,"label":"ground"},{"t":"rect","x":150,"y":150,"w":60,"h":50,"label":"m"},{"t":"line","x1":180,"y1":150,"x2":180,"y2":80,"arrow":true,"label":"N"},{"t":"circle","cx":100,"cy":100,"r":30},{"t":"poly","points":[[20,200],[120,200],[20,120]]},{"t":"point","x":60,"y":60,"label":"A"},{"t":"arc","cx":20,"cy":200,"r":30,"from":0,"to":37,"label":"θ"},{"t":"text","x":200,"y":30,"text":"label"}]}
   Use diagrams for geometry (triangles with side labels, circles with chords), free-body diagrams (arrows), ramps and pulleys, circuits (lines/rects/circles), ray diagrams, cell/organ sketches, energy-level or reaction-coordinate sketches. Keep labels short.
+  Real scientific icons can be placed in a diagram: {"t":"icon","name":"mitochondrion","x":40,"y":60,"w":120,"h":80,"label":"X"} draws that icon inside the box (label below it). Use them for cells, organelles, membranes, molecules, organisms, organs and lab apparatus, and draw what no icon shows with rects, lines, arrows and text (e.g. a membrane as two parallel lines with complexes as labelled rects across it and H+ arrows through them; the "ion channel" icon already includes a short membrane section). When a question asks the student to identify a structure, label it with a letter, not its name. Icon names (use exactly one of these): ${BIOICON_NAMES.join(", ")}.
 - Pictures from the student's own pages (only if images are attached): {"type":"crop","image":2,"bbox":[0.1,0.25,0.8,0.4]} where image is the attached image number and bbox is [x,y,width,height] as fractions of that image. Crop only a clear diagram, graph or figure — never plain text.
 A question or an individual part may carry a "figure". Put the figure on the question when all parts use it.`;
 
