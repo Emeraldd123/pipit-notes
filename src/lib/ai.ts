@@ -3,6 +3,7 @@
 // an action that needs it (read a page, ask a question, check working, …).
 import { aiReady, getSettings, hasKey } from "./settings";
 import { LocalSkip, tryLocal } from "./local-ai";
+import { GeminiSkip, tryGemini } from "./gemini";
 import { count, error as logErr, track, warn } from "./telemetry";
 import { JsonReplyError, parseModelJson } from "./json-repair.ts";
 import { effortFor, maxTokensFor, modelFor, type Effort } from "./ai-cost.ts";
@@ -47,8 +48,13 @@ async function claudeOnce(opts: {
   let skip = "";
   try { return await tryLocal({ feature, system: opts.system, user: opts.user, maxTokens: opts.maxTokens, signal: opts.signal }); }
   catch (e) { if (!(e instanceof LocalSkip)) throw e; if (e.message === "cancelled") throw new AiError("Cancelled."); skip = e.message; }
-  if (!hasKey(s)) throw new AiError(skip === "not a local job"
-    ? "This needs Claude (your laptop only does reading and short answers). Add an Anthropic key in Settings to use it."
+  // then Gemini (Google credit), for the jobs it is allowed to do
+  try { return await tryGemini({ feature, system: opts.system, user: opts.user, maxTokens: opts.maxTokens, signal: opts.signal }); }
+  catch (e) { if (!(e instanceof GeminiSkip)) throw e; if (e.message === "cancelled") throw new AiError("Cancelled."); if (e.message !== "not a gemini job") skip = "gemini " + e.message; }
+  if (!hasKey(s)) throw new AiError(skip.startsWith("gemini ")
+    ? `Gemini couldn't do this one (${skip.slice(7)}), and there's no Anthropic key to fall back on. Add a key in Settings, or try again.`
+    : skip === "not a local job"
+    ? "This needs Claude (the laptop and Gemini only do reading and short answers, and exams are always written by Claude). Add an Anthropic key in Settings to use it."
     : skip === "unreachable" ? "Your laptop's AI isn't reachable right now, and there's no Anthropic key to fall back on. Check the laptop, or add a key in Settings."
     : "Your laptop's AI couldn't do this one, and there's no Anthropic key to fall back on. Add a key in Settings, or try again.");
   if (s.monthlyBudgetUsd > 0) {

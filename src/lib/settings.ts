@@ -49,6 +49,14 @@ export type Settings = {
   localModel: string;
   /** "light": reading and short answers. "most": also Explain, flashcards, maps, review and LaTeX. Exams always use Claude. */
   localScope: "light" | "most";
+  /** Google Gemini API key (paid from your Google credit): tried after the laptop, before Claude. Empty = not used. */
+  geminiKey: string;
+  /** Which Gemini model (empty = the default cheap, fast one). */
+  geminiModel: string;
+  /** Same choice as the laptop: reading and short answers, or most jobs. Exams always use Claude. */
+  geminiScope: "light" | "most";
+  /** Stop using Gemini once this month's estimated Gemini spend reaches this (your monthly credit). 0 = no cap. */
+  geminiBudgetUsd: number;
 };
 
 const KEY = "pipit-notes.settings.v1";
@@ -76,6 +84,10 @@ export const DEFAULT_SETTINGS: Settings = {
   localUrl: "",
   localModel: "",
   localScope: "light",
+  geminiKey: "",
+  geminiModel: "",
+  geminiScope: "light",
+  geminiBudgetUsd: 10,
 };
 
 let cache: Settings | null = null;
@@ -126,7 +138,7 @@ export function useSettings(): Settings {
 
 /** True when AI features are switched on AND there is somewhere to send them (a key, or a laptop model). */
 export function aiReady(s: Settings = read()): boolean {
-  return s.aiEnabled && (hasKey(s) || (s.localEnabled && s.localUrl.trim().length > 0));
+  return s.aiEnabled && (hasKey(s) || s.geminiKey.trim().length > 20 || (s.localEnabled && s.localUrl.trim().length > 0));
 }
 export function hasKey(s: Settings = read()): boolean {
   return s.apiKey.trim().length > 10;

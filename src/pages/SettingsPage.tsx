@@ -12,6 +12,7 @@ import { loadLedger, onLedgerChange, resetLedger } from "@/lib/ai-ledger";
 import { Button, Card, Modal, Toast } from "@/components/ui";
 import { PenTest } from "@/components/pentest";
 import { LaptopAi } from "@/components/laptop-ai";
+import { GeminiAi } from "@/components/gemini-ai";
 import { useDiagFlow } from "@/components/diag-flow";
 import { runHealthChecks } from "@/lib/health";
 import { sendReport } from "@/lib/report";
@@ -148,6 +149,7 @@ export function SettingsPage() {
             <span className="text-xs text-foreground-muted">The key is stored only on this device.</span>
           </div>
           <LaptopAi />
+          <GeminiAi />
         </Section>
 
         <Section icon={<Activity size={16} />} title="Health & diagnostics">
