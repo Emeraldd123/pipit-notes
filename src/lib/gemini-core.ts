@@ -5,6 +5,8 @@ import type { Content } from "./ai-route-core.ts";
 
 export const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 export const GEMINI_DEFAULT_MODEL = "gemini-3.1-flash-lite";
+/** For exams, marking, Explain and other big jobs when there is no Claude key. */
+export const GEMINI_STRONG_MODEL = "gemini-3.8-flash";
 
 /** USD per million tokens [input, output incl. thinking]: Google's published paid-tier prices (Nov 2026). */
 const PRICES: [RegExp, [number, number]][] = [

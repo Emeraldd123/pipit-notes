@@ -3,9 +3,10 @@
 // an action that needs it (read a page, ask a question, check working, …).
 import { aiReady, getSettings, hasKey } from "./settings";
 import { GeminiSkip, tryGemini } from "./gemini";
+import { applyEvent, newStreamState, sseSplitter, type StreamState } from "./sse-core.ts";
 import { count, error as logErr, track, warn } from "./telemetry";
 import { JsonReplyError, parseModelJson } from "./json-repair.ts";
-import { effortFor, maxTokensFor, modelFor, type Effort } from "./ai-cost.ts";
+import { effortFor, maxTokensFor, modelFor, type Effort, type Usage } from "./ai-cost.ts";
 import { recordUsage, spentThisMonth } from "./ai-ledger";
 import { cachedAi, hashString } from "./ai-cache";
 import { normalizeIssues, type Issue } from "./review-core.ts";
@@ -29,6 +30,61 @@ const RETRY_STATUS = new Set([429, 500, 502, 503, 529]);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const usd = (v: number) => `$${v.toFixed(2)}`;
 
+/** What to tell someone whose only key is a Gemini key when Gemini can't do the job. */
+const GEMINI_ONLY_ERRORS: Record<string, string> = {
+  "not a gemini job": "This needs an Anthropic key. Add one in Settings → AI features.",
+  "over the cap": "You've reached this month's Gemini cap. Raise it in Settings → AI features → Google Gemini.",
+  "bad-key": "Google rejected the Gemini key. Check it in Settings → AI features.",
+  forbidden: "Google rejected the Gemini key. Check it in Settings → AI features.",
+  "rate-limited": "Gemini is rate-limiting this key (free keys allow only a few requests a minute). Wait a minute and try again.",
+  network: "Couldn't reach Google. Check your connection and try again.",
+  timeout: "Gemini took too long to answer. Try again; a smaller selection is quicker.",
+  "cut-off": "Gemini's answer was cut off before it finished. Try again with fewer questions or a smaller selection.",
+  "bad-reply": "Gemini's answer couldn't be read. Try again.",
+  blocked: "Gemini declined to answer this one. Try rewording, or a different selection.",
+};
+
+/** No bytes for this long while an answer is being written = the connection is dead (the service pings every few seconds). */
+const STALL_MS = 60_000;
+const DROPPED = "The connection dropped while the answer was being written (did the iPad lock, or the app go to the background?). Try again, and keep Pipit open until it finishes.";
+
+/**
+ * Read a streamed reply. Progress is reported as text arrives; a connection that goes quiet (or that died while the
+ * app was in the background) is noticed within seconds instead of after a five-minute timeout.
+ */
+async function readStream(res: Response, abort: () => void, signal: AbortSignal | undefined, onProgress?: (text: string) => void): Promise<StreamState> {
+  const st = newStreamState();
+  if (!res.body) throw new AiError(DROPPED);
+  const reader = res.body.getReader(), dec = new TextDecoder(), split = sseSplitter();
+  let last = Date.now(), stalled = false;
+  const stop = () => { abort(); void reader.cancel().catch(() => undefined); };
+  const stall = () => { stalled = true; stop(); };
+  const tick = setInterval(() => { if (Date.now() - last > STALL_MS) stall(); }, 2000);
+  // back from the background: if nothing arrives within a few seconds, the request died while we were away
+  const onVisible = () => { if (document.visibilityState === "visible") setTimeout(() => { if (!st.done && Date.now() - last > 20_000) stall(); }, 4000); };
+  document.addEventListener("visibilitychange", onVisible);
+  signal?.addEventListener("abort", stop);
+  try {
+    for (;;) {
+      let r: ReadableStreamReadResult<Uint8Array>;
+      try { r = await reader.read(); } catch { if (signal?.aborted) throw new AiError("Cancelled."); throw new AiError(DROPPED); }
+      if (signal?.aborted) throw new AiError("Cancelled.");
+      if (stalled) throw new AiError(DROPPED);
+      if (r.done) break;
+      last = Date.now();
+      let grew = false;
+      for (const p of split(dec.decode(r.value, { stream: true }))) if (applyEvent(st, p)) grew = true;
+      if (grew) { try { onProgress?.(st.text); } catch { /* a progress display must never break the request */ } }
+      if (st.error || st.done) break;
+    }
+  } finally {
+    clearInterval(tick);
+    document.removeEventListener("visibilitychange", onVisible);
+    signal?.removeEventListener("abort", stop);
+  }
+  return st;
+}
+
 async function claudeOnce(opts: {
   system?: string;
   user: Content[] | string;
@@ -39,6 +95,8 @@ async function claudeOnce(opts: {
   feature?: string;
   effort?: Effort;
   timeoutMs?: number;
+  /** called with the answer so far as it is written (long jobs are streamed) */
+  onProgress?: (text: string) => void;
 }): Promise<string> {
   const s = getSettings();
   if (!aiReady(s)) throw new AiError("AI features are off. Turn them on and add an API key in Settings.");
@@ -47,9 +105,7 @@ async function claudeOnce(opts: {
   let skip = "";
   try { return await tryGemini({ feature, system: opts.system, user: opts.user, maxTokens: opts.maxTokens, signal: opts.signal }); }
   catch (e) { if (!(e instanceof GeminiSkip)) throw e; if (e.message === "cancelled") throw new AiError("Cancelled."); skip = e.message; }
-  if (!hasKey(s)) throw new AiError(skip === "not a gemini job"
-    ? "This one needs Claude (exams and marking are always written by Claude). Add an Anthropic key in Settings to use it."
-    : `Gemini couldn't do this one (${skip}), and there's no Anthropic key to fall back on. Try again, or add an Anthropic key in Settings.`);
+  if (!hasKey(s)) throw new AiError(GEMINI_ONLY_ERRORS[skip] ?? `Gemini couldn't do this one (${skip}). Try again in a moment.`);
   if (s.monthlyBudgetUsd > 0) {
     const spent = await spentThisMonth();
     if (spent >= s.monthlyBudgetUsd) throw new AiError(`You've reached your monthly AI budget (${usd(spent)} of ${usd(s.monthlyBudgetUsd)}). Raise it in Settings → AI features to keep going.`);
@@ -58,7 +114,11 @@ async function claudeOnce(opts: {
   let effort = opts.effort ?? effortFor(feature, s.careful, model);
   const t0 = performance.now();
   count(`ai.${feature}`);
-  const timeoutMs = opts.timeoutMs ?? (feature === "exam" ? 300_000 : 120_000);
+  // long answers are streamed: progress can be shown, and a dead connection is noticed quickly (readStream)
+  const streaming = !!opts.onProgress || (opts.maxTokens ?? 2000) >= 2500;
+  // when streaming this is only the wait for the reply to START; after that the stall watch takes over
+  const timeoutMs = opts.timeoutMs ?? (streaming ? 90_000 : 120_000);
+  let abortLive: () => void = () => undefined;
   let res: Response | null = null;
   let networkRetried = false;
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -66,6 +126,7 @@ async function claudeOnce(opts: {
     const onAbort = () => ctrl.abort();
     opts.signal?.addEventListener("abort", onAbort);
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    abortLive = () => ctrl.abort();
     try {
       res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -83,6 +144,7 @@ async function claudeOnce(opts: {
           max_tokens: maxTokensFor(opts.maxTokens ?? 2000, effort),   // thinking shares this budget
           ...(effort ? { output_config: { effort } } : {}),
           ...(opts.system ? { system: opts.system } : {}),
+          ...(streaming ? { stream: true } : {}),
           messages: [{ role: "user", content: opts.user }],
         }),
       });
@@ -116,7 +178,7 @@ async function claudeOnce(opts: {
     break;
   }
   if (!res) throw new AiError("Couldn't reach the AI service.");
-  const ms = performance.now() - t0;
+  let ms = performance.now() - t0;
   if (!res.ok) {
     let detail = "";
     try {
@@ -130,7 +192,21 @@ async function claudeOnce(opts: {
     if (res.status === 529 || res.status >= 500) throw new AiError("The AI service is busy right now. Try again in a minute.");
     throw new AiError(`AI request failed (${res.status}) ${detail}`.trim());
   }
-  const data = await res.json();
+  let data: { usage?: Usage; stop_reason?: string | null; content?: { type: string; text: string }[] };
+  if (streaming) {
+    let st: StreamState;
+    try { st = await readStream(res, abortLive, opts.signal, opts.onProgress); }
+    catch (e) { if ((e as Error).message !== "Cancelled.") logErr("ai", "stream dropped", { feature, model, ms: Math.round(performance.now() - t0) }); throw e; }
+    if (st.usage) void recordUsage(feature, model, st.usage);   // what was written before a failure is still billed
+    if (st.error) {
+      logErr("ai", "stream error", { feature, model, type: st.error.type });
+      throw new AiError(/overloaded|rate_limit/.test(st.error.type) ? "The AI service is busy right now. Try again in a minute." : `The AI service stopped part-way (${st.error.type}). Try again.`);
+    }
+    if (!st.done) { logErr("ai", "stream ended early", { feature, model, chars: st.text.length }); throw new AiError(DROPPED); }
+    data = { stop_reason: st.stop, content: [{ type: "text", text: st.text }], usage: undefined };
+    if (st.usage) { track("ai.inputTokens", st.usage.input_tokens ?? 0); track("ai.outputTokens", st.usage.output_tokens ?? 0); }
+  } else data = await res.json();
+  ms = performance.now() - t0;
   track("ai.ms", ms);
   track(`ai.${feature}.ms`, ms);
   if (data?.usage) {

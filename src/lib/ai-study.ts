@@ -2,6 +2,7 @@
 // The model writes structured JSON; everything it returns is validated locally
 // (exam-core / figure-core) before it is shown or marked.
 import { AiError, claude, extractJson, imageBlock, text, type Content, type Excerpt } from "./ai";
+import { itemsSoFar, questionsSoFar } from "./sse-core.ts";
 import { normalizeExam, needsAi, type Exam, type Part, type PartAnswer, type PartMark, type Question } from "./exam-core";
 import type { CardKind } from "./study-core";
 import { buildExamPrompt, DISTRACTOR_RULES, EXAM_MAX_TOKENS, type ExamSpec } from "./exam-prompt.ts";
@@ -52,10 +53,10 @@ function toRawCards(raw: string): RawCard[] {
   });
 }
 
-export async function generateCards(excerpts: Excerpt[], want: number): Promise<RawCard[]> {
+export async function generateCards(excerpts: Excerpt[], want: number, onProgress?: (cards: number) => void): Promise<RawCard[]> {
   const ctx = excerpts.map((e) => `[${e.n}] ${e.noteTitle} — page ${e.page + 1}\n${e.text}`).join("\n\n");
   const raw = await claude({
-    feature: "cards", maxTokens: 6000, system: CARDS_SYSTEM,
+    feature: "cards", maxTokens: 6000, system: CARDS_SYSTEM, onProgress: onProgress && ((t) => onProgress(itemsSoFar(t, "front"))),
     user: `Notes:\n\n${ctx}\n\nWrite about ${want} flashcards covering the most important material. Mix card kinds sensibly.`,
   });
   return toRawCards(raw);
@@ -97,10 +98,10 @@ export async function writeWrongOptions(cards: { front: string; back: string }[]
 }
 
 // --- exam generation ----------------------------------------------------------------------------------------------------
-export async function generateExam(spec: ExamSpec): Promise<Exam> {
+export async function generateExam(spec: ExamSpec, onProgress?: (questions: number) => void): Promise<Exam> {
   const { system, content } = buildExamPrompt(spec);
   const user: Content[] = content.map((c) => (c.type === "image" ? imageBlock(c.dataUrl) : text(c.text)));
-  const raw = await claude({ feature: "exam", maxTokens: EXAM_MAX_TOKENS, system, user });
+  const raw = await claude({ feature: "exam", maxTokens: EXAM_MAX_TOKENS, system, user, onProgress: onProgress && ((t) => onProgress(questionsSoFar(t))) });
   const exam = normalizeExam(extractJson<unknown>(raw));
   if (!exam) throw new AiError("The model's exam couldn't be read. Try again (a smaller exam often helps).");
   return exam;

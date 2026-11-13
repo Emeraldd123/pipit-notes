@@ -4,8 +4,9 @@
 // Logged content-free: counts, timings, and the reason for a fallback.
 import { getSettings, type Settings } from "./settings";
 import { count, track, warn } from "./telemetry";
-import { replyUsable, routeAllowed, type Content } from "./ai-route-core.ts";
-import { GEMINI_BASE, GEMINI_DEFAULT_MODEL, geminiBody, geminiCostUsd, readGeminiReply } from "./gemini-core.ts";
+import { NEEDS_STRONG, replyUsable, routeAllowed, type Content } from "./ai-route-core.ts";
+import { GEMINI_BASE, GEMINI_DEFAULT_MODEL, GEMINI_STRONG_MODEL, geminiBody, geminiCostUsd, readGeminiReply } from "./gemini-core.ts";
+import { hasKey } from "./settings";
 import { getMeta, setMeta } from "./db";
 import { monthKey } from "./ai-cost";
 
@@ -30,14 +31,15 @@ async function addSpend(usd: number) {
 export function onGeminiSpend(fn: () => void) { listeners.add(fn); return () => { listeners.delete(fn); }; }
 
 /** One request to Gemini. Throws GeminiSkip with a reason when the caller should move on to Claude. */
-async function call(s: Settings, opts: { system?: string; user: Content[] | string; maxTokens: number; signal?: AbortSignal; timeoutMs: number }) {
-  const model = modelOf(s);
+async function call(s: Settings, opts: { system?: string; user: Content[] | string; maxTokens: number; signal?: AbortSignal; timeoutMs: number; strong?: boolean }) {
+  // big jobs get the stronger model and its own default thinking; small ones the cheap model with thinking kept low
+  const model = opts.strong ? GEMINI_STRONG_MODEL : modelOf(s);
   const ctrl = new AbortController();
   const onAbort = () => ctrl.abort();
   opts.signal?.addEventListener("abort", onAbort);
   const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs);
   try {
-    let thinking = true;
+    let thinking = !opts.strong;
     for (let attempt = 0; attempt < 2; attempt++) {
       let res: Response;
       try {
@@ -66,12 +68,14 @@ async function call(s: Settings, opts: { system?: string; user: Content[] | stri
 
 export async function tryGemini(opts: { feature: string; system?: string; user: Content[] | string; maxTokens?: number; signal?: AbortSignal }): Promise<string> {
   const s = getSettings();
-  if (!geminiReady(s) || !routeAllowed(opts.feature, s.geminiScope)) throw new GeminiSkip("not a gemini job");
+  const only = !hasKey(s);   // no Claude key: Gemini does everything
+  if (!geminiReady(s) || !routeAllowed(opts.feature, s.geminiScope, !only)) throw new GeminiSkip("not a gemini job");
+  const strong = NEEDS_STRONG.has(opts.feature);
   if (s.geminiBudgetUsd > 0 && (await geminiSpent()).usd >= s.geminiBudgetUsd) { count("ai.gemini.fallback.cap"); throw new GeminiSkip("over the cap"); }
   const t0 = performance.now();
   const why = (reason: string) => { count(`ai.gemini.fallback.${reason}`); warn("ai", "gemini skipped", { feature: opts.feature, reason, ms: Math.round(performance.now() - t0) }); return new GeminiSkip(reason); };
   let r;
-  try { r = await call(s, { system: opts.system, user: opts.user, maxTokens: Math.max(256, opts.maxTokens ?? 2000), signal: opts.signal, timeoutMs: 90_000 }); }
+  try { r = await call(s, { system: opts.system, user: opts.user, maxTokens: Math.max(256, opts.maxTokens ?? 2000) + (strong ? 8000 : 0) /* thinking shares the limit */, signal: opts.signal, timeoutMs: strong ? 240_000 : 90_000, strong }); }
   catch (e) { if (e instanceof GeminiSkip && e.message !== "cancelled") throw why(e.message); throw e; }
   const reply = readGeminiReply(r.data);
   // billed even when we then throw the reply away, so count it before checking

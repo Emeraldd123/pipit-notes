@@ -769,7 +769,7 @@ function ExamModal({ ai, notes, notebooks, onClose, onReady, setBusy, flash }: {
   const subjects = [...new Set(builtin.map((e) => e.subject))];
   const [err, setErr] = useState<string | null>(null);
   const run = async () => {
-    setErr(null); setBusy("Writing your exam — this takes a minute for a full paper…");
+    setErr(null); setBusy("Reading your notes…");
     try {
       const ids = await scopeNoteIds(scope);
       const excerpts = await corpusExcerpts(ids, 20000);
@@ -783,7 +783,9 @@ function ExamModal({ ai, notes, notebooks, onClose, onReady, setBusy, flash }: {
       // case memory: the scenarios recent exams on these notes used, so this one picks different ones
       const memory = (await getMeta<CaseRec[]>(caseKey(scope)).catch(() => undefined)) ?? [];
       count("study.exam.generate");
-      let exam = await generateExam({ excerpts, questions, difficulty, style, figures, images, textbook, cases, avoidCases: avoidList(memory), pastExams: past.map((e) => ({ title: e.title, text: e.text })) });
+      setBusy("Planning your exam (a full paper takes a minute or two; keep Pipit open)…");
+      let exam = await generateExam({ excerpts, questions, difficulty, style, figures, images, textbook, cases, avoidCases: avoidList(memory), pastExams: past.map((e) => ({ title: e.title, text: e.text })) },
+        (n) => setBusy(n ? `Writing question ${Math.min(n, questions)} of ${questions}…` : "Planning your exam…"));
       // textbook and case-study questions must rest on something the notes teach (coverage.ts)
       const c = checkSolvable(exam, excerpts, textbook);
       if (!c.exam.sections.length) { setErr("Every question needed material your notes don't cover. Try again, or untick the textbook / case-study options."); return; }

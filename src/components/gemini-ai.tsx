@@ -2,7 +2,7 @@
 // this month's spend, and a Test button.
 import { useEffect, useState } from "react";
 import { Check, Loader2, Sparkles } from "lucide-react";
-import { updateSettings, useSettings } from "@/lib/settings";
+import { hasKey, updateSettings, useSettings } from "@/lib/settings";
 import { geminiSpent, onGeminiSpend, testGemini } from "@/lib/gemini";
 import { GEMINI_DEFAULT_MODEL } from "@/lib/gemini-core";
 import { Button } from "@/components/ui";
@@ -49,6 +49,11 @@ export function GeminiAi() {
             This month: {(spent?.usd ?? 0) > 0 && (spent?.usd ?? 0) < 0.01 ? "under 1¢" : `about $${(spent?.usd ?? 0).toFixed(2)}`} over {spent?.calls ?? 0} request{spent?.calls === 1 ? "" : "s"}{s.geminiBudgetUsd > 0 ? ` of $${s.geminiBudgetUsd}` : ""}. At the cap, jobs go to Claude instead. An estimate from token counts; Google&apos;s billing page has the real figure.
           </span>
         </label>
+        <p className="mt-3 rounded-lg bg-surface-secondary px-3 py-2 text-xs text-foreground-muted">
+          {hasKey(s)
+            ? <><strong>With both keys:</strong> Gemini takes the jobs above; exams and marking are written by Claude; anything Gemini can&apos;t do falls back to Claude.</>
+            : <><strong>With only a Gemini key:</strong> everything runs on Gemini, including exams, marking and Explain (on the stronger Gemini 3.8 Flash). Exams were tuned on Claude, so Gemini&apos;s are less tested: report any broken question from the exam screen.</>}
+        </p>
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <Button onClick={async () => { setTesting(true); setResult(null); try { setResult(await testGemini()); } finally { setTesting(false); } }} disabled={testing}>
             {testing ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Test Gemini

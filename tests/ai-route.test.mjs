@@ -7,6 +7,9 @@ test("which jobs may go to the cheaper provider", () => {
   assert.ok(!routeAllowed("explain", "light") && routeAllowed("explain", "most"));
   for (const f of ["exam", "exam.mark", "exam.verify", "test"]) assert.ok(!routeAllowed(f, "most"), `${f} stays on Claude`);
   assert.ok(!routeAllowed("something-new", "most"), "unknown jobs stay on Claude");
+  // with no Claude key, Gemini is all there is
+  for (const f of ["exam", "exam.mark", "explain", "review", "something-new"]) assert.ok(routeAllowed(f, "light", false), f);
+  assert.ok(!routeAllowed("test", "most", false), "the Anthropic key test never goes to Gemini");
 });
 
 test("a bad reply is thrown away so the job goes to Claude", () => {

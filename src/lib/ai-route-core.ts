@@ -17,6 +17,8 @@ export const ROUTE_LIGHT = new Set([
 export const ROUTE_MOST = new Set(["explain", "cards", "map", "map.expand", "review", "latex"]);
 /** Kept on Claude whenever there is a Claude key: exams and their marking were tuned on Claude. */
 export const CLAUDE_FIRST = new Set(["exam", "exam.mark", "exam.verify"]);
+/** Jobs that need the stronger Gemini model when Gemini does them (long, structured, or judgement-heavy). */
+export const NEEDS_STRONG = new Set(["exam", "exam.mark", "exam.verify", "explain", "review", "cards", "map", "practice", "latex"]);
 /** Never rerouted: the key test must reach Anthropic. */
 const NEVER = new Set(["test"]);
 
@@ -27,8 +29,14 @@ export const JSON_FEATURES = new Set([
   "exam", "exam.mark", "exam.verify",
 ]);
 
-export function routeAllowed(feature: string, scope: RouteScope): boolean {
-  if (NEVER.has(feature) || CLAUDE_FIRST.has(feature)) return false;
+/**
+ * May this job go to Gemini? With a Claude key: only the jobs the scope allows. With NO Claude key, Gemini is all
+ * there is, so it takes everything (exams included: better a less-tested exam than none).
+ */
+export function routeAllowed(feature: string, scope: RouteScope, hasClaudeKey = true): boolean {
+  if (NEVER.has(feature)) return false;
+  if (!hasClaudeKey) return true;
+  if (CLAUDE_FIRST.has(feature)) return false;
   return ROUTE_LIGHT.has(feature) || (scope === "most" && ROUTE_MOST.has(feature));
 }
 
