@@ -35,14 +35,14 @@ export function PagesPanel({ count, current, render, rev, onJump, onMove, onDupl
 }) {
   const activeRef = useRef<HTMLDivElement>(null);
   useEffect(() => { activeRef.current?.scrollIntoView({ block: "nearest" }); }, [current]);
-  const btn = "rounded-md p-1 text-foreground-muted hover:bg-surface-secondary disabled:opacity-30";
+  const btn = "rounded-md p-1 text-foreground-muted hover:bg-surface-secondary disabled:opacity-30 [@media(pointer:coarse)]:p-2.5";
   return (
-    <aside className="absolute bottom-0 right-0 top-0 z-30 flex w-44 flex-col border-l border-border bg-surface/95 shadow-xl backdrop-blur">
+    <aside className="absolute bottom-0 right-0 top-0 z-30 flex w-44 flex-col [@media(pointer:coarse)]:w-60 border-l border-border bg-surface/95 shadow-xl backdrop-blur">
       <div className="flex items-center justify-between border-b border-border px-3 py-2">
         <span className="text-xs font-semibold">Pages · {count}</span>
-        <button onClick={onClose} className="rounded-md p-1 text-foreground-muted hover:bg-surface-secondary" title="Close"><X size={14} /></button>
+        <button onClick={onClose} className="tap rounded-md p-1 text-foreground-muted hover:bg-surface-secondary" title="Close" aria-label="Close page thumbnails"><X size={14} /></button>
       </div>
-      <div className="min-h-0 flex-1 space-y-3 overflow-auto p-2.5">
+      <div className="min-h-0 flex-1 space-y-3 overflow-auto overscroll-contain p-2.5">
         {Array.from({ length: count }, (_, p) => (
           <div key={p} ref={p === current ? activeRef : undefined}>
             <button onClick={() => onJump(p)} className={`block w-full rounded-lg p-0.5 ${p === current ? "ring-2 ring-primary" : ""}`} title={`Go to page ${p + 1}`}>
@@ -51,11 +51,11 @@ export function PagesPanel({ count, current, render, rev, onJump, onMove, onDupl
             <div className="mt-1 flex items-center justify-between">
               <span className="text-[11px] text-foreground-muted">{p + 1}</span>
               <span className="flex">
-                <button className={btn} disabled={p === 0} onClick={() => onMove(p, p - 1)} title="Move up"><ArrowUp size={13} /></button>
-                <button className={btn} disabled={p === count - 1} onClick={() => onMove(p, p + 1)} title="Move down"><ArrowDown size={13} /></button>
-                <button className={btn} onClick={() => onDuplicate(p)} title="Duplicate this page"><Copy size={13} /></button>
-                <button className={btn} onClick={() => onInsertAfter(p)} title="Insert a blank page after"><FilePlus2 size={13} /></button>
-                <button className={`${btn} hover:text-negative`} disabled={count <= 1} onClick={() => onDelete(p)} title="Delete this page"><Trash2 size={13} /></button>
+                <button className={btn} disabled={p === 0} onClick={() => onMove(p, p - 1)} title="Move up" aria-label={`Move up: page ${p + 1}`}><ArrowUp size={13} /></button>
+                <button className={btn} disabled={p === count - 1} onClick={() => onMove(p, p + 1)} title="Move down" aria-label={`Move down: page ${p + 1}`}><ArrowDown size={13} /></button>
+                <button className={btn} onClick={() => onDuplicate(p)} title="Duplicate this page" aria-label={`Duplicate this page: page ${p + 1}`}><Copy size={13} /></button>
+                <button className={btn} onClick={() => onInsertAfter(p)} title="Insert a blank page after" aria-label={`Insert a blank page after: page ${p + 1}`}><FilePlus2 size={13} /></button>
+                <button className={`${btn} hover:text-negative`} disabled={count <= 1} onClick={() => onDelete(p)} title="Delete this page" aria-label={`Delete this page: page ${p + 1}`}><Trash2 size={13} /></button>
               </span>
             </div>
           </div>

@@ -35,7 +35,7 @@ export function GraphPage({ mapId }: { mapId?: string }) {
   return (
     <div className="paper-bg safe-t min-h-full">
       <div className="mx-auto max-w-6xl px-4 py-5 md:px-6 md:py-8">
-        <button onClick={() => go({ name: "library", notebook: null, q: "" })} className="mb-4 flex items-center gap-1.5 text-sm text-foreground-muted hover:text-foreground"><ArrowLeft size={15} /> All notes</button>
+        <button onClick={() => go({ name: "library", notebook: null, q: "" })} className="tap mb-4 -ml-1 flex items-center gap-1.5 rounded-lg px-1 text-sm text-foreground-muted hover:text-foreground" style={{ justifyContent: "flex-start" }}><ArrowLeft size={15} /> All notes</button>
         {!mapId && (
           <>
             <h1 className="serif text-4xl tracking-tight">Map <span className="serif-i text-primary">what you know</span></h1>

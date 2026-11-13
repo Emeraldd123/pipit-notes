@@ -74,7 +74,7 @@ export function SettingsPage() {
   return (
     <div className="paper-bg safe-t min-h-full">
       <div className="mx-auto max-w-2xl px-5 py-6 md:py-10">
-        <button onClick={() => go({ name: "library", notebook: null, q: "" })} className="mb-6 flex items-center gap-1.5 text-sm text-foreground-muted hover:text-foreground"><ArrowLeft size={15} /> All notes</button>
+        <button onClick={() => go({ name: "library", notebook: null, q: "" })} className="tap mb-6 -ml-1 flex items-center gap-1.5 rounded-lg px-1 text-sm text-foreground-muted hover:text-foreground" style={{ justifyContent: "flex-start" }}><ArrowLeft size={15} /> All notes</button>
         <h1 className="serif text-4xl tracking-tight">Settings <span className="serif-i text-primary">&amp; backup</span></h1>
 
         <Section icon={<ShieldCheck size={16} />} title="Keeping your notes safe">
@@ -111,7 +111,7 @@ export function SettingsPage() {
             <input type="checkbox" checked={s.autoIndex} disabled={!s.aiEnabled} onChange={(e) => updateSettings({ autoIndex: e.target.checked })} className="h-5 w-5 accent-[var(--primary)]" />
           </label>
           <label className="mt-3 block text-xs text-foreground-muted">Anthropic API key
-            <input type="password" value={s.apiKey} onChange={(e) => updateSettings({ apiKey: e.target.value })} placeholder="sk-ant-…" autoComplete="off" autoCapitalize="off" spellCheck={false}
+            <input type="password" value={s.apiKey} onChange={(e) => updateSettings({ apiKey: e.target.value, ...(e.target.value.trim().length > 10 && !s.apiKey.trim() ? { aiEnabled: true } : {}) })} placeholder="sk-ant-…" autoComplete="off" autoCapitalize="off" spellCheck={false}
               className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2.5 font-mono text-sm text-foreground outline-none focus:border-primary" />
           </label>
           <label className="mt-3 block text-xs text-foreground-muted">Model

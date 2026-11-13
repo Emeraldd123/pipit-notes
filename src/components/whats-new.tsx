@@ -5,6 +5,9 @@ import { APP } from "@/lib/telemetry";
 
 /** Shown once after an update that moves things around, so nothing feels "gone". Bump the list with the version. */
 const NOTES: { title: string; body: string }[] = [
+  { title: "Google Gemini, a cheaper AI", body: "You can now add a Google Gemini key in Settings → AI features → Google Gemini. Reading handwriting, working checks and short answers go to Gemini first, and Claude takes over if Gemini can't do a job. With only a Gemini key, everything runs on Gemini. Exams were tuned on Claude, so Gemini's are less tested." },
+  { title: "See an exam being written", body: "While Claude writes an exam you now see how far it has got (“Writing question 3 of 8”). If the connection drops part-way, Pipit tells you within about a minute and asks you to try again, instead of waiting in silence. Keep Pipit open until it finishes." },
+  { title: "A getting-started card", body: "New here? An empty Library now shows three steps: add Pipit to your Home Screen, set up AI if you want it, and back up to Files. Dismiss it once and it stays gone." },
   { title: "Real science icons in exam diagrams", body: "Exam diagrams can now use real scientific icons (cells, organelles, organs, organisms, lab glassware) from Bioicons, with credit shown under each diagram. Structures to identify are labelled with letters, like a real paper." },
   { title: "Fresh cases every exam", body: "Practice exams now remember the real-world situations they used, so the next exam on the same notes picks different ones. You practise the ideas, not a few favourite examples." },
   { title: "Explanations fold away", body: "A pinned explanation is now a small “Explain” chip on what you circled. Tap it to read it in the bottom half of the screen. Highlighted something? Tap the Explain button that pops up, or tap the highlight with the Explain tool." },
@@ -20,7 +23,7 @@ const NOTES: { title: string; body: string }[] = [
   { title: "Study got smarter", body: "Reviews are now scheduled with FSRS (the method Anki moved to: fewer reviews for the same memory), and streak freezes save your streak if you miss a day." },
   { title: "Report what's wrong", body: "Flag a broken exam question and it stops counting toward your score. In Explain, “Not right? Ask again” gets a more careful answer." },
   { title: "Study, sorted", body: "Learn, Flashcards, Quizzes and Exams are now separate tabs. Each has its own notebook and topic picker. In a lesson, “Off topic” drops that unit and restarts. Study settings can reset your cards, exams and XP." },
-  { title: "Textbooks", body: "“Add textbook” in the Library brings in a book's text only (fast and small). Practice exams can then use its real problems, but only ones your notes cover. Add a book on your laptop and move the small file it saves to your iPad." },
+  { title: "Textbooks", body: "Import → Textbook in the Library brings in a book's text only (fast and small). Practice exams can then use its real problems, but only ones your notes cover. Add a book on your laptop and move the small file it saves to your iPad." },
   { title: "Tougher answer choices", body: "Multiple-choice wrong answers now come from real mistakes, not from other cards. Older cards can get theirs with “Write answer choices” in the Cards tab." },
   { title: "Lower AI bills", body: "Simple jobs use a cheaper model, repeats are free, and Settings shows what you've spent this month (you can set a budget)." },
 ];

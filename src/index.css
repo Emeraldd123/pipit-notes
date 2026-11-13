@@ -71,8 +71,46 @@ html, body, #root {
   overscroll-behavior: none;
 }
 body { -webkit-tap-highlight-color: transparent; }
+html { -webkit-text-size-adjust: 100%; }
 button { cursor: pointer; }
 button:disabled { cursor: default; }
+
+/* Motion tokens: one strong ease-out for everything that enters or responds to a press. */
+:root { --ease-out: cubic-bezier(0.23, 1, 0.32, 1); }
+
+/* Controls behave like controls on touch: no double-tap-zoom delay, no text selection or callout on a long press. */
+button, a, select, summary, label, [role="button"] { touch-action: manipulation; }
+button, [role="button"] { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+
+/* Press feedback on every button (the tap highlight is off, so this is the only "I heard you").
+   Uses the standalone `scale` property so it never fights a transform or Tailwind's translate utilities. */
+button {
+  transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease, opacity 150ms ease, scale 140ms var(--ease-out);
+}
+button:not(:disabled):active { scale: 0.97; }
+
+/* Keyboard focus is always visible (a tap or a Pencil never triggers :focus-visible). */
+:is(button, a, select, summary, [role="button"], [tabindex]):focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* Entrances. Things that appear (menus, dialogs, toasts) ease in from nearly their final state; they are
+   transitions with a starting style, so they are skipped cleanly where @starting-style is unsupported. */
+.anim-pop { transition: opacity 160ms var(--ease-out), scale 160ms var(--ease-out); }
+.anim-fade { transition: opacity 200ms ease; }
+.anim-rise { transition: opacity 240ms var(--ease-out), transform 240ms var(--ease-out); }
+@starting-style {
+  .anim-pop { opacity: 0; scale: 0.96; }
+  .anim-fade { opacity: 0; }
+  .anim-rise { opacity: 0; transform: translateY(10px); }
+}
+
+/* Compact icon buttons keep their size with a mouse and grow to a finger-sized target on touch. */
+@media (pointer: coarse) {
+  .tap { display: inline-flex; align-items: center; justify-content: center; min-width: 2.75rem; min-height: 2.75rem; }
+}
+
+/* Scrollable strips (tool rail, chip rows) scroll without a scrollbar eating their width. */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
 
 /* Safe-area padding for the installed (standalone) iPad/iPhone app. */
 .safe-t { padding-top: env(safe-area-inset-top); }

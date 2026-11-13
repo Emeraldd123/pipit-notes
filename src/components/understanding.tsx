@@ -77,7 +77,7 @@ export function ExplainPanel({ state, onAsk, onClose, onPin, onUnpin, onCards, o
             ? <button onClick={onUnpin} className="mr-1 flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-foreground-muted hover:bg-surface-secondary" title="Take the Explain chip off the page"><PinOff size={13} /> Unpin</button>
             : <button onClick={onPin} className="mr-1 flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-primary hover:bg-primary/10" title="Leave a small Explain chip on what you circled; tap it any time to read this again"><Pin size={13} /> Pin to note</button>)}
           {d && <button onClick={onCards} className="mr-2 flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-primary hover:bg-primary/10" title="Turn this into flashcards"><Layers size={13} /> Flashcards</button>}
-          <button onClick={onClose} className="rounded-md p-1 text-foreground-muted hover:bg-surface-secondary" title={state.pinnedId ? "Close (it stays pinned)" : "Close"}><X size={18} /></button>
+          <button onClick={onClose} className="tap shrink-0 rounded-md p-1 text-foreground-muted hover:bg-surface-secondary" title={state.pinnedId ? "Close (it stays pinned)" : "Close"} aria-label="Close explanation"><X size={18} /></button>
         </div>
         <div className="min-h-0 flex-1 space-y-3 overflow-auto px-4 py-3 text-sm leading-relaxed">
           {state.status === "loading" && <p className="flex items-center gap-2 text-foreground-muted"><Loader2 size={14} className="animate-spin" /> Reading what you circled…</p>}
@@ -142,8 +142,8 @@ export function StickyPanel({ b, onChange, onDelete, onClose }: { b: BlockRec; o
             <button key={c} onClick={() => onChange({ ...b, tint: c })} aria-label="Note colour" title="Note colour"
               className={`h-6 w-6 rounded-full border border-black/20 ${c === tint ? "ring-2 ring-neutral-700 ring-offset-1" : ""}`} style={{ background: c }} />
           ))}
-          <button onClick={onDelete} className="ml-1 rounded-md p-1.5 text-neutral-700 hover:bg-black/10" title="Delete this sticky note"><Trash2 size={16} /></button>
-          <button onClick={onClose} className="rounded-md p-1.5 text-neutral-700 hover:bg-black/10" title="Close"><X size={18} /></button>
+          <button onClick={onDelete} className="tap ml-1 rounded-md p-1.5 text-neutral-700 hover:bg-black/10" title="Delete this sticky note" aria-label="Delete this sticky note"><Trash2 size={16} /></button>
+          <button onClick={onClose} className="tap rounded-md p-1.5 text-neutral-700 hover:bg-black/10" title="Close" aria-label="Close sticky note"><X size={18} /></button>
         </div>
         <textarea value={b.text} onChange={(e) => onChange({ ...b, text: e.target.value })} autoFocus={!b.text} placeholder="Write a note… (the first line shows on the page)"
           className="min-h-0 flex-1 resize-none bg-transparent px-4 py-3 text-base leading-relaxed text-neutral-900 outline-none placeholder:text-neutral-600/70"
@@ -252,12 +252,12 @@ export function ReviewBar({ review, onGo, onToggleFixed, onDismiss, onClose, onC
     <div className="absolute inset-x-0 bottom-0 z-30 flex justify-center px-3 pb-3">
       <div className="flex max-h-[52vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl">
         <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-          <button onClick={() => onGo(i - 1)} disabled={i === 0} className="rounded-md p-1.5 text-foreground-muted hover:bg-surface-secondary disabled:opacity-30" title="Previous mistake"><ChevronLeft size={18} /></button>
+          <button onClick={() => onGo(i - 1)} disabled={i === 0} className="tap rounded-md p-1.5 text-foreground-muted hover:bg-surface-secondary disabled:opacity-30" title="Previous mistake" aria-label="Previous mistake"><ChevronLeft size={18} /></button>
           <button onClick={() => setList((v) => !v)} className="flex-1 text-left text-sm font-semibold" title="Show all">
             Mistake {i + 1} of {issues.length} <span className="font-normal text-foreground-muted">· page {it.page + 1} · {it.kind.replace("-", " ")}{it.confidence === "medium" ? " · not sure" : ""} · {remaining} left</span>
           </button>
-          <button onClick={() => onGo(i + 1)} disabled={i >= issues.length - 1} className="rounded-md p-1.5 text-foreground-muted hover:bg-surface-secondary disabled:opacity-30" title="Next mistake"><ChevronRight size={18} /></button>
-          <button onClick={onClose} className="rounded-md p-1.5 text-foreground-muted hover:bg-surface-secondary" title="Close review"><X size={16} /></button>
+          <button onClick={() => onGo(i + 1)} disabled={i >= issues.length - 1} className="tap rounded-md p-1.5 text-foreground-muted hover:bg-surface-secondary disabled:opacity-30" title="Next mistake" aria-label="Next mistake"><ChevronRight size={18} /></button>
+          <button onClick={onClose} className="tap rounded-md p-1.5 text-foreground-muted hover:bg-surface-secondary" title="Close review" aria-label="Close review"><X size={16} /></button>
         </div>
         {list ? (
           <ol className="min-h-0 flex-1 divide-y divide-border overflow-auto text-sm">

@@ -270,25 +270,25 @@ export function StudyPage({ view }: { view?: string }) {
   return (
     <div className="paper-bg safe-t min-h-full pb-24">
       <div className="mx-auto max-w-3xl px-4 py-5 md:px-6 md:py-8">
-        <button onClick={() => go({ name: "library", notebook: null, q: "" })} className="mb-4 flex items-center gap-1.5 text-sm text-foreground-muted hover:text-foreground"><ArrowLeft size={15} /> All notes</button>
+        <button onClick={() => go({ name: "library", notebook: null, q: "" })} className="tap mb-4 -ml-1 flex items-center gap-1.5 rounded-lg px-1 text-sm text-foreground-muted hover:text-foreground" style={{ justifyContent: "flex-start" }}><ArrowLeft size={15} /> All notes</button>
 
         {/* header: streak, daily goal */}
         <div className="flex flex-wrap items-center justify-between gap-4">
           <h1 className="serif text-4xl tracking-tight">Study <span className="serif-i text-primary">time</span></h1>
           <div className="flex items-center gap-3">
-            <span className={`flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm font-bold ${streak ? "border-orange-500/40 bg-orange-500/10 text-orange-600" : "border-border text-foreground-muted"}`} title="Day streak"><Flame size={16} fill={streak ? "currentColor" : "none"} /> {streak}</span>
+            <span className={`flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm font-bold tabular-nums ${streak ? "border-orange-500/40 bg-orange-500/10 text-orange-600" : "border-border text-foreground-muted"}`} title="Day streak" aria-label={`Day streak: ${streak}`}><Flame size={16} fill={streak ? "currentColor" : "none"} /> {streak}</span>
             <span className="flex items-center gap-1 rounded-full border border-sky-500/40 bg-sky-500/10 px-2.5 py-1.5 text-sm font-bold text-sky-600" title="Streak freezes: if you miss a day, one is used instead of ending your streak. You earn one for every 7 days in a row (you can hold 2).">
               <Snowflake size={15} /> {progress?.freezes ?? 0}
             </span>
             <GoalRing pct={goalPct} label={`${goalXp}/${progress?.goal ?? 30}`} />
-            <button onClick={() => setModal("settings")} className="rounded-lg p-2 text-foreground-muted hover:bg-surface-secondary" title="Study settings"><Settings2 size={17} /></button>
+            <button onClick={() => setModal("settings")} className="tap rounded-lg p-2 text-foreground-muted hover:bg-surface-secondary" title="Study settings" aria-label="Study settings"><Settings2 size={17} /></button>
           </div>
         </div>
 
-        <div className="mt-5 flex gap-1 overflow-x-auto rounded-2xl border border-border bg-surface p-1 text-sm">
+        <div role="tablist" aria-label="Study sections" className="no-scrollbar mt-5 flex gap-1 overflow-x-auto rounded-2xl border border-border bg-surface p-1 text-sm">
           {TABS.map((t) => (
-            <button key={t.id} onClick={() => go({ name: "study", view: t.id === "path" ? undefined : t.id })}
-              className={`flex shrink-0 items-center gap-1.5 rounded-xl px-3.5 py-2 font-medium ${tab === t.id ? "bg-primary text-white" : "text-foreground-muted hover:bg-surface-secondary"}`}>{t.icon}{t.label}</button>
+            <button key={t.id} role="tab" aria-selected={tab === t.id} onClick={() => go({ name: "study", view: t.id === "path" ? undefined : t.id })}
+              className={`flex shrink-0 items-center gap-1.5 rounded-xl px-3.5 py-2 font-medium [@media(pointer:coarse)]:min-h-11 ${tab === t.id ? "bg-primary text-white" : "text-foreground-muted hover:bg-surface-secondary"}`}>{t.icon}{t.label}</button>
           ))}
         </div>
 
@@ -296,7 +296,7 @@ export function StudyPage({ view }: { view?: string }) {
           {tab === "path" && progress && (
             <>
               {cards.length > 0 && <FocusBar label="Learning" hint="Lessons only teach these. Tap “Off topic” in a lesson to drop a unit." cards={cards} notebooks={notebooks} focus={focusOf("learn")} onChange={(f) => void setFocus("learn", f)} />}
-              <PathView cards={learnCards} anyCards={cards.length > 0} topics={topics} dueCount={dueCount} progress={progress}
+              <PathView cards={learnCards} anyCards={cards.length > 0} ai={ai} hasNotes={notes.some((n) => !n.isTextbook && !n.isPastExam)} topics={topics} dueCount={dueCount} progress={progress}
                 onLesson={(o) => startLesson({ ...o, pool: learnCards, mode: "lesson", section: "learn" })} onGenerate={() => setModal("generate")} onCard={() => { setEditing(null); setModal("card"); }} />
             </>
           )}
@@ -351,8 +351,8 @@ function GoalRing({ pct, label }: { pct: number; label: string }) {
 // ---- Learn (the skill path) ---------------------------------------------------------------------------------------------------------------
 const WIGGLE = [0, 46, 74, 46, 0, -46, -74, -46];
 
-function PathView({ cards, anyCards, topics, dueCount, progress, onLesson, onGenerate, onCard }: {
-  cards: Card[]; anyCards: boolean; topics: ReturnType<typeof topicStats>; dueCount: number; progress: Progress;
+function PathView({ cards, anyCards, ai, hasNotes, topics, dueCount, progress, onLesson, onGenerate, onCard }: {
+  cards: Card[]; anyCards: boolean; ai: boolean; hasNotes: boolean; topics: ReturnType<typeof topicStats>; dueCount: number; progress: Progress;
   onLesson: (o: { topic?: string; dueOnly?: boolean; title: string; size?: number }) => void; onGenerate: () => void; onCard: () => void;
 }) {
   const [open, setOpen] = useState<string | null>(null);
@@ -366,11 +366,30 @@ function PathView({ cards, anyCards, topics, dueCount, progress, onLesson, onGen
       <UiCard className="px-6 py-10 text-center">
         <Brain size={40} className="mx-auto text-primary" />
         <h2 className="serif mt-3 text-3xl">Turn your notes into <span className="serif-i text-primary">a course</span></h2>
-        <p className="mx-auto mt-2 max-w-md text-sm text-foreground-muted">I&apos;ll read your notes and make flashcards, then build short Duolingo-style lessons from them — matching, multiple choice, fill-in-the-blank, ordering and more — with streaks, XP and spaced repetition so it sticks.</p>
-        <div className="mt-6 flex flex-wrap justify-center gap-2">
-          <Button variant="primary" onClick={onGenerate}><Sparkles size={15} /> Make flashcards from my notes</Button>
-          <Button onClick={onCard}><Plus size={15} /> Add a card myself</Button>
-        </div>
+        <p className="mx-auto mt-2 max-w-md text-sm text-foreground-muted">Flashcards become short lessons: matching, multiple choice, fill-in-the-blank, ordering and more, with streaks, XP and spaced repetition so it sticks.</p>
+        {/* the first step depends on what this person has: notes to read, an AI key to read them with, or neither yet */}
+        {!hasNotes ? (
+          <>
+            <p className="mx-auto mt-3 max-w-md text-sm text-foreground-muted">You have no notes yet. Write or import one and cards can be made from it, or add a few cards yourself now.</p>
+            <div className="mt-6 flex flex-wrap justify-center gap-2">
+              <Button variant="primary" onClick={onCard}><Plus size={15} /> Add a card myself</Button>
+              <Button onClick={() => go({ name: "library", notebook: null, q: "" })}>Go to my notes</Button>
+            </div>
+          </>
+        ) : !ai ? (
+          <>
+            <p className="mx-auto mt-3 max-w-md text-sm text-foreground-muted">Making cards from your notes needs AI, which is off. Cards you add yourself work without it.</p>
+            <div className="mt-6 flex flex-wrap justify-center gap-2">
+              <Button variant="primary" onClick={onCard}><Plus size={15} /> Add a card myself</Button>
+              <Button onClick={() => go({ name: "settings" })}><Sparkles size={15} /> Set up AI</Button>
+            </div>
+          </>
+        ) : (
+          <div className="mt-6 flex flex-wrap justify-center gap-2">
+            <Button variant="primary" onClick={onGenerate}><Sparkles size={15} /> Make flashcards from my notes</Button>
+            <Button onClick={onCard}><Plus size={15} /> Add a card myself</Button>
+          </div>
+        )}
       </UiCard>
     );
   }
@@ -490,9 +509,9 @@ function CardsView({ cards, total, notebooks, onAdd, onEdit, onDelete, onSuspend
                       </p>
                     </div>
                     <div className="flex shrink-0 gap-0.5">
-                      <button onClick={() => onEdit(c)} className="rounded-md p-1.5 text-foreground-muted hover:bg-surface-secondary" title="Edit"><Pencil size={14} /></button>
-                      <button onClick={() => onSuspend(c)} className="rounded-md p-1.5 text-foreground-muted hover:bg-surface-secondary" title={c.suspended ? "Resume" : "Pause (skip in lessons)"}><Check size={14} /></button>
-                      <button onClick={() => { if (confirm("Delete this card?")) onDelete(c); }} className="rounded-md p-1.5 text-foreground-muted hover:text-negative" title="Delete"><Trash2 size={14} /></button>
+                      <button onClick={() => onEdit(c)} className="tap rounded-md p-1.5 text-foreground-muted hover:bg-surface-secondary" title="Edit" aria-label="Edit card"><Pencil size={14} /></button>
+                      <button onClick={() => onSuspend(c)} className="tap rounded-md p-1.5 text-foreground-muted hover:bg-surface-secondary" title={c.suspended ? "Resume" : "Pause (skip in lessons)"} aria-label={c.suspended ? "Resume card" : "Pause card"} aria-pressed={!!c.suspended}><Check size={14} /></button>
+                      <button onClick={() => { if (confirm("Delete this card?")) onDelete(c); }} className="tap rounded-md p-1.5 text-foreground-muted hover:text-negative" title="Delete" aria-label="Delete card"><Trash2 size={14} /></button>
                     </div>
                   </div>
                 </UiCard>
@@ -599,7 +618,7 @@ function ExamsView({ exams, ai, onExam, onOpen, onDelete }: {
       <div>
         <button onClick={onExam} className="w-full rounded-2xl border-2 border-primary/50 bg-primary/5 p-5 text-left hover:bg-primary/10">
           <ClipboardList size={26} className="text-primary" />
-          <p className="mt-2 text-lg font-bold">Practice exam {ai ? "" : "(needs AI)"}</p>
+          <p className="mt-2 text-lg font-bold">Practice exam{ai ? "" : " (needs AI)"}</p>
           <p className="text-sm text-foreground-muted">A realistic paper written from the notes you choose: multi-part questions with graphs, data tables, diagrams and pictures. Timed, marked, with the model answer.</p>
         </button>
       </div>
@@ -616,7 +635,7 @@ function ExamsView({ exams, ai, onExam, onOpen, onDelete }: {
                   <p className="text-xs text-foreground-muted">{r.exam.totalMarks} marks · {r.exam.durationMin} min · {r.exam.sections.reduce((a, s) => a + s.questions.length, 0)} questions · {timeAgo(r.createdAt)}{best !== null ? ` · best ${best}%` : ""}</p>
                 </div>
                 <Button variant="primary" onClick={() => onOpen(r)}>{r.attempts.length ? "Retake" : "Start"}</Button>
-                <button onClick={() => onDelete(r)} className="rounded-md p-1.5 text-foreground-muted hover:text-negative" title="Delete"><Trash2 size={15} /></button>
+                <button onClick={() => onDelete(r)} className="tap shrink-0 rounded-md p-1.5 text-foreground-muted hover:text-negative" title="Delete" aria-label={`Delete ${r.exam.title}`}><Trash2 size={15} /></button>
               </UiCard>
             );
           })}
@@ -661,9 +680,9 @@ function MistakesView({ mistakes, notes, onOpen, onResolve, onDelete, onPractice
                 {m.fix && <p className="mt-0.5"><span className="font-medium text-positive">Instead: </span><RichText text={m.fix} /></p>}
               </div>
               <div className="flex shrink-0 gap-0.5">
-                <button onClick={() => onOpen(m)} className="rounded-md px-1.5 py-1 text-xs text-primary hover:bg-surface-secondary">Open</button>
-                <button onClick={() => onResolve(m)} className="rounded-md p-1.5 text-foreground-muted hover:bg-surface-secondary" title={m.resolved ? "Mark unresolved" : "Mark fixed"}><Check size={14} /></button>
-                <button onClick={() => onDelete(m)} className="rounded-md p-1.5 text-foreground-muted hover:text-negative" title="Remove"><Trash2 size={14} /></button>
+                <button onClick={() => onOpen(m)} className="tap rounded-md px-1.5 py-1 text-xs text-primary hover:bg-surface-secondary">Open</button>
+                <button onClick={() => onResolve(m)} className="tap rounded-md p-1.5 text-foreground-muted hover:bg-surface-secondary" title={m.resolved ? "Mark unresolved" : "Mark fixed"} aria-label={m.resolved ? "Mark unresolved" : "Mark fixed"} aria-pressed={!!m.resolved}><Check size={14} /></button>
+                <button onClick={() => onDelete(m)} className="tap rounded-md p-1.5 text-foreground-muted hover:text-negative" title="Remove" aria-label="Remove mistake"><Trash2 size={14} /></button>
               </div>
             </div>
           </UiCard>
@@ -695,7 +714,7 @@ function GenerateModal({ ai, notes, notebooks, onClose, onDone, setBusy }: {
   const run = async () => {
     setErr(null); setBusy("Reading your notes and writing cards…");
     try {
-      const r = await makeCardsFromNotes(scope, want, again);
+      const r = await makeCardsFromNotes(scope, want, again, (n) => { if (n) setBusy(`Writing card ${Math.min(n, want)} of about ${want}…`); });
       if (!r.sources && r.skipped) { setErr(`You've already made cards from all ${r.skipped} page${r.skipped === 1 ? "" : "s"} here, and none have changed. Tick “Include pages I've already used” to make more anyway.`); return; }
       if (!r.sources) { setErr("There's no readable text in that scope yet. Use “Read my handwriting” on the Search page, or import typed PDFs."); return; }
       onDone(r.added ? `Added ${r.added} new card${r.added === 1 ? "" : "s"} from ${r.sources} page${r.sources === 1 ? "" : "s"}.` : "No new cards — you already have these.");
@@ -851,7 +870,7 @@ function ExamModal({ ai, notes, notebooks, onClose, onReady, setBusy, flash }: {
           {books.length > 0 ? (
             <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={useBooks} onChange={(e) => setUseBooks(e.target.checked)} /><span><b>Use questions from my textbooks</b> — real problems from {books.length === 1 ? `“${books[0].title}”` : `your ${books.length} textbooks`}, but only ones your notes give you what you need to solve <span className="text-foreground-muted">(costs a little more)</span></span></label>
           ) : (
-            <p className="text-xs text-foreground-muted">Tip: import a textbook PDF and mark it as a textbook (the book button on its card in the Library) — exams can then use its problems, limited to what your notes cover.</p>
+            <p className="text-xs text-foreground-muted">Tip: add a textbook with Import → Textbook in the Library. Exams can then use its problems, limited to what your notes cover.</p>
           )}
           <p className="text-xs text-foreground-muted">Typical cost {formatUsd(estimateUsd("exam", questions / 8, getSettings()) + (pictures ? estimateUsd("review", 4, getSettings()) : 0))} to write, plus about {formatUsd(estimateUsd("exam.mark", 2, getSettings()))} to mark the written answers.</p>
           {err && <p className="text-sm text-negative">{err}</p>}

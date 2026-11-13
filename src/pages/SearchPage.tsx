@@ -27,7 +27,7 @@ export function SearchPage() {
   return (
     <div className="paper-bg safe-t min-h-full">
       <div className="mx-auto max-w-3xl px-5 py-6 md:py-10">
-        <button onClick={() => go({ name: "library", notebook: null, q: "" })} className="mb-6 flex items-center gap-1.5 text-sm text-foreground-muted hover:text-foreground">
+        <button onClick={() => go({ name: "library", notebook: null, q: "" })} className="tap -ml-1 mb-6 flex items-center gap-1.5 rounded-lg px-1 text-sm text-foreground-muted hover:text-foreground" style={{ justifyContent: "flex-start" }}>
           <ArrowLeft size={15} /> All notes
         </button>
         <h1 className="serif text-4xl tracking-tight">Search <span className="serif-i text-primary">&amp; ask</span></h1>

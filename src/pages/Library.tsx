@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  BookOpen, CheckSquare, ClipboardList, Clock, Download, RotateCcw, Trash, FileUp, Folder, FolderInput, FolderPlus, GraduationCap, Loader2, Network, NotebookPen, Pencil, Pin, Plus, Search, Settings as SettingsIcon, Tag, Trash2, Upload, X,
+  BookOpen, CheckSquare, ChevronDown, ClipboardList, Clock, Download, MoreHorizontal, RotateCcw, Trash, FileUp, Folder, FolderInput, FolderPlus, GraduationCap, Loader2, Network, NotebookPen, Pencil, Pin, Plus, Search, Settings as SettingsIcon, Tag, Trash2, Upload, X,
 } from "lucide-react";
 import type { NoteMeta, NotebookRec } from "@/types";
 import {
@@ -17,9 +17,10 @@ import { timeAgo } from "@/lib/format";
 import { getBootResult, updateSentinel, whenBooted } from "@/lib/health";
 import { count, logError, timer } from "@/lib/telemetry";
 import { go } from "@/router";
-import { Button, Card, Toast, Wordmark } from "@/components/ui";
+import { Button, Card, DropMenu, Toast, Wordmark, type DropItem } from "@/components/ui";
 import { WhatsNew } from "@/components/whats-new";
 import { Welcome } from "@/components/welcome";
+import { InstallNudge } from "@/components/install-nudge";
 
 export function Library({ notebook, q }: { notebook: string | null; q: string }) {
   const [notes, setNotes] = useState<NoteMeta[] | null>(null);
@@ -304,65 +305,71 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
     }
   }
 
+  const importItems: DropItem[] = [
+    { icon: <FileUp size={17} />, label: "PDF to write on", hint: "Slides or a worksheet. Each PDF becomes a note.", onClick: () => pdfRef.current?.click() },
+    { icon: <BookOpen size={17} />, label: "Textbook", hint: "Text only. Practice exams can use its problems.", onClick: () => bookRef.current?.click() },
+    { icon: <ClipboardList size={17} />, label: "Past exam", hint: "Practice exams copy its format, never its questions.", onClick: () => examRef.current?.click() },
+    { divider: true, icon: <Upload size={17} />, label: "Restore a backup", hint: "A .zip saved with Back up now.", onClick: () => restoreRef.current?.click() },
+  ];
+
   const activeName = notebook === "trash" ? "Recently deleted" : notebook === "recent" ? "Recent" : notebook === "none" ? "Unfiled" : notebook ? notebooks.find((n) => n.id === notebook)?.name ?? "Notebook" : "All notes";
 
   return (
     <div className="paper-bg safe-t flex min-h-full">
       {/* Sidebar */}
-      <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-surface/70 px-4 py-6 backdrop-blur md:flex">
+      <aside className="sticky top-[env(safe-area-inset-top,0px)] hidden h-[calc(100dvh-env(safe-area-inset-top,0px))] w-56 shrink-0 flex-col self-start overflow-y-auto overscroll-contain border-r border-border bg-surface/70 px-3.5 py-6 backdrop-blur md:flex lg:w-60 lg:px-4">
         <div className="mb-6 flex items-center gap-2"><NotebookPen size={20} className="text-primary" /><Wordmark size="sm" /></div>
         <nav className="space-y-0.5 text-sm">
           <SideItem active={!notebook} onClick={() => go({ name: "library", notebook: null, q: "" })} icon={<Folder size={15} />} label="All notes" count={notes?.length} />
           <SideItem active={notebook === "recent"} onClick={() => go({ name: "library", notebook: "recent", q: "" })} icon={<Clock size={15} />} label="Recent" />
           {(trashed.length > 0 || notebook === "trash") && <SideItem active={notebook === "trash"} onClick={() => go({ name: "library", notebook: "trash", q: "" })} icon={<Trash size={15} />} label="Recently deleted" count={trashed.length} />}
           <SideItem active={notebook === "none"} onClick={() => go({ name: "library", notebook: "none", q: "" })} icon={<Folder size={15} />} label="Unfiled" count={counts.get(null)}
-            action={<button title="Download as PDFs (.zip)" onClick={() => exportNotebookZip(null, "Unfiled")} className="p-1 text-foreground-muted hover:text-primary"><Download size={12} /></button>} />
+            action={<button title="Download as PDFs (.zip)" aria-label="Download Unfiled as PDFs" onClick={() => exportNotebookZip(null, "Unfiled")} className={sideAction}><Download size={13} /></button>} />
           {notebooks.map((nb) => (
             <SideItem key={nb.id} active={notebook === nb.id} onClick={() => go({ name: "library", notebook: nb.id, q: "" })}
               icon={<span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: nb.color }} />} label={nb.name} count={counts.get(nb.id)}
               action={<>
-                <button title="Download notebook as PDFs (.zip)" onClick={() => exportNotebookZip(nb.id, nb.name)} className="p-1 text-foreground-muted hover:text-primary"><Download size={12} /></button>
-                <button title="Delete notebook" onClick={() => removeNotebook(nb)} className="p-1 text-foreground-muted hover:text-negative"><Trash2 size={12} /></button>
+                <button title="Download notebook as PDFs (.zip)" aria-label={`Download ${nb.name} as PDFs`} onClick={() => exportNotebookZip(nb.id, nb.name)} className={sideAction}><Download size={13} /></button>
+                <button title="Delete notebook" aria-label={`Delete notebook ${nb.name}`} onClick={() => removeNotebook(nb)} className={`${sideAction} hover:text-negative`}><Trash2 size={13} /></button>
               </>} />
           ))}
-          <button onClick={newNotebook} className="mt-1 flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-foreground-muted hover:bg-surface-secondary">
+          <button onClick={newNotebook} className={`mt-1 ${sideLink} text-foreground-muted hover:bg-surface-secondary`}>
             <FolderPlus size={15} /> New notebook
           </button>
         </nav>
         <div className="mt-auto space-y-0.5 pt-6 text-sm">
-          <button onClick={() => go({ name: "study" })} className="flex w-full items-center gap-2 rounded-lg bg-primary/10 px-2.5 py-1.5 font-medium text-primary hover:bg-primary/20"><GraduationCap size={15} /> Study</button>
-          <button onClick={() => go({ name: "search" })} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-foreground-muted hover:bg-surface-secondary"><Search size={15} /> Search &amp; ask</button>
-          <button onClick={() => go({ name: "graph" })} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-foreground-muted hover:bg-surface-secondary"><Network size={15} /> Concept maps</button>
-          <button onClick={() => go({ name: "settings" })} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-foreground-muted hover:bg-surface-secondary"><SettingsIcon size={15} /> Settings &amp; backup</button>
+          <button onClick={() => go({ name: "study" })} className={`${sideLink} bg-primary/10 font-medium text-primary hover:bg-primary/20`}><GraduationCap size={15} /> Study</button>
+          <button onClick={() => go({ name: "search" })} className={`${sideLink} text-foreground-muted hover:bg-surface-secondary`}><Search size={15} /> Search &amp; ask</button>
+          <button onClick={() => go({ name: "graph" })} className={`${sideLink} text-foreground-muted hover:bg-surface-secondary`}><Network size={15} /> Concept maps</button>
+          <button onClick={() => go({ name: "settings" })} className={`${sideLink} text-foreground-muted hover:bg-surface-secondary`}><SettingsIcon size={15} /> Settings &amp; backup</button>
         </div>
       </aside>
 
       {/* Main */}
-      <main className="min-w-0 flex-1 px-5 py-6 md:px-10">
+      <main className="min-w-0 flex-1 px-4 py-6 sm:px-5 md:px-8 lg:px-10">
         <div className="mx-auto max-w-6xl">
-          <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
-            <div>
+          <header className="mb-6 flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
+            <div className="min-w-0">
               <div className="md:hidden"><Wordmark /></div>
-              <h1 className="serif hidden text-4xl tracking-tight md:block">{activeName}</h1>
-              <p className="mt-1 text-sm text-foreground-muted">{notebook === "trash" ? `Removed for good after ${TRASH_RETENTION_DAYS} days — restore anything you want to keep.` : `${visible.length} note${visible.length === 1 ? "" : "s"} · stored on this device`}</p>
+              <h1 className="serif hidden text-4xl tracking-tight [overflow-wrap:anywhere] md:block">{activeName}</h1>
+              <p className="mt-1 text-sm text-foreground-muted">{notebook === "trash" ? `Removed for good after ${TRASH_RETENTION_DAYS} days. Restore anything you want to keep.` : `${visible.length} note${visible.length === 1 ? "" : "s"} · stored on this device`}</p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="relative">
+            {/* one row at iPad width: the filter takes what is left, the three actions keep their size */}
+            <div className="flex w-full flex-wrap items-center gap-2 xl:w-auto">
+              <div className="relative min-w-28 flex-1 xl:w-52 xl:flex-none">
                 <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-foreground-muted" />
-                <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter by title or tag"
-                  className="w-48 rounded-xl border border-border bg-surface py-2 pl-8 pr-3 text-sm outline-none focus:border-primary" />
+                <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter notes" aria-label="Filter notes by title or tag" enterKeyHint="search"
+                  className="w-full rounded-xl border border-border bg-surface py-2 pl-8 pr-3 text-sm outline-none focus:border-primary [@media(pointer:coarse)]:min-h-11" />
               </div>
-              <Button onClick={() => go({ name: "search" })} className="md:hidden"><Search size={15} /></Button>
-              <Button onClick={() => (selecting ? stopSelecting() : setSelecting(true))} title="Select several notes"><CheckSquare size={15} /> {selecting ? "Cancel" : "Select"}</Button>
-              <Button onClick={() => pdfRef.current?.click()} disabled={!!busy} title="Pick one or several PDFs"><FileUp size={15} /> Import PDFs</Button>
-              <Button onClick={() => bookRef.current?.click()} disabled={!!busy} title="Add a textbook PDF (text only) or a textbook file from another device"><BookOpen size={15} /> Add textbook</Button>
-              <Button onClick={() => examRef.current?.click()} disabled={!!busy} title="Add past exams (e.g. from MIT OpenCourseWare) so practice exams copy their format"><ClipboardList size={15} /> Add past exam</Button>
-              <Button variant="primary" onClick={newNote}><Plus size={15} /> New note</Button>
+              <Button onClick={() => go({ name: "search" })} className="shrink-0 md:hidden" ariaLabel="Search inside notes" title="Search inside notes"><Search size={15} /></Button>
+              <Button onClick={() => (selecting ? stopSelecting() : setSelecting(true))} className="shrink-0" title="Select several notes to move, tag, export or delete"><CheckSquare size={15} /> {selecting ? "Cancel" : "Select"}</Button>
+              <DropMenu label="Import" title="Bring in PDFs, textbooks, past exams or a backup" disabled={!!busy} items={importItems}><FileUp size={15} /> Import <ChevronDown size={14} className="-mr-1 text-foreground-muted" /></DropMenu>
+              <Button variant="primary" onClick={newNote} className="shrink-0"><Plus size={15} /> New note</Button>
             </div>
           </header>
 
           {/* Notebook chips on narrow screens */}
-          <div className="mb-4 flex gap-2 overflow-x-auto md:hidden">
+          <div className="no-scrollbar -mx-4 mb-4 flex gap-2 overflow-x-auto px-4 sm:-mx-5 sm:px-5 md:hidden">
             <Chip active={!notebook} onClick={() => go({ name: "library", notebook: null, q: "" })}>All</Chip>
             <Chip active={notebook === "none"} onClick={() => go({ name: "library", notebook: "none", q: "" })}>Unfiled</Chip>
             {notebooks.map((nb) => <Chip key={nb.id} active={notebook === nb.id} onClick={() => go({ name: "library", notebook: nb.id, q: "" })}>{nb.name}</Chip>)}
@@ -370,6 +377,8 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
             <Chip active={notebook === "recent"} onClick={() => go({ name: "library", notebook: "recent", q: "" })}>Recent</Chip>
             <Chip onClick={() => go({ name: "study" })}>Study</Chip>
             <Chip onClick={() => go({ name: "graph" })}>Maps</Chip>
+            {(trashed.length > 0 || notebook === "trash") && <Chip active={notebook === "trash"} onClick={() => go({ name: "library", notebook: "trash", q: "" })}>Recently deleted</Chip>}
+            <Chip onClick={() => go({ name: "settings" })}>Settings</Chip>
           </div>
 
           {allTags.length > 0 && notebook !== "recent" && (
@@ -377,7 +386,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
               <Tag size={13} className="text-foreground-muted" />
               {allTags.map((t) => (
                 <button key={t} onClick={() => setTagFilter(tagFilter === t ? null : t)}
-                  className={`rounded-full border px-2.5 py-0.5 text-xs ${tagFilter === t ? "border-primary bg-primary text-white" : "border-border bg-surface text-foreground-muted hover:bg-surface-secondary"}`}>#{t}</button>
+                  aria-pressed={tagFilter === t} className={`rounded-full border px-2.5 py-0.5 text-xs [@media(pointer:coarse)]:min-h-9 [@media(pointer:coarse)]:px-3 [@media(pointer:coarse)]:text-sm ${tagFilter === t ? "border-primary bg-primary text-white" : "border-border bg-surface text-foreground-muted hover:bg-surface-secondary"}`}>#{t}</button>
               ))}
             </div>
           )}
@@ -394,6 +403,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
               <div className="mt-2"><Button onClick={() => setBootDismissed(true)}>Got it</Button></div>
             </Card>
           )}
+          {notes !== null && notes.length > 0 && <InstallNudge />}
           {overdue && (
             <Card className="mb-5 flex flex-wrap items-center justify-between gap-3 border-amber-500/40 bg-amber-500/10 px-4 py-3">
               <p className="text-sm"><strong>Back up your notes.</strong> Everything lives on this device — a backup in iCloud Drive protects you if the browser ever clears its storage.</p>
@@ -403,7 +413,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
 
           {pack && (
             <Card className="mb-5 flex flex-wrap items-center justify-between gap-3 border-primary/40 bg-primary/5 px-4 py-3">
-              <p className="min-w-0 flex-1 text-sm"><strong>Move {pack.names.length === 1 ? `“${pack.names[0]}”` : `these ${pack.names.length} files`} to your iPad:</strong> save this small file ({Math.max(0.1, pack.file.size / 1e6).toFixed(1)} MB, text only) to iCloud Drive, OneDrive or Google Drive, or email it to yourself. Then on the iPad tap <b>Add textbook</b> (or <b>Add past exam</b>) and pick it.</p>
+              <p className="min-w-0 flex-1 text-sm"><strong>Move {pack.names.length === 1 ? `“${pack.names[0]}”` : `these ${pack.names.length} files`} to your iPad:</strong> save this small file ({Math.max(0.1, pack.file.size / 1e6).toFixed(1)} MB, text only) to iCloud Drive, OneDrive or Google Drive, or email it to yourself. Then on the iPad tap <b>Import</b>, choose <b>Textbook</b> (or <b>Past exam</b>) and pick it.</p>
               <div className="flex gap-2">
                 <Button variant="primary" onClick={() => void shareOrDownload(pack.file, "Textbooks")}><Download size={14} /> Save file</Button>
                 <Button onClick={() => setPack(null)}>Done</Button>
@@ -424,7 +434,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
               {notes.length === 0 && <Welcome />}
             </>
           ) : (
-            <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-3 sm:gap-x-5 lg:grid-cols-4">
               {visible.map((n) => (
                 <NoteTile key={n.id} note={n} notebook={notebooks.find((b) => b.id === n.notebookId)} notebooks={notebooks} onChange={reload} flash={flash} selecting={selecting} picked={picked.has(n.id)} onPick={() => togglePick(n.id)}
                   trashed={notebook === "trash"} onTrash={async () => { await trashNotes([n.id]); await reload(); flashUndo(`“${n.title}” moved to Recently deleted.`, [n.id]); }}
@@ -442,18 +452,18 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
       <input ref={restoreRef} type="file" accept=".zip,application/zip" multiple hidden onChange={onRestore} />
       {selecting && (
         <div className="safe-b fixed inset-x-0 bottom-4 z-40 flex justify-center px-3">
-          <div className="relative flex flex-wrap items-center gap-1.5 rounded-2xl border border-border bg-surface px-3 py-2 shadow-2xl">
-            <span className="mr-1 text-sm font-medium">{picked.size} selected</span>
+          <div className="anim-rise relative flex flex-wrap items-center justify-center gap-1.5 rounded-2xl border border-border bg-surface px-3 py-2 shadow-2xl">
+            <span className="mr-1 text-sm font-medium tabular-nums">{picked.size} selected</span>
             <Button variant="ghost" onClick={() => setPicked(new Set(visible.map((n) => n.id)))}>All</Button>
             <Button disabled={!picked.size} onClick={() => setMoveMenu((v) => !v)}><FolderInput size={14} /> Move</Button>
             <Button disabled={!picked.size} onClick={tagSelected}><Tag size={14} /> Tag</Button>
             <Button disabled={!picked.size} onClick={exportSelected}><Download size={14} /> PDFs</Button>
             <Button variant="danger" disabled={!picked.size} onClick={deleteSelected}><Trash2 size={14} /> Delete</Button>
-            <button onClick={stopSelecting} className="rounded-md p-1.5 text-foreground-muted hover:bg-surface-secondary" title="Done"><X size={16} /></button>
+            <button onClick={stopSelecting} className="flex h-9 w-9 items-center justify-center rounded-lg text-foreground-muted hover:bg-surface-secondary [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11" title="Done selecting" aria-label="Done selecting"><X size={16} /></button>
             {moveMenu && (
-              <div className="absolute bottom-full left-0 mb-2 max-h-60 w-52 overflow-auto rounded-xl border border-border bg-surface p-1 text-sm shadow-xl">
+              <div className="anim-pop absolute bottom-full left-0 mb-2 max-h-60 w-56 origin-bottom-left overflow-auto overscroll-contain rounded-xl border border-border bg-surface p-1 text-sm shadow-xl">
                 {[{ id: null as string | null, name: "Unfiled", color: "" }, ...notebooks].map((b) => (
-                  <button key={b.id ?? "none"} onClick={() => moveSelected(b.id)} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-surface-secondary">
+                  <button key={b.id ?? "none"} onClick={() => moveSelected(b.id)} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-surface-secondary [@media(pointer:coarse)]:min-h-11">
                     {b.color ? <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: b.color }} /> : <span className="h-2 w-2" />}
                     <span className="truncate">{b.name}</span>
                   </button>
@@ -470,9 +480,13 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
   );
 }
 
+/** sidebar rows and the small actions inside them: comfortable to hit with a finger, compact with a mouse */
+const sideLink = "flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left [@media(pointer:coarse)]:min-h-11";
+const sideAction = "flex items-center justify-center rounded-md p-1 text-foreground-muted hover:text-primary [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-8";
+
 function Chip({ children, onClick, active }: { children: React.ReactNode; onClick: () => void; active?: boolean }) {
   return (
-    <button onClick={onClick} className={`shrink-0 rounded-full border px-3 py-1.5 text-sm ${active ? "border-primary bg-primary text-white" : "border-border bg-surface text-foreground-muted"}`}>
+    <button onClick={onClick} aria-pressed={active} className={`max-w-[14rem] shrink-0 truncate rounded-full border px-3 py-1.5 text-sm [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:px-3.5 ${active ? "border-primary bg-primary text-white" : "border-border bg-surface text-foreground-muted"}`}>
       {children}
     </button>
   );
@@ -481,9 +495,9 @@ function Chip({ children, onClick, active }: { children: React.ReactNode; onClic
 function SideItem({ active, onClick, icon, label, count, action }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string; count?: number; action?: React.ReactNode }) {
   return (
     <div className={`group flex items-center rounded-lg ${active ? "bg-primary/10 font-medium text-primary" : "hover:bg-surface-secondary"}`}>
-      <button onClick={onClick} className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5 text-left">
-        {icon}<span className="min-w-0 flex-1 truncate">{label}</span>
-        {count != null && <span className="text-xs text-foreground-muted">{count}</span>}
+      <button onClick={onClick} aria-current={active ? "page" : undefined} title={label} className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left [@media(pointer:coarse)]:min-h-11">
+        <span className="flex w-[15px] shrink-0 justify-center">{icon}</span><span className="min-w-0 flex-1 truncate">{label}</span>
+        {count != null && <span className="text-xs tabular-nums text-foreground-muted">{count}</span>}
       </button>
       {action && <span className="flex shrink-0 opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100">{action}</span>}
     </div>
@@ -492,14 +506,14 @@ function SideItem({ active, onClick, icon, label, count, action }: { active: boo
 
 function Empty({ onNew, onPdf, onRestore, hasAny }: { onNew: () => void; onPdf: () => void; onRestore: () => void; hasAny: boolean }) {
   return (
-    <Card className="mx-auto mt-10 max-w-lg px-8 py-12 text-center">
+    <Card className="mx-auto mt-6 max-w-lg px-6 py-10 text-center sm:px-8 md:mt-10">
       <h2 className="serif text-3xl">{hasAny ? "Nothing here" : <>A notebook you can <span className="serif-i text-primary">live</span> in.</>}</h2>
       <p className="mt-2 text-sm text-foreground-muted">{hasAny ? "No notes match. Try another notebook or clear the filter." : "Write by hand, annotate PDFs, and keep everything on your own device."}</p>
       <div className="mt-6 flex flex-wrap justify-center gap-2">
         <Button variant="primary" onClick={onNew}><Plus size={15} /> New note</Button>
         <Button onClick={onPdf}><FileUp size={15} /> Import PDF</Button>
-        {!hasAny && <Button onClick={onRestore}><Upload size={15} /> Restore backup</Button>}
       </div>
+      {!hasAny && <button type="button" onClick={onRestore} className="tap mt-3 rounded-lg px-2 text-sm text-foreground-muted underline decoration-dotted underline-offset-4 hover:text-foreground">Moving from another device? Restore a backup</button>}
     </Card>
   );
 }
@@ -545,6 +559,8 @@ function NoteTile({ note, notebook, notebooks, onChange, flash, selecting, picke
     onChange();
   }
 
+  // with a mouse the tile's buttons appear on hover (or keyboard focus); on touch they are always there
+  const reveal = "opacity-100 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:opacity-100";
   return (
     <div className="group relative">
       <div className="relative">
@@ -555,39 +571,47 @@ function NoteTile({ note, notebook, notebooks, onChange, flash, selecting, picke
         {selecting && <span className={`pointer-events-none absolute left-2 top-2 flex h-6 w-6 items-center justify-center rounded-full border-2 text-white ${picked ? "border-primary bg-primary" : "border-white bg-black/30"}`}>{picked ? "✓" : ""}</span>}
         {trashed ? (
           <div className="absolute inset-x-1.5 bottom-1.5 flex justify-between gap-1">
-            <button onClick={onRestore} className="flex min-h-9 flex-1 items-center justify-center gap-1 rounded-lg bg-surface/95 px-2 text-xs font-medium text-primary shadow backdrop-blur"><RotateCcw size={13} /> Restore</button>
-            <button onClick={onPurge} className="flex min-h-9 items-center justify-center rounded-lg bg-surface/95 px-2.5 text-negative shadow backdrop-blur" title="Delete for good"><Trash2 size={13} /></button>
+            <button onClick={onRestore} className="flex min-h-9 min-w-0 flex-1 items-center [@media(pointer:coarse)]:min-h-11 justify-center gap-1 rounded-lg bg-surface/95 px-2 text-xs font-medium text-primary shadow backdrop-blur"><RotateCcw size={13} /> Restore</button>
+            <button onClick={onPurge} className="flex min-h-9 items-center justify-center rounded-lg bg-surface/95 px-2.5 text-negative shadow backdrop-blur [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:px-3.5" title="Delete for good" aria-label={`Delete ${note.title} for good`}><Trash2 size={13} /></button>
           </div>
         ) : (
           <>
-            <div className={`absolute right-1.5 top-1.5 flex gap-1 opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 ${selecting ? "hidden" : ""}`}>
-              <Mini title={note.isPinned ? "Unpin" : "Pin"} onClick={togglePin} active={note.isPinned}><Pin size={13} /></Mini>
-              <Mini title="Move to notebook" onClick={() => setMoving((v) => !v)} active={moving}><FolderInput size={13} /></Mini>
-              <Mini title={note.isTextbook ? "Textbook — tap to make it a normal note" : "Mark as a textbook"} onClick={toggleTextbook} active={note.isTextbook}><BookOpen size={13} /></Mini>
-              <Mini title={note.isPastExam ? "Past exam — tap to make it a normal note" : "Mark as a past exam (practice exams copy its format)"} onClick={togglePastExam} active={note.isPastExam}><ClipboardList size={13} /></Mini>
-              <Mini title="Tags" onClick={editTags}><Tag size={13} /></Mini>
-              <Mini title="Rename" onClick={rename}><Pencil size={13} /></Mini>
+            <div className={`absolute right-1.5 top-1.5 ${reveal} ${selecting ? "hidden" : ""}`}>
+              <DropMenu label={`Actions for ${note.title}`} title="Pin, move, tag, rename" width={248} triggerClass={miniClass} items={[
+                { icon: <Pin size={16} />, label: note.isPinned ? "Unpin" : "Pin to the top", active: note.isPinned, onClick: () => void togglePin() },
+                { icon: <FolderInput size={16} />, label: "Move to notebook", onClick: () => setMoving(true) },
+                { icon: <Tag size={16} />, label: note.tags.length ? "Edit tags" : "Add tags", onClick: () => void editTags() },
+                { icon: <Pencil size={16} />, label: "Rename", onClick: () => void rename() },
+                { divider: true, icon: <BookOpen size={16} />, label: note.isTextbook ? "Textbook: make it a normal note" : "Mark as a textbook", hint: note.isTextbook ? undefined : "Practice exams can use its problems", active: note.isTextbook, onClick: () => void toggleTextbook() },
+                { icon: <ClipboardList size={16} />, label: note.isPastExam ? "Past exam: make it a normal note" : "Mark as a past exam", hint: note.isPastExam ? undefined : "Practice exams copy its format", active: note.isPastExam, onClick: () => void togglePastExam() },
+              ]}><MoreHorizontal size={16} /></DropMenu>
             </div>
             {/* the destructive action lives in its own corner, far from the buttons used all the time */}
-            <div className={`absolute bottom-1.5 right-1.5 opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 ${selecting ? "hidden" : ""}`}>
+            <div className={`absolute bottom-1.5 right-1.5 ${reveal} ${selecting ? "hidden" : ""}`}>
               <Mini title="Move to Recently deleted" onClick={onTrash} danger><Trash2 size={13} /></Mini>
             </div>
           </>
         )}
       </div>
       {moving && (
-        <div className="absolute left-1.5 top-10 z-20 max-h-56 w-44 overflow-auto rounded-xl border border-border bg-surface p-1 text-sm shadow-xl">
-          <p className="px-2 py-1 text-xs text-foreground-muted">Move to…</p>
+        <>
+        <div className="fixed inset-0 z-10" onClick={() => setMoving(false)} />
+        <div className="anim-pop absolute inset-x-1.5 top-1.5 z-20 max-h-64 origin-top overflow-auto overscroll-contain rounded-xl border border-border bg-surface p-1 text-sm shadow-xl">
+          <p className="px-2 py-1 text-xs text-foreground-muted">Move “{note.title.length > 24 ? `${note.title.slice(0, 24)}…` : note.title}” to</p>
           {[{ id: null as string | null, name: "Unfiled", color: "" }, ...notebooks].map((b) => (
-            <button key={b.id ?? "none"} onClick={() => moveTo(b.id)} className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-surface-secondary ${b.id === note.notebookId ? "font-semibold" : ""}`}>
-              {b.color ? <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: b.color }} /> : <span className="h-2 w-2" />}
+            <button key={b.id ?? "none"} onClick={() => moveTo(b.id)} className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-surface-secondary [@media(pointer:coarse)]:min-h-11 ${b.id === note.notebookId ? "font-semibold text-primary" : ""}`}>
+              {b.color ? <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: b.color }} /> : <span className="h-2 w-2 shrink-0" />}
               <span className="truncate">{b.name}</span>
             </button>
           ))}
         </div>
+        </>
       )}
       <div className="mt-2 px-0.5">
-        <p className="truncate text-sm font-medium">{note.title}</p>
+        <p className="flex items-center gap-1 text-sm font-medium" title={note.title}>
+          {note.isPinned && <Pin size={12} className="shrink-0 text-primary" aria-label="Pinned" />}
+          <span className="truncate">{note.title}</span>
+        </p>
         <p className="flex items-center gap-1.5 truncate text-xs text-foreground-muted">
           {notebook && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: notebook.color }} />}
           {note.isTextbook && <span className="font-medium text-primary">Textbook ·</span>}
@@ -600,10 +624,11 @@ function NoteTile({ note, notebook, notebooks, onChange, flash, selecting, picke
   );
 }
 
-function Mini({ children, onClick, title, active, danger }: { children: React.ReactNode; onClick: () => void; title: string; active?: boolean; danger?: boolean }) {
+const miniClass = "flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface/95 text-foreground-muted shadow-sm backdrop-blur hover:bg-surface-secondary [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11";
+
+function Mini({ children, onClick, title, danger }: { children: React.ReactNode; onClick: () => void; title: string; danger?: boolean }) {
   return (
-    <button title={title} onClick={onClick}
-      className={`flex h-7 w-7 items-center justify-center rounded-lg border border-border bg-surface/95 shadow-sm backdrop-blur [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:w-10 ${active ? "text-primary" : danger ? "text-negative" : "text-foreground-muted"} hover:bg-surface-secondary`}>
+    <button type="button" title={title} aria-label={title} onClick={onClick} className={`${miniClass} ${danger ? "!text-negative" : ""}`}>
       {children}
     </button>
   );

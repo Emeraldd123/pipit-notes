@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  AlertTriangle, ArrowLeft, ArrowLeftRight, ArrowUpRight, Check, CheckCheck, Circle, Code2, Copy, Download, Eraser, FilePlus2, FileText,
+  AlertTriangle, ArrowLeft, ArrowLeftRight, ArrowUpRight, Bookmark, Check, CheckCheck, Circle, Code2, Copy, Download, Eraser, FilePlus2, FileText,
   Compass, Grid3x3, Hand, Plus, Layers as LayersIcon, Share2, Highlighter, History, Layers, Ruler, Waves, Lightbulb, LineChart, ListChecks, ImagePlus, Lasso, Loader2, Maximize2, Minus, MoreHorizontal, MousePointer2, Paintbrush, Pen,
-  Pencil, Printer, Redo2, Columns2, FileCode2, FlaskConical, Network, Shapes, TextCursorInput, Wand2, Scissors, ScanText, Sigma, Square, Trash, Trash2, Type, Undo2, ZoomIn, ZoomOut, Sparkles, StickyNote,
+  Pencil, Printer, Redo2, Columns2, FileCode2, FlaskConical, Network, Shapes, TextCursorInput, Wand2, Scissors, ScanText, Sigma, Square, Trash, Trash2, Type, Undo2, X, ZoomIn, ZoomOut, Sparkles, StickyNote,
 } from "lucide-react";
 import { NoteCanvas, type CanvasImage, type NoteCanvasHandle, type Stroke, type Tool } from "@/components/note-canvas";
 import { BlocksLayer, BLOCK_DEFAULTS, Latex } from "@/components/blocks";
@@ -54,6 +54,14 @@ import { go } from "@/router";
 const COLORS = ["#111827", "#2563eb", "#dc2626", "#16a34a", "#d97706", "#7c3aed", "#0891b2", "#db2777"];
 const HIGHLIGHTER_COLORS = ["#fde047", "#fca5a5", "#86efac", "#93c5fd", "#f0abfc", "#fdba74"];
 const WIDTHS = [2, 4, 7, 12];
+const WIDTH_NAMES: Record<number, string> = { 2: "Fine", 4: "Medium", 7: "Thick", 12: "Extra thick" };
+const COLOR_NAMES: Record<string, string> = {
+  "#111827": "Black", "#2563eb": "Blue", "#dc2626": "Red", "#16a34a": "Green", "#d97706": "Orange", "#7c3aed": "Purple", "#0891b2": "Teal", "#db2777": "Pink",
+  "#fde047": "Yellow", "#fca5a5": "Light red", "#86efac": "Light green", "#93c5fd": "Light blue", "#f0abfc": "Light purple", "#fdba74": "Light orange",
+};
+/** the first-run "hold a tool to see its name" hint, shown until it is dismissed once */
+const TOOL_HINT_KEY = "pipit.toolHint";
+const toolHintSeen = () => { try { return localStorage.getItem(TOOL_HINT_KEY) === "1"; } catch { return true; } };
 /** Each tool remembers its own size (a highlighter is usually much wider than a pen); shapes share one. */
 const widthKey = (t: Tool) => (t === "pen" || t === "pencil" || t === "marker" || t === "highlighter" || t === "eraser" ? t : "shape");
 const DEFAULT_WIDTH: Record<string, number> = { highlighter: 7, eraser: 7 };
@@ -916,12 +924,20 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
     updateSettings({ recentColors: [c, ...settings.recentColors.filter((x) => x !== c)].slice(0, 5) });
   }
 
+  const [toolHint, setToolHint] = useState(() => !toolHintSeen());
+  const [guideOpen, setGuideOpen] = useState(false);
+  const dismissToolHint = () => { try { localStorage.setItem(TOOL_HINT_KEY, "1"); } catch { /* storage unavailable */ } setToolHint(false); };
+  const openGuide = () => { dismissToolHint(); setMenu(false); setGuideOpen(true); };
+  // Undo and redo sit in the top bar on a tablet or wider (the rail is taller than an iPad screen, so they used to be
+  // scrolled out of sight); a split pane is too narrow for that, and a phone keeps them in its horizontal tool strip.
+  const topUndo = !splitWith;
+
   const activeTool: Tool = tool;
   const railSide = settings.railSide;
   const blockMode = tool === "block";
   const blocksTakeTouch = blockMode || tool === "text";
   const rail = (defs: ToolDef[]) => (
-    <div className="flex gap-1 md:flex-col">
+    <div className="flex shrink-0 gap-1 md:flex-col">
       {defs.map((t) => <IconButton key={t.id} title={t.label} active={tool === t.id} onClick={() => setTool(t.id)}>{t.icon}</IconButton>)}
     </div>
   );
@@ -929,31 +945,37 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
 
   return (
     <div className="safe-t flex h-full flex-col overflow-hidden bg-background" onPointerDownCapture={() => { activeEditor = noteId; }}>
-      <header className="flex shrink-0 items-center gap-2 border-b border-border bg-surface px-3 py-2">
+      <header className="flex shrink-0 items-center gap-1.5 border-b border-border bg-surface px-2 py-2 sm:gap-2 sm:px-3">
         <IconButton title="Back to notes" onClick={() => { void flush().then(() => go({ name: "library", notebook: note.meta.notebookId, q: "" })); }}><ArrowLeft size={18} /></IconButton>
         <input value={title} onChange={(e) => setTitle(e.target.value)} onBlur={commitTitle}
           onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-          className="min-w-0 flex-1 select-text rounded-lg bg-transparent px-2 py-1 text-sm font-medium outline-none focus:bg-surface-secondary" aria-label="Note title"
+          className="min-w-0 flex-1 select-text truncate rounded-lg bg-transparent px-2 py-1 text-sm font-medium outline-none focus:bg-surface-secondary [@media(pointer:coarse)]:min-h-11" aria-label="Note title" enterKeyHint="done"
           style={{ WebkitUserSelect: "text", userSelect: "text" }} />
-        <select value={paper} onChange={(e) => changePaper(e.target.value as NotePaper)} className="rounded-lg border border-border bg-background px-2 py-1 text-xs" title="Paper style">
+        {topUndo && (
+          <div className="hidden shrink-0 md:flex">
+            <IconButton title="Undo" disabled={!history.canUndo} onClick={() => canvasRef.current?.undo()}><Undo2 size={18} /></IconButton>
+            <IconButton title="Redo" disabled={!history.canRedo} onClick={() => canvasRef.current?.redo()}><Redo2 size={18} /></IconButton>
+          </div>
+        )}
+        <select value={paper} onChange={(e) => changePaper(e.target.value as NotePaper)} className="max-w-[5.5rem] shrink-0 rounded-lg border border-border bg-background px-2 py-1 text-xs sm:max-w-none [@media(pointer:coarse)]:min-h-11" title="Paper style" aria-label="Paper style">
           {PAPERS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
         </select>
         <button
           onClick={swapEraser}
           title={tool === "eraser" ? "Back to your last tool (E)" : "Eraser — tap again to go back to this tool (E)"}
-          aria-pressed={tool === "eraser"}
-          className={`flex h-9 shrink-0 items-center gap-1.5 rounded-xl border px-3 text-sm font-medium transition-colors ${tool === "eraser" ? "border-primary bg-primary text-white" : "border-border bg-background text-foreground hover:bg-surface-secondary"}`}
+          aria-pressed={tool === "eraser"} aria-label={tool === "eraser" ? `Back to ${TOOL_NAMES[lastTool.current] ?? "pen"}` : "Erase"}
+          className={`flex h-9 shrink-0 items-center gap-1.5 rounded-xl border px-3 text-sm font-medium [@media(pointer:coarse)]:h-11 ${tool === "eraser" ? "border-primary bg-primary text-white" : "border-border bg-background text-foreground hover:bg-surface-secondary"}`}
         >
           {tool === "eraser" ? <ArrowLeftRight size={16} /> : <Eraser size={16} />}
-          <span>{tool === "eraser" ? `Back to ${TOOL_NAMES[lastTool.current] ?? "pen"}` : "Erase"}</span>
+          <span className="hidden sm:inline">{tool === "eraser" ? `Back to ${TOOL_NAMES[lastTool.current] ?? "pen"}` : "Erase"}</span>
         </button>
         <SavePill state={saveState} />
         <div className="relative">
-          <IconButton title="More" onClick={() => setMenu((o) => !o)}><MoreHorizontal size={18} /></IconButton>
+          <IconButton title="More: search, history, export, delete" onClick={() => setMenu((o) => !o)}><MoreHorizontal size={18} /></IconButton>
           {menu && (
             <>
               <div className="fixed inset-0 z-30" onClick={() => setMenu(false)} />
-              <div className="absolute right-0 z-40 mt-1 w-64 rounded-xl border border-border bg-surface p-1 text-sm shadow-xl">
+              <div role="menu" className="anim-pop absolute right-0 z-40 mt-1 max-h-[calc(100dvh-5rem)] w-72 origin-top-right overflow-auto overscroll-contain rounded-xl border border-border bg-surface p-1 text-sm shadow-xl">
                 <MenuItem icon={<ScanText size={15} />} label="Read handwriting for search" onClick={indexThisNote} />
                 <MenuItem icon={<History size={15} />} label="Version history" onClick={openHistory} />
                 <MenuItem icon={<Network size={15} />} label="Related notes" onClick={showRelated} />
@@ -970,6 +992,8 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
                 <MenuItem icon={<Shapes size={15} />} label="Save this page as SVG…" onClick={() => { setMenu(false); shareSvg.start(); }} />
                 <MenuItem icon={<FileCode2 size={15} />} label="Save as LaTeX (Overleaf project)…" onClick={() => { setMenu(false); if (!ai) flash("LaTeX export reads your handwriting with AI. Turn AI on in Settings first."); else setLatexOpen(true); }} />
                 <MenuItem icon={<Printer size={15} />} label="Print" onClick={doPrint} />
+                <div className="my-1 h-px bg-border" />
+                <MenuItem icon={<Lightbulb size={15} />} label="Tool guide: what each button does" onClick={openGuide} />
                 <div className="my-1 h-px bg-border" />
                 <MenuItem icon={<Trash2 size={15} />} label="Move note to Recently deleted" danger onClick={onDeleteNote} />
               </div>
@@ -995,7 +1019,7 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
       )}
 
       <div className={`flex min-h-0 flex-1 flex-col ${railSide === "right" ? "md:flex-row-reverse" : "md:flex-row"}`}>
-        <div className={`flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-border bg-surface px-2 py-2 md:min-h-0 md:w-[60px] md:flex-col md:items-center md:gap-1.5 md:overflow-y-auto md:overflow-x-visible md:border-b-0 md:px-1.5 md:py-3 [@media(pointer:coarse)]:md:w-[68px] ${railSide === "right" ? "md:border-l" : "md:border-r"}`}>
+        <div role="toolbar" aria-label="Tools" className={`no-scrollbar flex shrink-0 items-center gap-1.5 overflow-x-auto overscroll-contain border-b border-border bg-surface px-2 py-2 md:min-h-0 md:w-[60px] md:flex-col md:items-center md:gap-1.5 md:overflow-y-auto md:overflow-x-hidden md:border-b-0 md:px-0.5 md:py-3 [@media(pointer:coarse)]:md:w-[76px] ${railSide === "right" ? "md:border-l" : "md:border-r"}`}>
           {rail(WRITE)}
           <IconButton title="Eraser" active={tool === "eraser"} onClick={() => setTool("eraser")}><Eraser size={17} /></IconButton>
           <Sep />
@@ -1024,37 +1048,37 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
           ]} />
           <PresetsButton presets={settings.presets} side={railSide} onApply={applyPreset} onSave={savePreset} onDelete={(i) => updateSettings({ presets: settings.presets.filter((_, k) => k !== i) })} />
           <Sep />
-          <div className="flex items-center gap-1.5 md:flex-col">
+          <div className="flex shrink-0 items-center gap-1.5 md:flex-col" role="group" aria-label="Stroke width">
             {WIDTHS.map((w) => (
-              <button key={w} onClick={() => setWidth(w)} title={`Width ${w}`}
-                className={`flex h-8 w-8 items-center justify-center rounded-lg [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:w-10 ${width === w ? "bg-surface-secondary ring-1 ring-primary" : "hover:bg-surface-secondary"}`}>
+              <button key={w} onClick={() => setWidth(w)} title={`${WIDTH_NAMES[w]} line`} aria-label={`${WIDTH_NAMES[w]} line`} aria-pressed={width === w}
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:w-10 ${width === w ? "bg-surface-secondary ring-1 ring-primary" : "hover:bg-surface-secondary"}`}>
                 <span className="rounded-full bg-foreground" style={{ width: Math.min(w, 16), height: Math.min(w, 16) }} />
               </button>
             ))}
           </div>
           <Sep />
-          <div className="flex items-center gap-1.5 md:grid md:grid-cols-2 md:gap-2">
+          <div className="flex shrink-0 items-center gap-1.5 md:grid md:grid-cols-2 md:gap-1" role="group" aria-label={tool === "highlighter" ? "Highlighter colour" : "Ink colour"}>
             {(tool === "highlighter" ? HIGHLIGHTER_COLORS : COLORS).map((c) => (
-              <button key={c} title={c} aria-label={`Colour ${c}`} onClick={() => (tool === "highlighter" ? setHlColor(c) : setColor(c))}
-                className={`h-6 w-6 rounded-full [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8 ${inkColor === c ? "ring-2 ring-primary ring-offset-2 ring-offset-surface" : ""}`} style={{ backgroundColor: c }} />
+              <button key={c} title={COLOR_NAMES[c] ?? c} aria-label={COLOR_NAMES[c] ?? `Colour ${c}`} aria-pressed={inkColor === c} onClick={() => (tool === "highlighter" ? setHlColor(c) : setColor(c))}
+                className={`h-6 w-6 shrink-0 rounded-full [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8 ${inkColor === c ? "ring-2 ring-primary ring-offset-2 ring-offset-surface" : ""}`} style={{ backgroundColor: c }} />
             ))}
             {settings.recentColors.map((c) => (
-              <button key={c} title={`Recent ${c}`} aria-label={`Recent colour ${c}`} onClick={() => (tool === "highlighter" ? setHlColor(c) : setColor(c))}
-                className={`h-6 w-6 rounded-full ring-1 ring-border [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8 ${inkColor === c ? "ring-2 ring-primary ring-offset-2 ring-offset-surface" : ""}`} style={{ backgroundColor: c }} />
+              <button key={c} title={`Recent colour ${c}`} aria-label={`Recent colour ${c}`} aria-pressed={inkColor === c} onClick={() => (tool === "highlighter" ? setHlColor(c) : setColor(c))}
+                className={`h-6 w-6 shrink-0 rounded-full ring-1 ring-border [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8 ${inkColor === c ? "ring-2 ring-primary ring-offset-2 ring-offset-surface" : ""}`} style={{ backgroundColor: c }} />
             ))}
-            <label className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full ring-1 ring-border [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8" title="Custom colour" style={{ background: "conic-gradient(red, yellow, lime, aqua, blue, magenta, red)" }}>
-              <input type="color" value={inkColor} onChange={(e) => { const v = e.target.value; (tool === "highlighter" ? setHlColor : setColor)(v); rememberColor(v); }} className="sr-only" />
+            <label className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full ring-1 ring-border [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8" title="Custom colour" style={{ background: "conic-gradient(red, yellow, lime, aqua, blue, magenta, red)" }}>
+              <input type="color" value={inkColor} onChange={(e) => { const v = e.target.value; (tool === "highlighter" ? setHlColor : setColor)(v); rememberColor(v); }} className="sr-only" aria-label="Custom colour" />
             </label>
           </div>
-          <Sep />
-          <div className="flex gap-1 md:flex-col">
+          <div className={`mx-1 h-6 w-px shrink-0 bg-border md:mx-0 md:my-1 md:h-px md:w-6 ${topUndo ? "md:hidden" : ""}`} />
+          <div className={`flex shrink-0 gap-1 md:flex-col ${topUndo ? "md:hidden" : ""}`}>
             <IconButton title="Undo" disabled={!history.canUndo} onClick={() => canvasRef.current?.undo()}><Undo2 size={17} /></IconButton>
             <IconButton title="Redo" disabled={!history.canRedo} onClick={() => canvasRef.current?.redo()}><Redo2 size={17} /></IconButton>
           </div>
           <Sep />
-          <div className="flex items-center gap-1 md:flex-col">
+          <div className="flex shrink-0 items-center gap-1 md:flex-col">
             <IconButton title="Zoom out" onClick={() => canvasRef.current?.zoomOut()}><ZoomOut size={17} /></IconButton>
-            <button title="Reset zoom" onClick={() => canvasRef.current?.zoomReset()} className="w-10 rounded-md py-0.5 text-center text-[11px] font-medium text-foreground-muted hover:bg-surface-secondary [@media(pointer:coarse)]:py-2 [@media(pointer:coarse)]:text-xs">{Math.round(zoom * 100)}%</button>
+            <button title="Reset zoom" aria-label={`Zoom ${Math.round(zoom * 100)}%. Reset zoom`} onClick={() => canvasRef.current?.zoomReset()} className="w-10 shrink-0 rounded-md py-0.5 tabular-nums text-center text-[11px] font-medium text-foreground-muted hover:bg-surface-secondary [@media(pointer:coarse)]:py-2 [@media(pointer:coarse)]:text-xs">{Math.round(zoom * 100)}%</button>
             <IconButton title="Zoom in" onClick={() => canvasRef.current?.zoomIn()}><ZoomIn size={17} /></IconButton>
             <IconButton title="Fit to page" onClick={() => canvasRef.current?.zoomReset()}><Maximize2 size={17} /></IconButton>
           </div>
@@ -1107,6 +1131,13 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
               {math.checking ? <Loader2 size={12} className="animate-spin text-primary" /> : <Sigma size={12} />} Math check{math.checking ? "ing…" : " on"}
             </div>
           )}
+          {toolHint && !busy && findRects.length === 0 && (
+            <div className="anim-rise absolute left-1/2 top-3 z-20 flex w-max max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-1 rounded-2xl border border-border bg-surface/95 py-1 pl-3.5 pr-1 text-xs shadow-md backdrop-blur">
+              <span className="min-w-0 text-foreground-muted">Press and hold any tool to see its name.</span>
+              <button onClick={openGuide} className="shrink-0 rounded-full px-2.5 py-1.5 font-medium text-primary hover:bg-primary/10 [@media(pointer:coarse)]:min-h-9">All tools</button>
+              <button onClick={dismissToolHint} aria-label="Dismiss this tip" title="Dismiss" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-foreground-muted hover:bg-surface-secondary [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:w-9"><X size={14} /></button>
+            </div>
+          )}
           {findRects.length > 0 && (
             <button onClick={() => { setFindRects([]); setFindTerm(""); }} className="absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-surface/95 px-3 py-1 text-xs shadow-md backdrop-blur" title="Clear highlights">
               Matches for “{findTerm}” <span className="text-foreground-muted">✕</span>
@@ -1143,12 +1174,12 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
           <div className={`safe-b absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-full border border-border bg-surface/95 py-1 pl-3 pr-1.5 text-xs font-medium shadow-md backdrop-blur ${explain || review || openSticky ? "hidden" : ""}`}>
             <span onPointerDown={onScrubDown} onPointerMove={onScrubMove} onPointerUp={onScrubUp} onPointerCancel={onScrubUp}
               title={pageCount > 1 ? "Hold and drag to jump to a page" : undefined} style={{ touchAction: "none" }}
-              className={`select-none rounded-full px-1 py-0.5 text-foreground-muted ${pageCount > 1 ? "cursor-ew-resize hover:bg-surface-secondary" : ""} ${scrub !== null ? "bg-surface-secondary text-foreground" : ""}`}>
+              className={`select-none whitespace-nowrap rounded-full px-1 py-0.5 tabular-nums text-foreground-muted ${pageCount > 1 ? "cursor-ew-resize hover:bg-surface-secondary" : ""} ${scrub !== null ? "bg-surface-secondary text-foreground" : ""}`}>
               Page {Math.min(currentPage + 1, pageCount)} / {pageCount}
             </span>
-            <button onClick={() => { setPagesOpen((v) => !v); setPagesRev((r) => r + 1); }} title="Page thumbnails — reorder, duplicate, insert" className={`ml-1 flex items-center rounded-full p-1.5 hover:bg-surface-secondary ${pagesOpen ? "bg-primary/10 text-primary" : "text-foreground-muted"}`}><Layers size={14} /></button>
-            <button onClick={deleteCurrentPage} title="Delete this page" disabled={pageCount <= 1} className="ml-1 flex items-center rounded-full p-1.5 text-foreground-muted hover:bg-negative/10 hover:text-negative disabled:opacity-30"><Trash size={14} /></button>
-            <button onClick={addPage} title="Add a page to the end" className="flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-white hover:bg-primary-hover"><FilePlus2 size={13} /> Add page</button>
+            <button onClick={() => { setPagesOpen((v) => !v); setPagesRev((r) => r + 1); }} title="Page thumbnails: reorder, duplicate, insert" aria-label="Page thumbnails" aria-pressed={pagesOpen} className={`ml-1 flex items-center justify-center rounded-full p-1.5 hover:bg-surface-secondary [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:w-9 ${pagesOpen ? "bg-primary/10 text-primary" : "text-foreground-muted"}`}><Layers size={14} /></button>
+            <button onClick={deleteCurrentPage} title="Delete this page" aria-label="Delete this page" disabled={pageCount <= 1} className="ml-1 flex items-center justify-center rounded-full p-1.5 text-foreground-muted [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:w-9 hover:bg-negative/10 hover:text-negative disabled:opacity-30"><Trash size={14} /></button>
+            <button onClick={addPage} title="Add a page to the end" className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-primary px-2.5 py-1 text-white hover:bg-primary-hover [@media(pointer:coarse)]:min-h-9 [@media(pointer:coarse)]:px-3"><FilePlus2 size={13} /> Add page</button>
           </div>
 
           {busy && (
@@ -1220,6 +1251,7 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
           </div>
         </Modal>
       )}
+      {guideOpen && <ToolGuide onClose={() => setGuideOpen(false)} />}
       {sharePdf.modal}
       {sharePng.modal}
       {shareSvg.modal}
@@ -1239,16 +1271,64 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
   );
 }
 
+/** Every icon in the tool rail with its name and one line on what it does: recognition for a newcomer, one tap away for everyone else. */
+function ToolGuide({ onClose }: { onClose: () => void }) {
+  const groups: { name: string; rows: { icon: React.ReactNode; label: string; hint: string }[] }[] = [
+    { name: "Write", rows: [
+      { icon: <Pen size={17} />, label: "Pen", hint: "Everyday writing." },
+      { icon: <Pencil size={17} />, label: "Pencil", hint: "A softer line for sketches." },
+      { icon: <Highlighter size={17} />, label: "Highlighter", hint: "See-through colour over your writing." },
+      { icon: <Pen size={17} strokeWidth={3.5} />, label: "Marker", hint: "A bold line for headings." },
+      { icon: <Eraser size={17} />, label: "Eraser", hint: "Rub out ink. The Erase button at the top swaps to it and back." },
+    ] },
+    { name: "Select and move", rows: [
+      { icon: <Lasso size={17} />, label: "Lasso", hint: "Circle ink to select it, then recolour, duplicate, convert or delete it." },
+      { icon: <MousePointer2 size={17} />, label: "Select", hint: "Tap a picture to move or resize it." },
+      { icon: <Scissors size={17} />, label: "Snip", hint: "Copy a region onto a new page." },
+      { icon: <Lightbulb size={17} />, label: "Explain", hint: "Circle anything to have it explained. Needs AI." },
+      { icon: <Hand size={17} />, label: "Pan", hint: "Drag to move around the page." },
+    ] },
+    { name: "Add and adjust", rows: [
+      { icon: <Plus size={17} />, label: "Insert", hint: "Shapes, text, sticky notes, graphs, maths, Python, images, a ruler." },
+      { icon: <Wand2 size={17} />, label: "Pen assists", hint: "Snap shapes, scribble to erase, maths check." },
+      { icon: <Bookmark size={17} />, label: "Pen presets", hint: "Save a pen's colour and width to switch back in one tap." },
+      { icon: <span className="h-2 w-2 rounded-full bg-current" />, label: "Dots and colours", hint: "Line width and ink colour. Each tool remembers its own width." },
+      { icon: <Undo2 size={17} />, label: "Undo and redo", hint: "Step back or forward through your changes." },
+      { icon: <ZoomIn size={17} />, label: "Zoom", hint: "Zoom in and out. Tap the percentage to reset." },
+    ] },
+  ];
+  return (
+    <Modal title="Tool guide" onClose={onClose} wide>
+      <p className="mb-4 text-sm text-foreground-muted">Press and hold any tool with your finger or Pencil to see its name. You can open this guide again from the ⋯ menu.</p>
+      <div className="grid gap-x-6 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
+        {groups.map((g) => (
+          <section key={g.name}>
+            <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-foreground-muted">{g.name}</h3>
+            <ul className="space-y-2.5">
+              {g.rows.map((r) => (
+                <li key={r.label} className="flex gap-3 text-sm">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface-secondary text-foreground-muted">{r.icon}</span>
+                  <span className="min-w-0"><span className="block font-medium">{r.label}</span><span className="block text-xs leading-snug text-foreground-muted">{r.hint}</span></span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
 function SavePill({ state }: { state: SaveState }) {
   const m = state === "saved" ? { i: <Check size={13} />, t: "Saved", c: "text-positive" }
     : state === "saving" ? { i: <Loader2 size={13} className="animate-spin" />, t: "Saving", c: "text-foreground-muted" }
     : { i: <AlertTriangle size={13} />, t: "Retrying", c: "text-negative" };
-  return <span title="Saved on this device" className={`flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium ${m.c}`}>{m.i}{m.t}</span>;
+  return <span title={`${m.t}. Notes are kept on this device.`} role="status" className={`flex shrink-0 items-center gap-1 rounded-lg px-1 py-1 text-xs font-medium sm:px-2 ${m.c}`}>{m.i}<span className="sr-only sm:not-sr-only">{m.t}</span></span>;
 }
 function MenuItem({ icon, label, onClick, danger }: { icon: React.ReactNode; label: string; onClick: () => void; danger?: boolean }) {
   return (
-    <button onClick={onClick} className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left hover:bg-surface-secondary ${danger ? "text-negative" : ""}`}>
-      <span className={danger ? "text-negative" : "text-foreground-muted"}>{icon}</span>{label}
+    <button role="menuitem" onClick={onClick} className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left hover:bg-surface-secondary [@media(pointer:coarse)]:min-h-11 ${danger ? "text-negative" : ""}`}>
+      <span className={`shrink-0 ${danger ? "text-negative" : "text-foreground-muted"}`}>{icon}</span>{label}
     </button>
   );
 }
