@@ -22,3 +22,49 @@
   for = "/manifest.webmanifest"
   [headers.values]
     Content-Type = "application/manifest+json"
+
+# The build stamp (`npm run verify:live` reads it): never serve a remembered copy.
+[[headers]]
+  for = "/version.json"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+# Security headers for every path.
+#
+# Enforced now:
+#   - nosniff, referrer policy, permissions policy (the app uses none of the listed features;
+#     picking a photo or PDF goes through a file input, which these do not govern)
+#   - no framing by other sites (X-Frame-Options + frame-ancestors), and the three
+#     Content-Security-Policy directives that nothing in the app depends on.
+#
+# Reported only, not yet enforced: the full Content-Security-Policy. Anything it would have
+# blocked appears in the browser console and in the app's diagnostics log (area "csp", see
+# src/main.tsx). Once Python blocks, PDF import, PDF export, printing and both AI providers
+# have been used on the live site with no "csp" entries, move the Report-Only value into
+# Content-Security-Policy (keeping frame-ancestors) and delete the Report-Only line.
+#
+# What each source is for:
+#   script-src   'wasm-unsafe-eval'        Pyodide and pdf.js compile WebAssembly
+#                https://cdn.jsdelivr.net  Pyodide's loader (src/lib/py.ts)
+#                'sha256-…'                the inline script in the print frame (printImages in
+#                                          src/pages/Editor.tsx); if that script changes, this hash
+#                                          must change with it, or printing stops when enforced
+#   style-src    'unsafe-inline'           KaTeX output and a few <style> elements use inline styles
+#   img-src      data: blob:               note images, thumbnails, plots, canvas exports, SVG data URIs
+#   font-src     data:                     pdf.js embeds a PDF's own fonts as data URLs
+#   connect-src  data: blob:               fetch() is used to turn data/blob URLs into Blobs
+#                api.anthropic.com, generativelanguage.googleapis.com   the two AI providers
+#                cdn.jsdelivr.net          Pyodide's runtime and packages (also fetched by the service worker)
+#                'self'                    /.netlify/functions/diag. A custom "report URL" on another
+#                                          host (Settings) is NOT allowed by this policy: add that host
+#                                          here before enforcing if one is ever used.
+#   worker-src   blob:                     pdf.js falls back to a blob worker; the service worker is 'self'
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    X-Frame-Options = "DENY"
+    Permissions-Policy = "accelerometer=(), bluetooth=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=()"
+    Content-Security-Policy = "frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+    Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net 'sha256-fvHMks9n0i45UfViu+IKF2tF63zyVPqMDFIp+I8Lxow='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' data: blob: https://api.anthropic.com https://generativelanguage.googleapis.com https://cdn.jsdelivr.net; worker-src 'self' blob:; child-src 'self' blob:; frame-src 'self' blob:; media-src 'self' data: blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"

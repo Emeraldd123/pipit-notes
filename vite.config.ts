@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
@@ -8,17 +8,33 @@ import { execSync } from "node:child_process";
 
 const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"));
 const commit = (() => { try { return execSync("git rev-parse --short HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim(); } catch { return "unknown"; } })();
+// Uncommitted changes to tracked files at build time: the commit stamp alone would not describe this build.
+const dirty = (() => { try { return execSync("git status --porcelain --untracked-files=no", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim().length > 0; } catch { return false; } })();
+const builtAt = new Date().toISOString();
+
+/**
+ * Writes /version.json next to the app so anyone (and `npm run verify:live`) can tell which
+ * commit a deployed copy was built from. Same values as APP in src/lib/telemetry.ts.
+ */
+const versionFile = (): Plugin => ({
+  name: "pipit-version-file",
+  apply: "build",
+  generateBundle() {
+    this.emitFile({ type: "asset", fileName: "version.json", source: JSON.stringify({ commit, version: pkg.version, build: builtAt, dirty }) + "\n" });
+  },
+});
 
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
-    __APP_BUILD__: JSON.stringify(new Date().toISOString()),
+    __APP_BUILD__: JSON.stringify(builtAt),
     __APP_COMMIT__: JSON.stringify(commit),
   },
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   plugins: [
     react(),
     tailwindcss(),
+    versionFile(),
     VitePWA({
       registerType: "autoUpdate",
       includeAssets: ["icon.svg", "apple-touch-icon.png"],
@@ -40,6 +56,8 @@ export default defineConfig({
       workbox: {
         maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
         globPatterns: ["**/*.{js,css,html,svg,png,woff2,mjs,wasm,json}"],
+        // the build stamp is for checking a deploy from outside; it must always come from the network
+        globIgnores: ["version.json"],
         navigateFallback: "/index.html",
         // never answer the reporting endpoint (or any Netlify function) with the app shell
         navigateFallbackDenylist: [/^\/\.netlify\//],

@@ -9,3 +9,7 @@ dev-dist
 /imports
 .DS_Store
 .netlify
+
+# third-party agent skills (reinstall from skills-lock.json: npx skills@latest add emilkowalski/skills)
+.agents/
+.claude/skills/

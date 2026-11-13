@@ -76,8 +76,11 @@ export async function toCards(raws: RawCard[], ctx: { notebookId: string | null;
 /**
  * Pages are only sent to the AI if cards haven't already been made from their CURRENT text — re-running "make
  * cards" on the same notes would otherwise pay again for pages that can only produce duplicates.
+ *
+ * `onProgress(cards)` is called while the AI is writing, with how many cards it has written so far
+ * (a count that only goes up; the number finally added can be lower once duplicates are removed).
  */
-export async function makeCardsFromNotes(scope: string, want: number, includeDone = false): Promise<{ added: number; sources: number; skipped: number }> {
+export async function makeCardsFromNotes(scope: string, want: number, includeDone = false, onProgress?: (cards: number) => void): Promise<{ added: number; sources: number; skipped: number }> {
   const ids = await scopeNoteIds(scope);
   const pool = await corpusExcerpts(ids, 400_000);
   if (!pool.length) return { added: 0, sources: 0, skipped: 0 };
@@ -91,7 +94,7 @@ export async function makeCardsFromNotes(scope: string, want: number, includeDon
   let used = 0;
   for (const e of fresh) { if (used + e.text.length > 22000) break; used += e.text.length; excerpts.push({ ...e, n: excerpts.length + 1 }); }
   count("study.cards.generate");
-  const raws = await generateCards(excerpts, want);
+  const raws = await generateCards(excerpts, want, onProgress);
   const cards = dedupeCards(await toCards(raws, { notebookId: null, source: "ai", excerpts }), await listCards());
   await putCards(cards);
   for (const e of excerpts) done[keyOf(e)] = hashString(e.text);

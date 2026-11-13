@@ -1,18 +1,38 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { useRoute } from "./router";
 import { Library } from "./pages/Library";
-import { EditorPage } from "./pages/Editor";
-import { SearchPage } from "./pages/SearchPage";
-import { SettingsPage } from "./pages/SettingsPage";
-import { GraphPage } from "./pages/GraphPage";
-import { StudyPage } from "./pages/StudyPage";
 import { applyTheme, getSettings } from "./lib/settings";
+
+// Only the Library is in the first chunk. Every other screen is its own chunk, fetched the first
+// time it is opened; the service worker precaches every chunk, so they all open offline after one
+// load. The Editor (which carries KaTeX) is the screen people open next, so it is fetched in the
+// background as soon as the Library has painted instead of waiting for the first tap on a note.
+const loadEditor = () => import("./pages/Editor");
+const EditorPage = lazy(() => loadEditor().then((m) => ({ default: m.EditorPage })));
+const SearchPage = lazy(() => import("./pages/SearchPage").then((m) => ({ default: m.SearchPage })));
+const SettingsPage = lazy(() => import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
+const GraphPage = lazy(() => import("./pages/GraphPage").then((m) => ({ default: m.GraphPage })));
+const StudyPage = lazy(() => import("./pages/StudyPage").then((m) => ({ default: m.StudyPage })));
+
+// Same look as the Editor's own "Opening…" state, so the hand-over between the two is not a visible jump.
+const PageLoading = () => (
+  <div className="flex h-full items-center justify-center text-sm text-foreground-muted"><Loader2 size={16} className="mr-2 animate-spin" /> Loading…</div>
+);
+
+function warmEditor() {
+  // A failure here (offline before the first full load) is harmless: opening a note asks again.
+  const run = () => { void loadEditor().catch(() => undefined); };
+  if (typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 3000 });
+  else setTimeout(run, 800); // Safari has no requestIdleCallback
+}
 
 export function App() {
   const route = useRoute();
   // Dev-only hook to exercise the crash screen (compiled out of production builds).
   if (import.meta.env.DEV && location.hash === "#/__crash") throw new Error("test crash (dev only)");
   useEffect(() => { applyTheme(getSettings().theme); }, []);
+  useEffect(warmEditor, []);
   const [updateWaiting, setUpdateWaiting] = useState(false);
   useEffect(() => {
     const on = () => setUpdateWaiting(true);
@@ -41,5 +61,5 @@ export function App() {
     case "study": return <StudyPage view={route.view} />;
     default: return <Library notebook={route.notebook} q={route.q} />;
   } })();
-  return <>{banner}{page}</>;
+  return <>{banner}<Suspense fallback={<PageLoading />}>{page}</Suspense></>;
 }

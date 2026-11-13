@@ -6,11 +6,19 @@
 //
 // Reading requires the DIAG_READ_TOKEN environment variable (set it in the Netlify UI).
 // Writing needs no secret (the app has none), so every report is validated, size-capped
-// and re-scrubbed here, and old reports are pruned.
+// and re-scrubbed here, old reports are pruned, and writes are rate-limited per sender
+// and overall so nobody can flood the store or push the real reports out of it.
+import { createHash } from "node:crypto";
 import { scrubString } from "../../src/lib/telemetry-core.ts";
 
 export const MAX_BODY = 200_000;
 export const MAX_STORED = 400;
+/** Rate limits, counted in fixed windows. The app itself sends a handful of reports a day. */
+export const RATE_WINDOW_MS = 10 * 60_000;
+export const MAX_POSTS_PER_SENDER = 10;   // per window, per IP address
+export const MAX_POSTS_TOTAL = 120;       // per window, everyone together
+export const MAX_BAD_READS_PER_SENDER = 20; // wrong-token GETs per window, per IP address
+const RATE_KEY = "rate/state.json";
 const FORMAT = "pipit-notes-diagnostics";
 const ALLOWED = ["format", "version", "generatedAt", "app", "session", "trigger", "env", "storage", "counts", "settings", "health", "metrics", "errorsByArea", "recent", "lastBackupAt", "firstSeenAt"];
 
@@ -47,6 +55,27 @@ export function validate(report) {
   return null;
 }
 
+/** Who is calling, as a short hash: the address itself is never stored. */
+function senderOf(req) {
+  const ip = (req.header("x-nf-client-connection-ip") || req.header("x-forwarded-for") || "").split(",")[0].trim() || "unknown";
+  return createHash("sha256").update(ip).digest("hex").slice(0, 16);
+}
+
+/** The counters for the current window: { w, total, posts: {sender: n}, bad: {sender: n} }. Best-effort (not atomic). */
+async function readRate(store, now) {
+  const w = Math.floor(now / RATE_WINDOW_MS);
+  try {
+    const s = JSON.parse((await store.get(RATE_KEY)) || "null");
+    if (s && s.w === w && typeof s.total === "number" && s.posts && typeof s.posts === "object" && s.bad && typeof s.bad === "object") return s;
+  } catch { /* unreadable counters start again */ }
+  return { w, total: 0, posts: {}, bad: {} };
+}
+const writeRate = async (store, state) => { try { await store.set(RATE_KEY, JSON.stringify(state)); } catch { /* limits are best-effort */ } };
+const tooMany = (now) => {
+  const retry = Math.max(1, Math.ceil(((Math.floor(now / RATE_WINDOW_MS) + 1) * RATE_WINDOW_MS - now) / 1000));
+  return { status: 429, headers: { ...CORS, "content-type": "application/json", "retry-after": String(retry) }, body: JSON.stringify({ error: "too many requests" }) };
+};
+
 function tokenOk(supplied, expected) {
   if (!expected || !supplied || supplied.length !== expected.length) return false;
   let diff = 0; // constant-time compare
@@ -63,6 +92,15 @@ export async function handleDiag(req, store, env, now = Date.now()) {
   if (req.method === "OPTIONS") return empty(204);
 
   if (req.method === "POST") {
+    // refuse early, before reading anything, when the sender (or everyone together) is over the limit
+    const sender = senderOf(req);
+    const rate = await readRate(store, now);
+    if (rate.total >= MAX_POSTS_TOTAL || (rate.posts[sender] ?? 0) >= MAX_POSTS_PER_SENDER) return tooMany(now);
+    if (Number(req.header("content-length")) > MAX_BODY * 4) return json(413, { error: "report too large" }); // a UTF-8 character is at most 4 bytes
+    // every attempt counts, valid or not, so junk cannot be thrown at the parser for free
+    rate.total += 1; rate.posts[sender] = (rate.posts[sender] ?? 0) + 1;
+    await writeRate(store, rate);
+
     const raw = await req.text();
     if (raw.length > MAX_BODY) return json(413, { error: "report too large" });
     let report;
@@ -92,7 +130,15 @@ export async function handleDiag(req, store, env, now = Date.now()) {
     const auth = req.header("authorization") ?? "";
     const supplied = url.searchParams.get("token") ?? (auth.startsWith("Bearer ") ? auth.slice(7) : "");
     if (!env.DIAG_READ_TOKEN) return json(503, { error: "reading is disabled: set DIAG_READ_TOKEN in the site's environment variables" });
-    if (!tokenOk(supplied, env.DIAG_READ_TOKEN)) return json(401, { error: "unauthorized" });
+    // Stop token guessing: after too many wrong tokens a sender is refused for the rest of the
+    // window, and that refusal comes before the token is looked at, so it reveals nothing.
+    const sender = senderOf(req);
+    const rate = await readRate(store, now);
+    if ((rate.bad[sender] ?? 0) >= MAX_BAD_READS_PER_SENDER) return tooMany(now);
+    if (!tokenOk(supplied, env.DIAG_READ_TOKEN)) {
+      if (Object.keys(rate.bad).length < 500 || sender in rate.bad) { rate.bad[sender] = (rate.bad[sender] ?? 0) + 1; await writeRate(store, rate); }
+      return json(401, { error: "unauthorized" });
+    }
 
     const limit = Math.max(1, Math.min(100, Number(url.searchParams.get("limit")) || 20));
     const since = Number(url.searchParams.get("since")) || 0;
