@@ -19,6 +19,7 @@ import { count, logError, timer } from "@/lib/telemetry";
 import { go } from "@/router";
 import { Button, Card, Toast, Wordmark } from "@/components/ui";
 import { WhatsNew } from "@/components/whats-new";
+import { Welcome } from "@/components/welcome";
 
 export function Library({ notebook, q }: { notebook: string | null; q: string }) {
   const [notes, setNotes] = useState<NoteMeta[] | null>(null);
@@ -418,7 +419,10 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
           {notes === null ? (
             <p className="py-20 text-center text-sm text-foreground-muted">Loading…</p>
           ) : visible.length === 0 ? (
-            <Empty onNew={newNote} onPdf={() => pdfRef.current?.click()} onRestore={() => restoreRef.current?.click()} hasAny={notes.length > 0} />
+            <>
+              <Empty onNew={newNote} onPdf={() => pdfRef.current?.click()} onRestore={() => restoreRef.current?.click()} hasAny={notes.length > 0} />
+              {notes.length === 0 && <Welcome />}
+            </>
           ) : (
             <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4">
               {visible.map((n) => (

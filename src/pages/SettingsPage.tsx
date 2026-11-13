@@ -101,7 +101,7 @@ export function SettingsPage() {
         </Section>
 
         <Section icon={<KeyRound size={16} />} title="AI features">
-          <p className="text-sm text-foreground-muted">Recognising maths, checking working, reading handwriting for search, answering questions and writing practice exams use an AI model. Pages are sent <strong>straight from this device to Anthropic</strong> with your own key — only when you use one of those features, and never when this switch is off.</p>
+          <p className="text-sm text-foreground-muted">Recognising maths, checking working, reading handwriting for search, answering questions and writing practice exams use an AI model. Pages are sent <strong>straight from this device to Anthropic or Google</strong> with your own key, only when you use one of those features, and never when this switch is off. You need one key: an Anthropic key below, or a Google Gemini key further down (it has a free tier).</p>
           <label className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-border px-4 py-3 text-sm">
             <span><strong>Enable AI features</strong><span className="block text-xs text-foreground-muted">Off by default.</span></span>
             <input type="checkbox" checked={s.aiEnabled} onChange={(e) => updateSettings({ aiEnabled: e.target.checked })} className="h-5 w-5 accent-[var(--primary)]" />
@@ -205,6 +205,13 @@ export function SettingsPage() {
 
         <Section icon={<Database size={16} />} title="About">
           <p className="text-sm text-foreground-muted">Pipit Notes is a private, offline-first notebook. There is no account and no server: everything is stored on this device. Code blocks and step-checking run locally (Python in WebAssembly).</p>
+          <h3 className="mt-4 text-sm font-semibold">What leaves this device</h3>
+          <ul className="mt-2 list-disc space-y-1.5 pl-5 text-sm text-foreground-muted">
+            <li><strong className="text-foreground">Nothing, with AI off.</strong> Notes, ink, PDFs and flashcards stay in this browser&apos;s storage.</li>
+            <li><strong className="text-foreground">With AI on:</strong> only when you use an AI feature, the page or selection it needs goes straight from this device to Google (Gemini) or Anthropic (Claude) with your own key. Nothing passes through a Pipit server; there isn&apos;t one. On Google&apos;s free tier, Google may use what you send to improve its products.</li>
+            <li><strong className="text-foreground">Diagnostics:</strong> counts, timings and error messages, never note content. Turn them off under Health &amp; diagnostics.</li>
+            <li><strong className="text-foreground">Your keys</strong> are stored only on this device, and are never included in backups or diagnostics reports.</li>
+          </ul>
         </Section>
       </div>
       {backup.modal}

@@ -172,7 +172,7 @@ function NewMapModal({ ai, notes, notebooks, onClose, onDone, setBusy }: {
         </label>
         {err && <p className="text-sm text-negative">{err}</p>}
         <div className="flex flex-wrap gap-2">
-          <Button variant="primary" disabled={!ai} onClick={() => void run(false)}><Sparkles size={14} /> {ai ? "Propose a map" : "AI is off"}</Button>
+          <Button variant="primary" onClick={ai ? () => void run(false) : () => go({ name: "settings" })}><Sparkles size={14} /> {ai ? "Propose a map" : "Set up AI"}</Button>
           <Button onClick={() => void run(true)}>Start blank</Button>
         </div>
         <p className="text-xs text-foreground-muted">The AI only proposes — everything is editable. Starting blank gives you a single central idea to grow from.</p>

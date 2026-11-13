@@ -99,7 +99,7 @@ async function claudeOnce(opts: {
   onProgress?: (text: string) => void;
 }): Promise<string> {
   const s = getSettings();
-  if (!aiReady(s)) throw new AiError("AI features are off. Turn them on and add an API key in Settings.");
+  if (!aiReady(s)) throw new AiError("AI features aren't set up. In Settings → AI features, switch them on and add a Gemini or Anthropic key.");
   const feature = opts.feature ?? "other";
   // Gemini first (Google credit), for the jobs it is allowed to do (ai-route-core.ts); anything wrong and the job goes to Claude below
   let skip = "";

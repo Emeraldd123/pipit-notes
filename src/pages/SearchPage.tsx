@@ -129,7 +129,7 @@ function SearchTab({ notes, onIndexed, ai }: { notes: NoteMeta[]; onIndexed: (n:
           {indexing && <p className="mt-1 flex items-center gap-1.5 text-xs"><Loader2 size={12} className="animate-spin" /> {indexing}</p>}
           {msg && <p className="mt-1 text-xs">{msg}</p>}
         </div>
-        {indexing ? <Button onClick={() => abort.current?.abort()}>Stop</Button> : <Button variant="primary" disabled={!ai || !notes.length} onClick={indexAll}><Sparkles size={14} /> {ai ? "Read all notes" : "AI is off"}</Button>}
+        {indexing ? <Button onClick={() => abort.current?.abort()}>Stop</Button> : <Button variant="primary" disabled={ai && !notes.length} onClick={ai ? indexAll : () => go({ name: "settings" })}><Sparkles size={14} /> {ai ? "Read all notes" : "Set up AI"}</Button>}
       </Card>
     </div>
   );
