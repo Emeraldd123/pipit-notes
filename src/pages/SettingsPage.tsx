@@ -11,7 +11,6 @@ import { FEATURE_LABEL, monthByFeature, monthKey, monthTotal, type Ledger } from
 import { loadLedger, onLedgerChange, resetLedger } from "@/lib/ai-ledger";
 import { Button, Card, Modal, Toast } from "@/components/ui";
 import { PenTest } from "@/components/pentest";
-import { LaptopAi } from "@/components/laptop-ai";
 import { GeminiAi } from "@/components/gemini-ai";
 import { useDiagFlow } from "@/components/diag-flow";
 import { runHealthChecks } from "@/lib/health";
@@ -148,7 +147,6 @@ export function SettingsPage() {
             <Button onClick={testKey} disabled={testing || !aiReady(s) || !hasKey(s)}>{testing ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Test connection</Button>
             <span className="text-xs text-foreground-muted">The key is stored only on this device.</span>
           </div>
-          <LaptopAi />
           <GeminiAi />
         </Section>
 

@@ -25,7 +25,7 @@ export function GeminiAi() {
   return (
     <div className="mt-5 rounded-xl border border-border p-4">
       <p className="flex items-center gap-2 text-sm font-medium"><Sparkles size={15} /> Google Gemini <span className="text-xs font-normal text-foreground-muted">(paid from your Google credit)</span></p>
-      <p className="mt-1 text-xs text-foreground-muted">With a Gemini key, jobs the laptop can&apos;t take (or that are too slow for it) go to Gemini before Claude. It reads handwriting and maths in a few seconds, from your monthly Google credit. Exams and marking always use Claude.</p>
+      <p className="mt-1 text-xs text-foreground-muted">With a Gemini key, reading handwriting, maths, working checks and short answers go to Gemini before Claude: a few seconds each, paid from your Google credit. If Gemini is unavailable or its answer doesn&apos;t make sense, the job goes to Claude.</p>
       <label className="mt-3 block text-xs text-foreground-muted">Gemini API key
         <input type="password" value={s.geminiKey} onChange={(e) => updateSettings({ geminiKey: e.target.value })} placeholder="From aistudio.google.com → Get API key" autoComplete="off" autoCapitalize="off" spellCheck={false} className={`${field} font-mono`} />
         <span className="mt-1 block">Create it in a Google Cloud project that has billing (your credit) attached. Keys on the free tier work too, but Google may use free-tier requests to improve its products. Stored only on this device.</span>

@@ -2,7 +2,6 @@
 // stored in Settings. Nothing is sent unless AI is switched on AND the user takes
 // an action that needs it (read a page, ask a question, check working, …).
 import { aiReady, getSettings, hasKey } from "./settings";
-import { LocalSkip, tryLocal } from "./local-ai";
 import { GeminiSkip, tryGemini } from "./gemini";
 import { count, error as logErr, track, warn } from "./telemetry";
 import { JsonReplyError, parseModelJson } from "./json-repair.ts";
@@ -44,19 +43,13 @@ async function claudeOnce(opts: {
   const s = getSettings();
   if (!aiReady(s)) throw new AiError("AI features are off. Turn them on and add an API key in Settings.");
   const feature = opts.feature ?? "other";
-  // laptop first, for the jobs it is allowed to do (local-ai-core.ts); anything wrong and the job goes to Claude below
+  // Gemini first (Google credit), for the jobs it is allowed to do (ai-route-core.ts); anything wrong and the job goes to Claude below
   let skip = "";
-  try { return await tryLocal({ feature, system: opts.system, user: opts.user, maxTokens: opts.maxTokens, signal: opts.signal }); }
-  catch (e) { if (!(e instanceof LocalSkip)) throw e; if (e.message === "cancelled") throw new AiError("Cancelled."); skip = e.message; }
-  // then Gemini (Google credit), for the jobs it is allowed to do
   try { return await tryGemini({ feature, system: opts.system, user: opts.user, maxTokens: opts.maxTokens, signal: opts.signal }); }
-  catch (e) { if (!(e instanceof GeminiSkip)) throw e; if (e.message === "cancelled") throw new AiError("Cancelled."); if (e.message !== "not a gemini job") skip = "gemini " + e.message; }
-  if (!hasKey(s)) throw new AiError(skip.startsWith("gemini ")
-    ? `Gemini couldn't do this one (${skip.slice(7)}), and there's no Anthropic key to fall back on. Add a key in Settings, or try again.`
-    : skip === "not a local job"
-    ? "This needs Claude (the laptop and Gemini only do reading and short answers, and exams are always written by Claude). Add an Anthropic key in Settings to use it."
-    : skip === "unreachable" ? "Your laptop's AI isn't reachable right now, and there's no Anthropic key to fall back on. Check the laptop, or add a key in Settings."
-    : "Your laptop's AI couldn't do this one, and there's no Anthropic key to fall back on. Add a key in Settings, or try again.");
+  catch (e) { if (!(e instanceof GeminiSkip)) throw e; if (e.message === "cancelled") throw new AiError("Cancelled."); skip = e.message; }
+  if (!hasKey(s)) throw new AiError(skip === "not a gemini job"
+    ? "This one needs Claude (exams and marking are always written by Claude). Add an Anthropic key in Settings to use it."
+    : `Gemini couldn't do this one (${skip}), and there's no Anthropic key to fall back on. Try again, or add an Anthropic key in Settings.`);
   if (s.monthlyBudgetUsd > 0) {
     const spent = await spentThisMonth();
     if (spent >= s.monthlyBudgetUsd) throw new AiError(`You've reached your monthly AI budget (${usd(spent)} of ${usd(s.monthlyBudgetUsd)}). Raise it in Settings → AI features to keep going.`);

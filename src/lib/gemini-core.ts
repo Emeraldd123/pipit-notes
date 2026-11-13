@@ -1,7 +1,7 @@
 // Gemini (Google) as a second provider: paid from Google credits (the Gemini Pro subscription's monthly API credit),
-// tried after the laptop and before Claude for the jobs it's allowed to do. This file turns a request into Gemini's
+// tried before Claude for the jobs it's allowed to do. This file turns a request into Gemini's
 // native generateContent format and reads the reply. Pure; tests/gemini.test.mjs.
-import type { Content } from "./local-ai-core.ts";
+import type { Content } from "./ai-route-core.ts";
 
 export const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 export const GEMINI_DEFAULT_MODEL = "gemini-3.1-flash-lite";

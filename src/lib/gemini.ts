@@ -1,10 +1,10 @@
-// Gemini as the middle step: laptop → Gemini → Claude. Used only when a Gemini key is set, only for the jobs its
-// scope allows (the same lists as the laptop; exams stay on Claude), and only while this month's estimated Gemini
+// Gemini before Claude. Used only when a Gemini key is set, only for the jobs its
+// scope allows (ai-route-core.ts; exams stay on Claude), and only while this month's estimated Gemini
 // spend is under the cap (your Google credit). A reply that doesn't parse, is cut off or blocked goes on to Claude.
 // Logged content-free: counts, timings, and the reason for a fallback.
 import { getSettings, type Settings } from "./settings";
 import { count, track, warn } from "./telemetry";
-import { localAllowed, replyUsable, type Content } from "./local-ai-core.ts";
+import { replyUsable, routeAllowed, type Content } from "./ai-route-core.ts";
 import { GEMINI_BASE, GEMINI_DEFAULT_MODEL, geminiBody, geminiCostUsd, readGeminiReply } from "./gemini-core.ts";
 import { getMeta, setMeta } from "./db";
 import { monthKey } from "./ai-cost";
@@ -66,7 +66,7 @@ async function call(s: Settings, opts: { system?: string; user: Content[] | stri
 
 export async function tryGemini(opts: { feature: string; system?: string; user: Content[] | string; maxTokens?: number; signal?: AbortSignal }): Promise<string> {
   const s = getSettings();
-  if (!geminiReady(s) || !localAllowed(opts.feature, s.geminiScope)) throw new GeminiSkip("not a gemini job");
+  if (!geminiReady(s) || !routeAllowed(opts.feature, s.geminiScope)) throw new GeminiSkip("not a gemini job");
   if (s.geminiBudgetUsd > 0 && (await geminiSpent()).usd >= s.geminiBudgetUsd) { count("ai.gemini.fallback.cap"); throw new GeminiSkip("over the cap"); }
   const t0 = performance.now();
   const why = (reason: string) => { count(`ai.gemini.fallback.${reason}`); warn("ai", "gemini skipped", { feature: opts.feature, reason, ms: Math.round(performance.now() - t0) }); return new GeminiSkip(reason); };
