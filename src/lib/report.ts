@@ -71,7 +71,7 @@ export async function buildReport(trigger?: string): Promise<DiagReport> {
       logEntries: diagEntries,
     },
     settings: {
-      aiEnabled: s.aiEnabled, hasKey: s.apiKey.trim().length > 0, model: s.model, autoIndex: s.autoIndex, shapeSnap: s.shapeSnap,
+      aiEnabled: s.aiEnabled, hasKey: s.apiKey.trim().length > 0, hasGeminiKey: s.geminiKey.trim().length > 0, model: s.model, autoIndex: s.autoIndex, shapeSnap: s.shapeSnap,
       theme: s.theme, diagnostics: s.diagnostics, reportEnabled: s.reportEnabled,
     },
     health: await runHealthChecks(),

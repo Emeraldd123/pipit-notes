@@ -171,8 +171,10 @@ export async function runHealthChecks(): Promise<HealthItem[]> {
 
   // 7. AI configuration sanity
   const s = getSettings();
-  if (s.aiEnabled && !s.apiKey.trim()) add("ai", "AI features", "warn", "AI is switched on but no API key is set.");
-  else if (s.aiEnabled) add("ai", "AI features", "ok", "Enabled with an API key.");
+  const claudeKey = s.apiKey.trim().length > 10, geminiKey = s.geminiKey.trim().length > 20;
+  if (s.aiEnabled && !claudeKey && !geminiKey) add("ai", "AI features", "warn", "AI is switched on but no key is set. Add a Gemini or Anthropic key above.");
+  else if (s.aiEnabled) add("ai", "AI features", "ok", claudeKey && geminiKey ? "Enabled with Gemini and Anthropic keys." : geminiKey ? "Enabled with a Gemini key (everything runs on Gemini)." : "Enabled with an Anthropic key.");
+  else if (claudeKey || geminiKey) add("ai", "AI features", "warn", "A key is saved but AI is switched off. Turn on “Enable AI features” above to use it.");
   else add("ai", "AI features", "info", "Off (nothing is sent anywhere).");
 
   return items;

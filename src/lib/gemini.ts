@@ -1,5 +1,5 @@
 // Gemini before Claude. Used only when a Gemini key is set, only for the jobs its
-// scope allows (ai-route-core.ts; exams stay on Claude), and only while this month's estimated Gemini
+// scope allows (ai-route-core.ts: with a Claude key, exams stay on Claude; with none, Gemini does everything), and only while this month's estimated Gemini
 // spend is under the cap (your Google credit). A reply that doesn't parse, is cut off or blocked goes on to Claude.
 // Logged content-free: counts, timings, and the reason for a fallback.
 import { getSettings, type Settings } from "./settings";
