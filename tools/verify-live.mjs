@@ -10,6 +10,9 @@
 // means the build is current but the headers set in netlify.toml are not being sent.
 import { execSync } from "node:child_process";
 
+// let fetch's sockets finish closing before exiting (exiting at once trips a Node assertion on Windows)
+const quit = async (code) => { process.exitCode = code; await new Promise((r) => setTimeout(r, 400)); process.exit(code); };
+
 const DEFAULT_URL = "https://bensnotes.netlify.app";
 const ATTEMPTS = 6;      // a fresh deploy can take a few seconds to reach every CDN node
 const WAIT_MS = 5000;
@@ -70,10 +73,10 @@ for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
         if (missing.length) {
           console.error(`verify-live: the build is current, but the site is NOT sending the headers from netlify.toml (missing: ${missing.join(", ")}).`);
           console.error("verify-live: netlify.toml was not applied to this deploy. Deploy from the project folder with `npm run deploy:prod`.");
-          process.exit(3);
+          await quit(3);
         }
         console.log("verify-live: security headers from netlify.toml are being sent.");
-        process.exit(0);
+        await quit(0);
       }
       last = `it is running commit ${commit} (version ${version ?? "?"}, built ${build ?? "?"})`;
     } else {
@@ -86,9 +89,9 @@ for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
   if (attempt < ATTEMPTS) { await sleep(WAIT_MS); continue; }
   if (unreachable) {
     console.error(`verify-live: could not reach ${site}: ${last}`);
-    process.exit(2);
+    await quit(2);
   }
   console.error(`verify-live: STALE. ${site} is not running commit ${expect}: ${last}.`);
   console.error("verify-live: the deploy did not publish this build. Rebuild and deploy with `npm run deploy:prod` (never upload an old dist/ folder by hand).");
-  process.exit(1);
+  await quit(1);
 }
