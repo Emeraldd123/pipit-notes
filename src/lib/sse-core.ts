@@ -49,6 +49,30 @@ export function applyEvent(st: StreamState, payload: string): boolean {
   }
 }
 
+export type GeminiStreamState = { text: string; finish: "stop" | "length" | "blocked" | null; blocked: boolean; input: number; output: number };
+export const newGeminiState = (): GeminiStreamState => ({ text: "", finish: null, blocked: false, input: 0, output: 0 });
+
+/**
+ * Apply one Gemini stream chunk (a partial GenerateContentResponse). Text parts are appended (thought parts are not
+ * shown); usage is cumulative, so the latest wins; the last chunk carries the finish reason. Returns true when the
+ * visible text grew.
+ */
+export function applyGeminiEvent(st: GeminiStreamState, payload: string): boolean {
+  let ev: any;   // eslint-disable-line @typescript-eslint/no-explicit-any
+  try { ev = JSON.parse(payload); } catch { return false; }
+  if (ev?.promptFeedback?.blockReason) { st.blocked = true; st.finish = "blocked"; }
+  const c = ev?.candidates?.[0];
+  let grew = false;
+  for (const p of c?.content?.parts ?? []) if (!p?.thought && typeof p?.text === "string" && p.text) { st.text += p.text; grew = true; }
+  if (c?.finishReason) {
+    st.finish = c.finishReason === "STOP" ? "stop" : c.finishReason === "MAX_TOKENS" ? "length" : "blocked";
+    if (st.finish === "blocked") st.blocked = true;
+  }
+  const u = ev?.usageMetadata;
+  if (u) { st.input = u.promptTokenCount ?? st.input; st.output = (u.candidatesTokenCount ?? 0) + (u.thoughtsTokenCount ?? 0) || st.output; }
+  return grew;
+}
+
 /** How many questions an exam being written has started so far (each has exactly one "stem"). */
 export const questionsSoFar = (partial: string) => (partial.match(/"stem"\s*:/g) ?? []).length;
 /** How many of some JSON item have started, by its key (flashcards: "front"). */

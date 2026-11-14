@@ -1,6 +1,6 @@
 // Settings → "Google Gemini": a key (paid from your Google credit), the model, which jobs it does, a monthly cap,
 // this month's spend, and a Test button.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Loader2, Sparkles } from "lucide-react";
 import { hasKey, updateSettings, useSettings } from "@/lib/settings";
 import { geminiSpent, onGeminiSpend, testGemini } from "@/lib/gemini";
@@ -19,6 +19,18 @@ export function GeminiAi() {
   const [result, setResult] = useState<Awaited<ReturnType<typeof testGemini>> | null>(null);
   const [spent, setSpent] = useState<{ calls: number; usd: number } | null>(null);
   useEffect(() => { const load = () => void geminiSpent().then(setSpent); load(); return onGeminiSpend(load); }, []);
+  // a newly pasted key is checked once, straight away, so a typo shows up here and not at the first exam
+  const checked = useRef(s.geminiKey.trim());
+  useEffect(() => {
+    const key = s.geminiKey.trim();
+    if (key.length <= 20 || key === checked.current) return;
+    const t = setTimeout(async () => {
+      checked.current = key;
+      setTesting(true); setResult(null);
+      try { setResult(await testGemini()); } finally { setTesting(false); }
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [s.geminiKey]);
   const field = "mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary";
   const model = s.geminiModel || GEMINI_DEFAULT_MODEL;
 

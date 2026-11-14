@@ -39,3 +39,29 @@ test("progress counts", () => {
   assert.equal(questionsSoFar('{"stem":"a","parts":[{"prompt":"the stem of a plant"}]},{"stem'), 1);
   assert.equal(itemsSoFar('{"cards":[{"front":"a","back":"b"},{"front":"c"', "front"), 2);
 });
+
+test("Gemini streams: text grows chunk by chunk, thoughts are hidden, usage is the latest, the finish reason ends it", async () => {
+  const { applyGeminiEvent, newGeminiState, sseSplitter: split2 } = await import("../src/lib/sse-core.ts");
+  const chunk = (o) => `data: ${JSON.stringify(o)}\r\n\r\n`;
+  const STREAM =
+    chunk({ candidates: [{ content: { parts: [{ text: "planning", thought: true }] } }], usageMetadata: { promptTokenCount: 4000, thoughtsTokenCount: 50 } }) +
+    chunk({ candidates: [{ content: { parts: [{ text: '{"sections":[{"questions":[{"stem":"Q1"},' }] } }] }) +
+    chunk({ candidates: [{ content: { parts: [{ text: '{"stem":"Q2"}]}]}' }] }, finishReason: "STOP" }], usageMetadata: { promptTokenCount: 4000, candidatesTokenCount: 300, thoughtsTokenCount: 50 } });
+  for (const size of [1, 13, 100000]) {
+    const st = newGeminiState(), sp = split2();
+    let grew = 0;
+    for (let i = 0; i < STREAM.length; i += size) for (const p of sp(STREAM.slice(i, i + size))) if (applyGeminiEvent(st, p)) grew++;
+    assert.equal(st.text, '{"sections":[{"questions":[{"stem":"Q1"},{"stem":"Q2"}]}]}', `chunk size ${size}`);
+    assert.deepEqual({ finish: st.finish, blocked: st.blocked, input: st.input, output: st.output, grew }, { finish: "stop", blocked: false, input: 4000, output: 350, grew: 2 });
+  }
+  // cut off by the token limit, and blocked by safety
+  const cut = newGeminiState(); applyGeminiEvent(cut, JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"a":' }] }, finishReason: "MAX_TOKENS" }] }));
+  assert.equal(cut.finish, "length");
+  const blocked = newGeminiState(); applyGeminiEvent(blocked, JSON.stringify({ candidates: [{ finishReason: "SAFETY" }] }));
+  assert.ok(blocked.blocked && blocked.finish === "blocked");
+  const fb = newGeminiState(); applyGeminiEvent(fb, JSON.stringify({ promptFeedback: { blockReason: "OTHER" } }));
+  assert.ok(fb.blocked);
+  // a stream that just stops has no finish reason: the caller treats that as a dropped connection
+  const dropped = newGeminiState(); applyGeminiEvent(dropped, JSON.stringify({ candidates: [{ content: { parts: [{ text: "{" }] } }] }));
+  assert.equal(dropped.finish, null);
+});

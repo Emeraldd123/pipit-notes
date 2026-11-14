@@ -3,7 +3,8 @@
 // an action that needs it (read a page, ask a question, check working, …).
 import { aiReady, getSettings, hasKey } from "./settings";
 import { GeminiSkip, tryGemini } from "./gemini";
-import { applyEvent, newStreamState, sseSplitter, type StreamState } from "./sse-core.ts";
+import { applyEvent, newStreamState, type StreamState } from "./sse-core.ts";
+import { pumpSse, StreamStopped } from "./stream-read.ts";
 import { count, error as logErr, track, warn } from "./telemetry";
 import { JsonReplyError, parseModelJson } from "./json-repair.ts";
 import { effortFor, maxTokensFor, modelFor, type Effort, type Usage } from "./ai-cost.ts";
@@ -44,46 +45,8 @@ const GEMINI_ONLY_ERRORS: Record<string, string> = {
   blocked: "Gemini declined to answer this one. Try rewording, or a different selection.",
 };
 
-/** No bytes for this long while an answer is being written = the connection is dead (the service pings every few seconds). */
-const STALL_MS = 60_000;
 const DROPPED = "The connection dropped while the answer was being written (did the iPad lock, or the app go to the background?). Try again, and keep Pipit open until it finishes.";
 
-/**
- * Read a streamed reply. Progress is reported as text arrives; a connection that goes quiet (or that died while the
- * app was in the background) is noticed within seconds instead of after a five-minute timeout.
- */
-async function readStream(res: Response, abort: () => void, signal: AbortSignal | undefined, onProgress?: (text: string) => void): Promise<StreamState> {
-  const st = newStreamState();
-  if (!res.body) throw new AiError(DROPPED);
-  const reader = res.body.getReader(), dec = new TextDecoder(), split = sseSplitter();
-  let last = Date.now(), stalled = false;
-  const stop = () => { abort(); void reader.cancel().catch(() => undefined); };
-  const stall = () => { stalled = true; stop(); };
-  const tick = setInterval(() => { if (Date.now() - last > STALL_MS) stall(); }, 2000);
-  // back from the background: if nothing arrives within a few seconds, the request died while we were away
-  const onVisible = () => { if (document.visibilityState === "visible") setTimeout(() => { if (!st.done && Date.now() - last > 20_000) stall(); }, 4000); };
-  document.addEventListener("visibilitychange", onVisible);
-  signal?.addEventListener("abort", stop);
-  try {
-    for (;;) {
-      let r: ReadableStreamReadResult<Uint8Array>;
-      try { r = await reader.read(); } catch { if (signal?.aborted) throw new AiError("Cancelled."); throw new AiError(DROPPED); }
-      if (signal?.aborted) throw new AiError("Cancelled.");
-      if (stalled) throw new AiError(DROPPED);
-      if (r.done) break;
-      last = Date.now();
-      let grew = false;
-      for (const p of split(dec.decode(r.value, { stream: true }))) if (applyEvent(st, p)) grew = true;
-      if (grew) { try { onProgress?.(st.text); } catch { /* a progress display must never break the request */ } }
-      if (st.error || st.done) break;
-    }
-  } finally {
-    clearInterval(tick);
-    document.removeEventListener("visibilitychange", onVisible);
-    signal?.removeEventListener("abort", stop);
-  }
-  return st;
-}
 
 async function claudeOnce(opts: {
   system?: string;
@@ -103,8 +66,8 @@ async function claudeOnce(opts: {
   const feature = opts.feature ?? "other";
   // Gemini first (Google credit), for the jobs it is allowed to do (ai-route-core.ts); anything wrong and the job goes to Claude below
   let skip = "";
-  try { return await tryGemini({ feature, system: opts.system, user: opts.user, maxTokens: opts.maxTokens, signal: opts.signal }); }
-  catch (e) { if (!(e instanceof GeminiSkip)) throw e; if (e.message === "cancelled") throw new AiError("Cancelled."); skip = e.message; }
+  try { return await tryGemini({ feature, system: opts.system, user: opts.user, maxTokens: opts.maxTokens, signal: opts.signal, onProgress: opts.onProgress }); }
+  catch (e) { if (!(e instanceof GeminiSkip)) throw e; if (e.message === "cancelled") throw new AiError("Cancelled."); if (e.message === "dropped" && !hasKey(s)) throw new AiError(DROPPED); skip = e.message; }
   if (!hasKey(s)) throw new AiError(GEMINI_ONLY_ERRORS[skip] ?? `Gemini couldn't do this one (${skip}). Try again in a moment.`);
   if (s.monthlyBudgetUsd > 0) {
     const spent = await spentThisMonth();
@@ -114,7 +77,7 @@ async function claudeOnce(opts: {
   let effort = opts.effort ?? effortFor(feature, s.careful, model);
   const t0 = performance.now();
   count(`ai.${feature}`);
-  // long answers are streamed: progress can be shown, and a dead connection is noticed quickly (readStream)
+  // long answers are streamed: progress can be shown, and a dead connection is noticed quickly (stream-read.ts)
   const streaming = !!opts.onProgress || (opts.maxTokens ?? 2000) >= 2500;
   // when streaming this is only the wait for the reply to START; after that the stall watch takes over
   const timeoutMs = opts.timeoutMs ?? (streaming ? 90_000 : 120_000);
@@ -195,8 +158,20 @@ async function claudeOnce(opts: {
   let data: { usage?: Usage; stop_reason?: string | null; content?: { type: string; text: string }[] };
   if (streaming) {
     let st: StreamState;
-    try { st = await readStream(res, abortLive, opts.signal, opts.onProgress); }
-    catch (e) { if ((e as Error).message !== "Cancelled.") logErr("ai", "stream dropped", { feature, model, ms: Math.round(performance.now() - t0) }); throw e; }
+    st = newStreamState();
+    const live = st;
+    try {
+      await pumpSse(res, {
+        abort: abortLive, signal: opts.signal,
+        onPayload: (p) => ({ grew: applyEvent(live, p), finished: live.done || !!live.error }),
+        onProgress: opts.onProgress && (() => opts.onProgress!(live.text)),
+      });
+    } catch (e) {
+      if (e instanceof StreamStopped && e.why === "cancelled") throw new AiError("Cancelled.");
+      logErr("ai", "stream dropped", { feature, model, ms: Math.round(performance.now() - t0) });
+      if (live.usage) void recordUsage(feature, model, live.usage);
+      throw new AiError(DROPPED);
+    }
     if (st.usage) void recordUsage(feature, model, st.usage);   // what was written before a failure is still billed
     if (st.error) {
       logErr("ai", "stream error", { feature, model, type: st.error.type });

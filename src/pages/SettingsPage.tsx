@@ -61,6 +61,20 @@ export function SettingsPage() {
       flash(`${r.imported} imported, ${r.replaced} updated, ${r.skipped} already up to date${r.errors.length ? " — " + r.errors[0] : ""}.`);
     } finally { setBusy(null); }
   }
+  // a newly pasted Anthropic key is checked once (a one-word reply, a tiny fraction of a cent), result shown by the field
+  const [keyStatus, setKeyStatus] = useState<{ ok: boolean; msg: string } | null>(null);
+  const checkedKey = useRef(s.apiKey.trim());
+  useEffect(() => {
+    const key = s.apiKey.trim();
+    if (key.length <= 10 || key === checkedKey.current || !s.aiEnabled) return;
+    const t = setTimeout(async () => {
+      checkedKey.current = key;
+      setKeyStatus({ ok: true, msg: "Checking the key…" });
+      try { await claude({ user: "Reply with the single word: ok", maxTokens: 8, feature: "test", model: s.model }); setKeyStatus({ ok: true, msg: "✓ The key works." }); }
+      catch (e) { setKeyStatus({ ok: false, msg: (e as Error).message }); }
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [s.apiKey, s.aiEnabled, s.model]);
   async function testKey() {
     setTesting(true);
     try {
@@ -113,6 +127,7 @@ export function SettingsPage() {
           <label className="mt-3 block text-xs text-foreground-muted">Anthropic API key
             <input type="password" value={s.apiKey} onChange={(e) => updateSettings({ apiKey: e.target.value, ...(e.target.value.trim().length > 10 && !s.apiKey.trim() ? { aiEnabled: true } : {}) })} placeholder="sk-ant-…" autoComplete="off" autoCapitalize="off" spellCheck={false}
               className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2.5 font-mono text-sm text-foreground outline-none focus:border-primary" />
+            {keyStatus && <span role="status" className={`mt-1 block ${keyStatus.ok ? "text-positive" : "text-negative"}`}>{keyStatus.msg}</span>}
           </label>
           <label className="mt-3 block text-xs text-foreground-muted">Model
             <select value={s.model} onChange={(e) => updateSettings({ model: e.target.value })} className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-foreground">
