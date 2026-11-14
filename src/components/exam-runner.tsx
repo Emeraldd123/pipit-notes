@@ -5,6 +5,7 @@ import { FigureView } from "@/components/figure";
 import { InkPad } from "@/components/ink-pad";
 import { Button } from "@/components/ui";
 import { allParts, buildResult, REPORT_REASONS, type Exam, type ExamResult, type Part, type PartAnswer, type PartMark, type Question, type ReportReason } from "@/lib/exam-core";
+import { confirmBox } from "@/components/dialog";
 
 const fmtClock = (s: number) => `${Math.floor(Math.abs(s) / 60)}:${String(Math.abs(s) % 60).padStart(2, "0")}`;
 
@@ -42,9 +43,10 @@ export function ExamRunner({ exam, onSubmit, onExit, onReport }: {
   const unanswered = flat.filter((f) => !answered(f.q)).length;
 
   const sent = useRef(false);   // a second tap on Submit must not start a second (paid) marking run
-  const submit = () => {
+  const submit = async () => {
     if (sent.current) return;
-    if (unanswered > 0 && !confirm(`${unanswered} question${unanswered === 1 ? " is" : "s are"} unanswered. Submit anyway?`)) return;
+    if (unanswered > 0 && !(await confirmBox(`${unanswered} question${unanswered === 1 ? " is" : "s are"} unanswered. Submit anyway?`, { ok: "Submit" }))) return;
+    if (sent.current) return;
     sent.current = true;
     onSubmit(answers, elapsed);
   };
@@ -52,7 +54,7 @@ export function ExamRunner({ exam, onSubmit, onExit, onReport }: {
   return (
     <div className="flex h-full min-h-screen flex-col bg-background">
       <header className="flex shrink-0 items-center gap-3 border-b border-border bg-surface px-4 py-2.5">
-        <button onClick={() => { if (confirm("Leave the exam? Your answers will be lost.")) onExit(); }} className="rounded-lg p-1.5 text-foreground-muted hover:bg-surface-secondary" title="Leave"><X size={20} /></button>
+        <button onClick={async () => { if (await confirmBox("Leave the exam?", { body: "Your answers will be lost.", ok: "Leave", danger: true })) onExit(); }} className="rounded-lg p-1.5 text-foreground-muted hover:bg-surface-secondary" title="Leave"><X size={20} /></button>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold">{exam.title}</p>
           <p className="text-xs text-foreground-muted">{exam.totalMarks} marks · {exam.durationMin} min</p>

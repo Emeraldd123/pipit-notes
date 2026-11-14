@@ -32,6 +32,7 @@ import { count, logError } from "@/lib/telemetry";
 import { newId } from "@/lib/ids";
 import { timeAgo } from "@/lib/format";
 import type { NoteMeta, NotebookRec } from "@/types";
+import { confirmBox } from "@/components/dialog";
 
 type Tab = "path" | "cards" | "quiz" | "exams" | "mistakes";
 /** what a lesson-style session is: a Duolingo lesson, a scored quiz, or flip-and-grade flashcards */
@@ -317,7 +318,7 @@ export function StudyPage({ view }: { view?: string }) {
               onStart={(size) => startLesson({ title: "Quiz", pool: focusCards(cards, focusOf("quiz")), mode: "quiz", section: "quiz", size })} />
           )}
           {tab === "exams" && <ExamsView exams={exams} ai={ai} onExam={() => setModal("exam")}
-            onOpen={(rec) => void runExam(rec.exam, rec)} onDelete={async (rec) => { if (confirm(`Delete "${rec.exam.title}"?`)) { await deleteExam(rec.id); await reload(); } }} />}
+            onOpen={(rec) => void runExam(rec.exam, rec)} onDelete={async (rec) => { if (await confirmBox(`Delete "${rec.exam.title}"?`, { ok: "Delete", danger: true })) { await deleteExam(rec.id); await reload(); } }} />}
           {tab === "mistakes" && <MistakesView mistakes={mistakes} notes={notes} onOpen={(m) => go({ name: "note", id: m.noteId, page: m.page })}
             onResolve={async (m) => { await patchMistake(m.id, { resolved: !m.resolved }); await reload(); }} onDelete={async (m) => { await deleteMistake(m.id); await reload(); }} onPractice={() => void startPractice()} />}
         </div>
@@ -511,7 +512,7 @@ function CardsView({ cards, total, notebooks, onAdd, onEdit, onDelete, onSuspend
                     <div className="flex shrink-0 gap-0.5">
                       <button onClick={() => onEdit(c)} className="tap rounded-md p-1.5 text-foreground-muted hover:bg-surface-secondary" title="Edit" aria-label="Edit card"><Pencil size={14} /></button>
                       <button onClick={() => onSuspend(c)} className="tap rounded-md p-1.5 text-foreground-muted hover:bg-surface-secondary" title={c.suspended ? "Resume" : "Pause (skip in lessons)"} aria-label={c.suspended ? "Resume card" : "Pause card"} aria-pressed={!!c.suspended}><Check size={14} /></button>
-                      <button onClick={() => { if (confirm("Delete this card?")) onDelete(c); }} className="tap rounded-md p-1.5 text-foreground-muted hover:text-negative" title="Delete" aria-label="Delete card"><Trash2 size={14} /></button>
+                      <button onClick={async () => { if (await confirmBox("Delete this card?", { ok: "Delete", danger: true })) onDelete(c); }} className="tap rounded-md p-1.5 text-foreground-muted hover:text-negative" title="Delete" aria-label="Delete card"><Trash2 size={14} /></button>
                     </div>
                   </div>
                 </UiCard>
@@ -902,7 +903,7 @@ function StudySettings({ progress, counts, onClose, onChange, onReset }: {
           {opt("maps", "Concept maps")}
           <p className="text-xs text-foreground-muted">This can&apos;t be undone. A backup (Settings → Back up) keeps a copy if you might want it back.</p>
           <div className="flex gap-2">
-            <Button variant="danger" disabled={!any} onClick={() => { if (confirm("Delete the selected study data from this device?")) onReset(what); }}><Trash2 size={14} /> Delete selected</Button>
+            <Button variant="danger" disabled={!any} onClick={async () => { if (await confirmBox("Delete the selected study data from this device?", { body: "Back up first if you might want it later.", ok: "Delete", danger: true })) onReset(what); }}><Trash2 size={14} /> Delete selected</Button>
             <Button onClick={() => setResetting(false)}>Back</Button>
           </div>
         </div>

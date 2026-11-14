@@ -21,6 +21,7 @@ import { Button, Card, DropMenu, Toast, Wordmark, type DropItem } from "@/compon
 import { WhatsNew } from "@/components/whats-new";
 import { Welcome } from "@/components/welcome";
 import { InstallNudge } from "@/components/install-nudge";
+import { askText, confirmBox } from "@/components/dialog";
 
 export function Library({ notebook, q }: { notebook: string | null; q: string }) {
   const [notes, setNotes] = useState<NoteMeta[] | null>(null);
@@ -108,7 +109,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
   }
 
   async function newNotebook() {
-    const name = prompt("Notebook name (e.g. Chem 0710)");
+    const name = await askText("New notebook", { placeholder: "e.g. Chem 0710", ok: "Create" });
     if (!name?.trim()) return;
     const nb = await createNotebook(name);
     await reload();
@@ -116,7 +117,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
   }
 
   async function removeNotebook(nb: NotebookRec) {
-    if (!confirm(`Delete notebook "${nb.name}"? Its notes are kept (moved to Unfiled).`)) return;
+    if (!(await confirmBox(`Delete notebook "${nb.name}"?`, { body: "Its notes are kept and moved to Unfiled.", ok: "Delete notebook", danger: true }))) return;
     await deleteNotebook(nb.id);
     if (notebook === nb.id) go({ name: "library", notebook: null, q: "" });
     await reload();
@@ -233,7 +234,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
     await reload();
   }
   async function tagSelected() {
-    const t = prompt("Add tag(s) to the selected notes (comma-separated)")?.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+    const t = (await askText("Add tags to the selected notes", { label: "Separate tags with commas", placeholder: "e.g. exam, week 3", ok: "Add" }))?.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
     if (!t?.length) return;
     for (const id of picked) {
       const n = (notes ?? []).find((x) => x.id === id);
@@ -439,7 +440,7 @@ export function Library({ notebook, q }: { notebook: string | null; q: string })
                 <NoteTile key={n.id} note={n} notebook={notebooks.find((b) => b.id === n.notebookId)} notebooks={notebooks} onChange={reload} flash={flash} selecting={selecting} picked={picked.has(n.id)} onPick={() => togglePick(n.id)}
                   trashed={notebook === "trash"} onTrash={async () => { await trashNotes([n.id]); await reload(); flashUndo(`“${n.title}” moved to Recently deleted.`, [n.id]); }}
                   onRestore={async () => { await restoreNotes([n.id]); await reload(); flash("Restored."); }}
-                  onPurge={async () => { if (confirm(`Permanently delete "${n.title}"? This can't be undone.`)) { await deleteNote(n.id); await reload(); flash("Deleted for good."); } }} />
+                  onPurge={async () => { if (await confirmBox(`Permanently delete "${n.title}"?`, { body: "This can't be undone.", ok: "Delete for good", danger: true })) { await deleteNote(n.id); await reload(); flash("Deleted for good."); } }} />
               ))}
             </div>
           )}
@@ -535,14 +536,14 @@ function NoteTile({ note, notebook, notebooks, onChange, flash, selecting, picke
   }, [note.id, note.updatedAt]);
 
   async function rename() {
-    const t = prompt("Rename note", note.title);
+    const t = await askText("Rename note", { value: note.title, ok: "Rename" });
     if (t?.trim()) { await patchNote(note.id, { title: t.trim() }, false); onChange(); }
   }
   void flash;
   const [moving, setMoving] = useState(false);
   async function moveTo(id: string | null) { setMoving(false); if (id !== note.notebookId) { await patchNote(note.id, { notebookId: id }, false); flash(id ? "Moved to notebook." : "Moved to Unfiled."); onChange(); } }
   async function editTags() {
-    const t = prompt("Tags (comma-separated)", note.tags.join(", "));
+    const t = await askText("Tags", { label: "Separate tags with commas", value: note.tags.join(", "), ok: "Save" });
     if (t === null) return;
     await patchNote(note.id, { tags: [...new Set(t.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean))] }, false);
     onChange();

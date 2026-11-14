@@ -24,12 +24,12 @@ export function buttonClass(variant: ButtonVariant = "secondary") {
 }
 
 export function Button({
-  children, onClick, variant = "secondary", disabled, title, className = "", type = "button", ariaLabel,
+  children, onClick, variant = "secondary", disabled, title, className = "", type = "button", ariaLabel, ref,
 }: {
   children: ReactNode; onClick?: () => void; variant?: ButtonVariant;
-  disabled?: boolean; title?: string; className?: string; type?: "button" | "submit"; ariaLabel?: string;
+  disabled?: boolean; title?: string; className?: string; type?: "button" | "submit"; ariaLabel?: string; ref?: React.Ref<HTMLButtonElement>;
 }) {
-  return <button type={type} title={title} aria-label={ariaLabel} disabled={disabled} onClick={onClick} className={`${buttonClass(variant)} ${className}`}>{children}</button>;
+  return <button ref={ref} type={type} title={title} aria-label={ariaLabel} disabled={disabled} onClick={onClick} className={`${buttonClass(variant)} ${className}`}>{children}</button>;
 }
 
 /**

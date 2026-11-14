@@ -13,7 +13,7 @@ import { findBoxes, boxToDoc, pageFingerprints } from "@/lib/search-core";
 import { estimateUsd, formatUsd } from "@/lib/ai-cost";
 import { PAGE_H, PAGE_W, PAGE_GAP } from "@/lib/page";
 import { TEMPLATES, renderTemplate, type TemplateId } from "@/lib/templates";
-import { PresetsButton } from "@/components/presets";
+import { InkPicker, lastColours } from "@/components/ink-picker";
 import { RailMenu } from "@/components/rail-menu";
 import { shareOrDownload, useShareFlow } from "@/components/backup-flow";
 import { PagesPanel } from "@/components/pages-panel";
@@ -21,7 +21,7 @@ import { ExplainPanel, HighlightLayer, MathMarks, ReviewBar, ReviewSetup, Sticky
 import { useMathCheck } from "@/components/math-check";
 import { LatexExport } from "@/components/latex-export";
 import { pad, type Box } from "@/lib/ink-groups";
-import { Button, IconButton, Modal, Toast } from "@/components/ui";
+import { Button, DropMenu, IconButton, Modal, Toast } from "@/components/ui";
 import type { BlockKind, BlockRec, NoteMeta, NotePaper } from "@/types";
 import {
   addImage, dataUrlToBlob, deleteBlock, deleteImage, trashNotes, getPageTexts, listNotes, listVersions, loadNote, maybeSnapshot, patchNote, putBlock,
@@ -50,6 +50,7 @@ import { timeAgo } from "@/lib/format";
 import { clearDirty, markDirty } from "@/lib/health";
 import { count, error as logErrorEntry, logError, recordInputSample, timer, track, warn } from "@/lib/telemetry";
 import { go } from "@/router";
+import { confirmBox } from "@/components/dialog";
 
 const COLORS = ["#111827", "#2563eb", "#dc2626", "#16a34a", "#d97706", "#7c3aed", "#0891b2", "#db2777"];
 const HIGHLIGHTER_COLORS = ["#fde047", "#fca5a5", "#86efac", "#93c5fd", "#f0abfc", "#fdba74"];
@@ -436,9 +437,9 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
   // --- page ops -------------------------------------------------------------------------------
   const setPages = useCallback((n: number) => { setPageCount(n); void patchNote(noteId, { pageCount: n }); }, [noteId]);
   const addPage = () => setPages(pageCount + 1);
-  function deleteCurrentPage() {
+  async function deleteCurrentPage() {
     if (pageCount <= 1) return flash("A note needs at least one page.");
-    if (!confirm(`Delete page ${currentPage + 1}? Anything on it is removed (undo brings ink back).`)) return;
+    if (!(await confirmBox(`Delete page ${currentPage + 1}?`, { body: "Anything on it is removed. Undo brings the ink back.", ok: "Delete page", danger: true }))) return;
     canvasRef.current?.deletePageContent(currentPage);
     const n = pageCount - 1;
     setPages(n);
@@ -535,7 +536,7 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
   function doPrint() { setMenu(false); count("export.print"); printImages(canvasRef.current?.exportPages() ?? []); }
   async function openHistory() { setMenu(false); setVersions(await listVersions(noteId)); }
   async function onRestore(vid: string) {
-    if (!confirm("Restore this version? Your current ink is saved as a version first, so you can come back.")) return;
+    if (!(await confirmBox("Restore this version?", { body: "Your current ink is saved as a version first, so you can come back to it.", ok: "Restore" }))) return;
     await flush();
     await restoreVersion(vid);
     location.reload();
@@ -919,12 +920,22 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
   function applyPreset(p: (typeof settings.presets)[number]) {
     setTool(p.tool);
     if (p.tool === "highlighter") setHlColor(p.color); else setColor(p.color);
+    const key = p.tool === "highlighter" ? "hlHistory" : "inkHistory";
+    updateSettings({ [key]: [p.color, ...(getSettings()[key] ?? []).filter((x) => x !== p.color)].slice(0, 6) });
     setWidthFor(p.tool, p.width);
     count("pen.presetUsed");
   }
   function rememberColor(c: string) {
     if (COLORS.includes(c) || HIGHLIGHTER_COLORS.includes(c)) return;
     updateSettings({ recentColors: [c, ...settings.recentColors.filter((x) => x !== c)].slice(0, 5) });
+  }
+  function pickColor(c: string, custom = false) {
+    const hl = tool === "highlighter";
+    (hl ? setHlColor : setColor)(c);
+    if (custom) rememberColor(c);
+    const key = hl ? "hlHistory" : "inkHistory";
+    const hist = getSettings()[key] ?? [];
+    if (hist[0] !== c) updateSettings({ [key]: [c, ...hist.filter((x) => x !== c)].slice(0, 6) });
   }
 
   const [toolHint, setToolHint] = useState(() => !toolHintSeen());
@@ -960,7 +971,7 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
             <IconButton title="Redo" disabled={!history.canRedo} onClick={() => canvasRef.current?.redo()}><Redo2 size={18} /></IconButton>
           </div>
         )}
-        <select value={paper} onChange={(e) => changePaper(e.target.value as NotePaper)} className="max-w-[5.5rem] shrink-0 rounded-lg border border-border bg-background px-2 py-1 text-xs sm:max-w-none [@media(pointer:coarse)]:min-h-11" title="Paper style" aria-label="Paper style">
+        <select value={paper} onChange={(e) => changePaper(e.target.value as NotePaper)} className={`max-w-[5.5rem] shrink-0 rounded-lg border border-border bg-background px-2 py-1 text-xs ${splitWith ? "" : "sm:max-w-none"} [@media(pointer:coarse)]:min-h-11`} title="Paper style" aria-label="Paper style">
           {PAPERS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
         </select>
         <button
@@ -970,9 +981,9 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
           className={`flex h-9 shrink-0 items-center gap-1.5 rounded-xl border px-3 text-sm font-medium [@media(pointer:coarse)]:h-11 ${tool === "eraser" ? "border-primary bg-primary text-white" : "border-border bg-background text-foreground hover:bg-surface-secondary"}`}
         >
           {tool === "eraser" ? <ArrowLeftRight size={16} /> : <Eraser size={16} />}
-          <span className="hidden sm:inline">{tool === "eraser" ? `Back to ${TOOL_NAMES[lastTool.current] ?? "pen"}` : "Erase"}</span>
+          <span className={splitWith ? "hidden" : "hidden sm:inline"}>{tool === "eraser" ? `Back to ${TOOL_NAMES[lastTool.current] ?? "pen"}` : "Erase"}</span>
         </button>
-        <SavePill state={saveState} />
+        <SavePill state={saveState} compact={!!splitWith} />
         <div className="relative">
           <IconButton title="More: search, history, export, delete" onClick={() => setMenu((o) => !o)}><MoreHorizontal size={18} /></IconButton>
           {menu && (
@@ -1006,17 +1017,25 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
       </header>
 
       {hasSel && (
-        <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-border bg-primary/5 px-3 py-1.5 text-xs">
-          <span className="mr-1 font-medium text-foreground-muted">Selection</span>
+        // one row: the common actions, then "More" for the rest (it used to wrap to two or three rows on an iPad)
+        <div className="no-scrollbar flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-border bg-primary/5 px-3 py-1.5 text-xs">
+          <span className="mr-1 hidden font-medium text-foreground-muted lg:inline">Selection</span>
           <SelBtn onClick={() => canvasRef.current?.recolorSelection(color)}><Paintbrush size={13} /> Recolor</SelBtn>
           <SelBtn onClick={() => canvasRef.current?.duplicateSelection()}><Copy size={13} /> Duplicate</SelBtn>
           <SelBtn onClick={convertSelectionToText} accent><TextCursorInput size={13} /> To text</SelBtn>
-          <SelBtn onClick={recognizeSelection} accent><Sigma size={13} /> Recognise maths</SelBtn>
-          <SelBtn onClick={checkSelection} accent><CheckCheck size={13} /> Check working</SelBtn>
-          <SelBtn onClick={cardsFromSelection} accent><LayersIcon size={13} /> Flashcards</SelBtn>
+          <SelBtn onClick={recognizeSelection} accent><Sigma size={13} /> Maths</SelBtn>
           <SelBtn onClick={explainSelection} accent><Lightbulb size={13} /> Explain</SelBtn>
-          <SelBtn onClick={graphSelection} accent><LineChart size={13} /> Graph it</SelBtn>
-          <SelBtn onClick={checkChemistry} accent><FlaskConical size={13} /> Check equation</SelBtn>
+          <DropMenu label="More actions for the selection" title="More" align="left" width={250}
+            triggerClass="flex shrink-0 items-center gap-1 rounded-lg bg-primary/10 px-2.5 py-1.5 font-medium text-primary hover:bg-primary/15 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:px-3.5 [@media(pointer:coarse)]:text-sm"
+            items={[
+              { icon: <CheckCheck size={15} />, label: "Check working", hint: "Each step is checked with SymPy", onClick: checkSelection },
+              { icon: <FlaskConical size={15} />, label: "Check equation", hint: "Atoms and charge balance", onClick: checkChemistry },
+              { icon: <LineChart size={15} />, label: "Graph it", onClick: graphSelection },
+              { icon: <LayersIcon size={15} />, label: "Flashcards", onClick: cardsFromSelection },
+            ]}>
+            <MoreHorizontal size={13} /> More
+          </DropMenu>
+          <span className="flex-1" />
           <SelBtn onClick={() => canvasRef.current?.deleteSelection()} danger><Trash2 size={13} /> Delete</SelBtn>
         </div>
       )}
@@ -1024,7 +1043,6 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
       <div className={`flex min-h-0 flex-1 flex-col ${railSide === "right" ? "md:flex-row-reverse" : "md:flex-row"}`}>
         <div role="toolbar" aria-label="Tools" className={`no-scrollbar flex shrink-0 items-center gap-1.5 overflow-x-auto overscroll-contain border-b border-border bg-surface px-2 py-2 md:min-h-0 md:w-[60px] md:flex-col md:items-center md:gap-1.5 md:overflow-y-auto md:overflow-x-hidden md:border-b-0 md:px-0.5 md:py-3 [@media(pointer:coarse)]:md:w-[76px] ${railSide === "right" ? "md:border-l" : "md:border-r"}`}>
           {rail(WRITE)}
-          <IconButton title="Eraser" active={tool === "eraser"} onClick={() => setTool("eraser")}><Eraser size={17} /></IconButton>
           <Sep />
           {rail(SELECT)}
           <Sep />
@@ -1049,41 +1067,16 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
             { icon: <Wand2 size={17} />, label: settings.shapeSnap ? "Snap shapes: on" : "Snap shapes: off", hint: "Hold the pen still after a line, circle or box and it straightens", active: settings.shapeSnap, onClick: () => updateSettings({ shapeSnap: !settings.shapeSnap }) },
             { icon: <Waves size={17} />, label: settings.scribbleErase ? "Scribble to erase: on" : "Scribble to erase: off", hint: "Scribble back and forth over ink to delete it", active: settings.scribbleErase, onClick: () => updateSettings({ scribbleErase: !settings.scribbleErase }) },
           ]} />
-          <PresetsButton presets={settings.presets} side={railSide} onApply={applyPreset} onSave={savePreset} onDelete={(i) => updateSettings({ presets: settings.presets.filter((_, k) => k !== i) })} />
           <Sep />
-          <div className="flex shrink-0 items-center gap-1.5 md:flex-col" role="group" aria-label="Stroke width">
-            {WIDTHS.map((w) => (
-              <button key={w} onClick={() => setWidth(w)} title={`${WIDTH_NAMES[w]} line`} aria-label={`${WIDTH_NAMES[w]} line`} aria-pressed={width === w}
-                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:w-10 ${width === w ? "bg-surface-secondary ring-1 ring-primary" : "hover:bg-surface-secondary"}`}>
-                <span className="rounded-full bg-foreground" style={{ width: Math.min(w, 16), height: Math.min(w, 16) }} />
-              </button>
-            ))}
-          </div>
-          <Sep />
-          <div className="flex shrink-0 items-center gap-1.5 md:grid md:grid-cols-2 md:gap-1" role="group" aria-label={tool === "highlighter" ? "Highlighter colour" : "Ink colour"}>
-            {(tool === "highlighter" ? HIGHLIGHTER_COLORS : COLORS).map((c) => (
-              <button key={c} title={COLOR_NAMES[c] ?? c} aria-label={COLOR_NAMES[c] ?? `Colour ${c}`} aria-pressed={inkColor === c} onClick={() => (tool === "highlighter" ? setHlColor(c) : setColor(c))}
-                className={`h-6 w-6 shrink-0 rounded-full [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8 ${inkColor === c ? "ring-2 ring-primary ring-offset-2 ring-offset-surface" : ""}`} style={{ backgroundColor: c }} />
-            ))}
-            {settings.recentColors.map((c) => (
-              <button key={c} title={`Recent colour ${c}`} aria-label={`Recent colour ${c}`} aria-pressed={inkColor === c} onClick={() => (tool === "highlighter" ? setHlColor(c) : setColor(c))}
-                className={`h-6 w-6 shrink-0 rounded-full ring-1 ring-border [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8 ${inkColor === c ? "ring-2 ring-primary ring-offset-2 ring-offset-surface" : ""}`} style={{ backgroundColor: c }} />
-            ))}
-            <label className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full ring-1 ring-border [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8" title="Custom colour" style={{ background: "conic-gradient(red, yellow, lime, aqua, blue, magenta, red)" }}>
-              <input type="color" value={inkColor} onChange={(e) => { const v = e.target.value; (tool === "highlighter" ? setHlColor : setColor)(v); rememberColor(v); }} className="sr-only" aria-label="Custom colour" />
-            </label>
-          </div>
+          <InkPicker side={railSide} color={inkColor} width={width} widths={WIDTHS} widthNames={WIDTH_NAMES} palette={tool === "highlighter" ? HIGHLIGHTER_COLORS : COLORS} colorNames={COLOR_NAMES}
+            recentCustom={tool === "highlighter" ? [] : settings.recentColors} highlighter={tool === "highlighter"}
+            lastUsed={lastColours(tool === "highlighter" ? settings.hlHistory ?? [] : settings.inkHistory ?? [], tool === "highlighter" ? HIGHLIGHTER_COLORS : COLORS)}
+            onColor={pickColor} onWidth={setWidth}
+            presets={settings.presets} onApplyPreset={applyPreset} onSavePreset={savePreset} onDeletePreset={(i) => updateSettings({ presets: settings.presets.filter((_, k) => k !== i) })} />
           <div className={`mx-1 h-6 w-px shrink-0 bg-border md:mx-0 md:my-1 md:h-px md:w-6 ${topUndo ? "md:hidden" : ""}`} />
           <div className={`flex shrink-0 gap-1 md:flex-col ${topUndo ? "md:hidden" : ""}`}>
             <IconButton title="Undo" disabled={!history.canUndo} onClick={() => canvasRef.current?.undo()}><Undo2 size={17} /></IconButton>
             <IconButton title="Redo" disabled={!history.canRedo} onClick={() => canvasRef.current?.redo()}><Redo2 size={17} /></IconButton>
-          </div>
-          <Sep />
-          <div className="flex shrink-0 items-center gap-1 md:flex-col">
-            <IconButton title="Zoom out" onClick={() => canvasRef.current?.zoomOut()}><ZoomOut size={17} /></IconButton>
-            <button title="Reset zoom" aria-label={`Zoom ${Math.round(zoom * 100)}%. Reset zoom`} onClick={() => canvasRef.current?.zoomReset()} className="w-10 shrink-0 rounded-md py-0.5 tabular-nums text-center text-[11px] font-medium text-foreground-muted hover:bg-surface-secondary [@media(pointer:coarse)]:py-2 [@media(pointer:coarse)]:text-xs">{Math.round(zoom * 100)}%</button>
-            <IconButton title="Zoom in" onClick={() => canvasRef.current?.zoomIn()}><ZoomIn size={17} /></IconButton>
-            <IconButton title="Fit to page" onClick={() => canvasRef.current?.zoomReset()}><Maximize2 size={17} /></IconButton>
           </div>
         </div>
 
@@ -1157,7 +1150,7 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
               onMove={(f, t) => applyPageOp(moveMapping(pageCount, f, t), `Moved page ${f + 1} to ${t + 1}.`)}
               onDuplicate={(p) => applyPageOp(duplicateMapping(pageCount, p), `Duplicated page ${p + 1}.`)}
               onInsertAfter={(p) => applyPageOp(insertBlankMapping(pageCount, p), `Added a blank page after ${p + 1}.`)}
-              onDelete={(p) => { if (confirm(`Delete page ${p + 1}? Its writing goes with it (version history can bring it back).`)) void applyPageOp(deleteMapping(pageCount, p), `Deleted page ${p + 1}.`); }}
+              onDelete={async (p) => { if (await confirmBox(`Delete page ${p + 1}?`, { body: "Its writing goes with it. Version history can bring it back.", ok: "Delete page", danger: true })) void applyPageOp(deleteMapping(pageCount, p), `Deleted page ${p + 1}.`); }}
               onClose={() => setPagesOpen(false)} />
           )}
           {openSticky && <StickyPanel b={openSticky} onChange={onBlockChange} onDelete={() => { onBlockDelete(openSticky.id); setSticky(null); }} onClose={closeSticky} />}
@@ -1182,6 +1175,10 @@ function Editor({ note, startPage, hl, splitWith, onReload }: { note: LoadedNote
             </span>
             <button onClick={() => { setPagesOpen((v) => !v); setPagesRev((r) => r + 1); }} title="Page thumbnails: reorder, duplicate, insert" aria-label="Page thumbnails" aria-pressed={pagesOpen} className={`ml-1 flex items-center justify-center rounded-full p-1.5 hover:bg-surface-secondary [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:w-9 ${pagesOpen ? "bg-primary/10 text-primary" : "text-foreground-muted"}`}><Layers size={14} /></button>
             <button onClick={deleteCurrentPage} title="Delete this page" aria-label="Delete this page" disabled={pageCount <= 1} className="ml-1 flex items-center justify-center rounded-full p-1.5 text-foreground-muted [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:w-9 hover:bg-negative/10 hover:text-negative disabled:opacity-30"><Trash size={14} /></button>
+            <span className="mx-1 h-4 w-px bg-border" />
+            <button onClick={() => canvasRef.current?.zoomOut()} title="Zoom out" aria-label="Zoom out" className="hidden items-center justify-center rounded-full p-1.5 text-foreground-muted hover:bg-surface-secondary sm:flex [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:w-9"><ZoomOut size={15} /></button>
+            <button onClick={() => canvasRef.current?.zoomReset()} title="Reset zoom" aria-label={`Zoom ${Math.round(zoom * 100)}%. Reset zoom`} className="rounded-full px-1.5 py-1 tabular-nums text-foreground-muted hover:bg-surface-secondary [@media(pointer:coarse)]:min-h-9">{Math.round(zoom * 100)}%</button>
+            <button onClick={() => canvasRef.current?.zoomIn()} title="Zoom in" aria-label="Zoom in" className="mr-1 hidden items-center justify-center rounded-full p-1.5 text-foreground-muted hover:bg-surface-secondary sm:flex [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:w-9"><ZoomIn size={15} /></button>
             <button onClick={addPage} title="Add a page to the end" className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-primary px-2.5 py-1 text-white hover:bg-primary-hover [@media(pointer:coarse)]:min-h-9 [@media(pointer:coarse)]:px-3"><FilePlus2 size={13} /> Add page</button>
           </div>
 
@@ -1282,7 +1279,7 @@ function ToolGuide({ onClose }: { onClose: () => void }) {
       { icon: <Pencil size={17} />, label: "Pencil", hint: "A softer line for sketches." },
       { icon: <Highlighter size={17} />, label: "Highlighter", hint: "See-through colour over your writing." },
       { icon: <Pen size={17} strokeWidth={3.5} />, label: "Marker", hint: "A bold line for headings." },
-      { icon: <Eraser size={17} />, label: "Eraser", hint: "Rub out ink. The Erase button at the top swaps to it and back." },
+      { icon: <Eraser size={17} />, label: "Eraser", hint: "The Erase button in the top bar. Tap it again to go back to your pen (or press E)." },
     ] },
     { name: "Select and move", rows: [
       { icon: <Lasso size={17} />, label: "Lasso", hint: "Circle ink to select it, then recolour, duplicate, convert or delete it." },
@@ -1294,10 +1291,9 @@ function ToolGuide({ onClose }: { onClose: () => void }) {
     { name: "Add and adjust", rows: [
       { icon: <Plus size={17} />, label: "Insert", hint: "Shapes, text, sticky notes, graphs, maths, Python, images, a ruler." },
       { icon: <Wand2 size={17} />, label: "Pen assists", hint: "Snap shapes, scribble to erase, maths check." },
-      { icon: <Bookmark size={17} />, label: "Pen presets", hint: "Save a pen's colour and width to switch back in one tap." },
-      { icon: <span className="h-2 w-2 rounded-full bg-current" />, label: "Dots and colours", hint: "Line width and ink colour. Each tool remembers its own width." },
+      { icon: <Bookmark size={17} />, label: "Ink", hint: "The round button with your current colour: every width and colour, and pens you have saved. The colours beside it are the last ones you used, one tap each." },
       { icon: <Undo2 size={17} />, label: "Undo and redo", hint: "Step back or forward through your changes." },
-      { icon: <ZoomIn size={17} />, label: "Zoom", hint: "Zoom in and out. Tap the percentage to reset." },
+      { icon: <ZoomIn size={17} />, label: "Zoom", hint: "In the page bar at the bottom (or pinch). Tap the percentage to reset." },
     ] },
   ];
   return (
@@ -1322,11 +1318,11 @@ function ToolGuide({ onClose }: { onClose: () => void }) {
   );
 }
 
-function SavePill({ state }: { state: SaveState }) {
+function SavePill({ state, compact }: { state: SaveState; compact?: boolean }) {
   const m = state === "saved" ? { i: <Check size={13} />, t: "Saved", c: "text-positive" }
     : state === "saving" ? { i: <Loader2 size={13} className="animate-spin" />, t: "Saving", c: "text-foreground-muted" }
     : { i: <AlertTriangle size={13} />, t: "Retrying", c: "text-negative" };
-  return <span title={`${m.t}. Notes are kept on this device.`} role="status" className={`flex shrink-0 items-center gap-1 rounded-lg px-1 py-1 text-xs font-medium sm:px-2 ${m.c}`}>{m.i}<span className="sr-only sm:not-sr-only">{m.t}</span></span>;
+  return <span title={`${m.t}. Notes are kept on this device.`} role="status" className={`flex shrink-0 items-center gap-1 rounded-lg px-1 py-1 text-xs font-medium sm:px-2 ${m.c}`}>{m.i}<span className={compact ? "sr-only" : "sr-only sm:not-sr-only"}>{m.t}</span></span>;
 }
 function MenuItem({ icon, label, onClick, danger }: { icon: React.ReactNode; label: string; onClick: () => void; danger?: boolean }) {
   return (

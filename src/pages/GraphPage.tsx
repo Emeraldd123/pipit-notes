@@ -27,6 +27,7 @@ import { newId } from "@/lib/ids";
 import { timeAgo } from "@/lib/format";
 import type { MistakeRec } from "@/lib/db";
 import type { NoteMeta, NotebookRec, PageTextRec } from "@/types";
+import { confirmBox } from "@/components/dialog";
 
 type Tab = "maps" | "links";
 
@@ -338,7 +339,7 @@ function MapEditor({ initial, cards, mistakes, ai, flash, onCards, onDeleted, to
         <button onClick={() => void saveCards(cardsFromMap(map), "manual")} disabled={!map.edges.length && !map.nodes.some((n) => n.note)} className={tb} title="One card per link, plus definitions"><Layers size={14} /> Cards from map</button>
         <button onClick={exportPng} className={tb}><Download size={14} /> PNG</button>
         <button onClick={exportOutline} className={tb}><Download size={14} /> Outline</button>
-        <button onClick={() => { if (confirm(`Delete "${map.title}"?`)) { gone.current = true; void deleteMap(map.id).then(onDeleted); } }} className={`${tb} text-negative`}><Trash2 size={14} /></button>
+        <button onClick={async () => { if (await confirmBox(`Delete "${map.title}"?`, { ok: "Delete", danger: true })) { gone.current = true; void deleteMap(map.id).then(onDeleted); } }} className={`${tb} text-negative`}><Trash2 size={14} /></button>
       </div>
 
       {colorMode === "mastery" && (

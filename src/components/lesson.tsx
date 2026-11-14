@@ -8,6 +8,7 @@ import {
   type Card, type Exercise, type LessonStats, type Outcome, type Progress,
 } from "@/lib/study-core";
 import { Button } from "@/components/ui";
+import { confirmBox } from "@/components/dialog";
 
 // ---- how each exercise reports back to the runner -----------------------------------------------------------------------
 export type Report = { ready: boolean; correct?: boolean; shown?: string; auto?: boolean; grade?: Grade; mistakes?: string[] };
@@ -309,7 +310,7 @@ export function LessonRunner({ title, cards, exercises, progress, quiz, onFinish
   return (
     <div className="flex h-full min-h-screen flex-col bg-background">
       <header className="mx-auto flex w-full max-w-2xl items-center gap-3 px-4 py-4">
-        <button onClick={() => { if (done === 0 || confirm("Quit this lesson? Your progress in it will be lost.")) onExit(); }} className="rounded-lg p-1.5 text-foreground-muted hover:bg-surface-secondary" title="Quit"><X size={22} /></button>
+        <button onClick={async () => { if (done === 0 || await confirmBox("Quit this lesson?", { body: "Your progress in it will be lost.", ok: "Quit", danger: true })) onExit(); }} className="rounded-lg p-1.5 text-foreground-muted hover:bg-surface-secondary" title="Quit"><X size={22} /></button>
         <div className="h-3.5 flex-1 overflow-hidden rounded-full bg-surface-secondary">
           <div className="h-full rounded-full bg-positive transition-all duration-500" style={{ width: `${Math.min(100, (done / Math.max(1, total)) * 100)}%` }} />
         </div>

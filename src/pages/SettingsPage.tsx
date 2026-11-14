@@ -18,6 +18,7 @@ import { sendReport } from "@/lib/report";
 import { APP, clearLog, getRecent } from "@/lib/telemetry";
 import type { HealthItem } from "@/lib/telemetry-core";
 import type { LogEntry } from "@/types";
+import { confirmBox } from "@/components/dialog";
 
 const MODELS = [
   { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5 — recommended ($2 in / $10 out per million tokens)" },
@@ -236,7 +237,7 @@ export function SettingsPage() {
         <Modal title="Recent events" onClose={() => setEvents(null)} wide>
           <div className="mb-3 flex items-center justify-between gap-3">
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={onlyProblems} onChange={(e) => setOnlyProblems(e.target.checked)} className="accent-[var(--primary)]" /> Only warnings and errors</label>
-            <Button onClick={async () => { if (confirm("Clear the diagnostics log on this device?")) { await clearLog(); setEvents([]); } }}>Clear log</Button>
+            <Button onClick={async () => { if (await confirmBox("Clear the diagnostics log on this device?", { ok: "Clear log", danger: true })) { await clearLog(); setEvents([]); } }}>Clear log</Button>
           </div>
           {events.length === 0 ? <p className="text-sm text-foreground-muted">Nothing logged{onlyProblems ? " — no warnings or errors." : "."}</p> : (
             <ul className="space-y-1.5">
@@ -301,7 +302,7 @@ function AiUsagePanel({ budget }: { budget: number }) {
           {rows.map((r) => <li key={r.feature} className="flex justify-between gap-3"><span className="truncate">{FEATURE_LABEL[r.feature] ?? r.feature} · {r.calls}×</span><span className="tabular-nums">{r.usd < 0.01 ? "<1¢" : `$${r.usd.toFixed(2)}`}</span></li>)}
         </ul>
       )}
-      <p className="mt-2 text-[11px] text-foreground-muted">An estimate from token counts and published prices — your Anthropic console has the real figure.{rows.length ? " " : ""}{rows.length ? <button className="underline" onClick={() => { if (confirm("Reset this device's usage estimate?")) void resetLedger(); }}>Reset</button> : null}</p>
+      <p className="mt-2 text-[11px] text-foreground-muted">An estimate from token counts and published prices — your Anthropic console has the real figure.{rows.length ? " " : ""}{rows.length ? <button className="underline" onClick={async () => { if (await confirmBox("Reset this device's usage estimate?", { body: "Your real bill is unaffected; this only clears the estimate shown here.", ok: "Reset" })) void resetLedger(); }}>Reset</button> : null}</p>
     </div>
   );
 }

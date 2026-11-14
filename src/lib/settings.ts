@@ -35,6 +35,9 @@ export type Settings = {
   presets: Preset[];
   /** Custom colours picked recently (most recent first). */
   recentColors: string[];
+  /** Colours used most recently with pens / the highlighter (most recent first): the rail shows the last three. */
+  inkHistory: string[];
+  hlHistory: string[];
   /** Scribbling back and forth over ink erases it (off by default — it can surprise you). */
   scribbleErase: boolean;
   /** Last width used with each tool (pen, pencil, marker, highlighter, eraser, "shape"), so switching tools keeps your size. */
@@ -69,6 +72,8 @@ export const DEFAULT_SETTINGS: Settings = {
   railSide: "left",
   presets: [],
   recentColors: [],
+  inkHistory: [],
+  hlHistory: [],
   scribbleErase: false,
   toolWidths: {},
   mathCheck: false,

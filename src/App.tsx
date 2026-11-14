@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react";
 import { useRoute } from "./router";
 import { Library } from "./pages/Library";
 import { applyTheme, getSettings } from "./lib/settings";
+import { DialogHost } from "./components/dialog";
 
 // Only the Library is in the first chunk. Every other screen is its own chunk, fetched the first
 // time it is opened; the service worker precaches every chunk, so they all open offline after one
@@ -80,5 +81,5 @@ export function App() {
     case "study": return <StudyPage view={route.view} />;
     default: return <Library notebook={route.notebook} q={route.q} />;
   } })();
-  return <>{banner}<Suspense fallback={<PageLoading />}>{page}</Suspense></>;
+  return <>{banner}<Suspense fallback={<PageLoading />}>{page}</Suspense><DialogHost /></>;
 }
