@@ -1,7 +1,8 @@
 // Shared by tools/exam-eval.mjs and tools/exam-tune.mjs: API calls with a spending cap, writing an exam with EXACTLY
 // the app's prompt and validation, and the strict judge. The key comes from the environment and is only sent to
-// api.anthropic.com.
+// api.anthropic.com (or, for a gemini-* model, only to Google's Gemini API, with GEMINI_API_KEY).
 import { costUsd, effortFor, maxTokensFor, priceFor } from "../src/lib/ai-cost.ts";
+import { GEMINI_BASE, geminiBody, geminiCostUsd, geminiPrice, readGeminiReply } from "../src/lib/gemini-core.ts";
 import { parseModelJson } from "../src/lib/json-repair.ts";
 import { buildExamPrompt, EXAM_MAX_TOKENS } from "../src/lib/exam-prompt.ts";
 import { normalizeExam, lintMcq, allParts } from "../src/lib/exam-core.ts";
@@ -14,14 +15,32 @@ export class BudgetError extends Error {}
  * ~3 characters per token, the full output allowance) to what has been spent, and refuses the call if that could
  * go over. Spending is then counted from the real token usage the API reports.
  */
-export function makeApi({ key, model, budget = Infinity, log = () => {}, fetchImpl = fetch }) {
-  const ledger = { spent: 0, calls: 0, reserved: 0 };
+export function makeApi({ key, model, budget = Infinity, log = () => {}, fetchImpl = fetch, ledger = { spent: 0, calls: 0, reserved: 0 } }) {
+  // a gemini-* model is called the way the app calls it for a Gemini-only user (stronger model, its own thinking,
+  // 8000 tokens of room for it); pass a shared `ledger` so a Gemini writer and a Claude judge share one spending cap
+  const gemini = (m) => /^gemini-/.test(m);
+  const GEMINI_ROOM = 8000;
   const worstCase = (m, system, content, maxTokens, effort) => {
     const chars = system.length + content.reduce((n, c) => n + (c.text?.length ?? 0), 0);
-    const [pin, pout] = priceFor(m);
-    return (Math.ceil(chars / 3) * pin + maxTokensFor(maxTokens, effort) * pout) / 1e6;
+    const [pin, pout] = gemini(m) ? geminiPrice(m) : priceFor(m);
+    return (Math.ceil(chars / 3) * pin + (gemini(m) ? maxTokens + GEMINI_ROOM : maxTokensFor(maxTokens, effort)) * pout) / 1e6;
   };
+  async function onceGemini(m, system, content, maxTokens) {
+    const user = content.filter((c) => c.type === "text").map((c) => ({ type: "text", text: c.text }));
+    const res = await fetchImpl(`${GEMINI_BASE}/models/${encodeURIComponent(m)}:generateContent`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-goog-api-key": key },
+      body: JSON.stringify(geminiBody(m, system, user, maxTokens + GEMINI_ROOM, false)),
+    });
+    const data = await res.json();
+    const r = readGeminiReply(data);
+    if (r.input || r.output) { ledger.spent += geminiCostUsd(m, r.input, r.output); ledger.calls++; }
+    if (!res.ok) throw new Error(`${res.status}: ${data?.error?.message ?? JSON.stringify(data).slice(0, 300)}`);
+    if (r.blocked) throw new Error("gemini blocked the reply");
+    return { text: r.text, usage: { input_tokens: r.input, output_tokens: r.output }, stop: r.finish === "length" ? "max_tokens" : "end_turn" };
+  }
   async function once(m, system, content, maxTokens, effort) {
+    if (gemini(m)) return onceGemini(m, system, content, maxTokens);
     const user = content.map((c) => (c.type === "text" ? { type: "text", text: c.text } : null)).filter(Boolean);
     const res = await fetchImpl("https://api.anthropic.com/v1/messages", {
       method: "POST",

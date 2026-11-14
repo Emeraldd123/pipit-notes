@@ -232,6 +232,7 @@ export function ExamResults({ exam, answers, marks, seconds, onMarks, onRetake, 
           <div className="min-w-0 flex-1">
             <p className="text-2xl font-bold">{result.got} / {result.max} marks</p>
             <p className="text-sm text-foreground-muted">Took {Math.round(seconds / 60)} min of {exam.durationMin}</p>
+            <p className="mt-1 text-xs text-foreground-muted">Written and marked by AI. If a question or a mark looks wrong, use Report on that question and it won&apos;t count.</p>
             <div className="mt-3 space-y-1.5">
               {result.byTopic.map((t) => (
                 <div key={t.topic} className="flex items-center gap-2 text-xs">

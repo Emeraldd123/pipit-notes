@@ -9,6 +9,8 @@
 //   --style exam.pdf|exam.txt[,more]: a real past exam (e.g. MIT OCW) whose FORMAT the paper should copy. The judge then also
 //   scores how well the paper matches it and whether anything was copied. Keep such files in data/ (gitignored; OCW is CC BY-NC-SA).
 //   --budget N: stop before spending more than $N (default 5).
+//   --writer gemini-3.8-flash: Gemini writes the exams (needs GEMINI_API_KEY); the judge stays Claude (--model), so the
+//   scores compare with Claude-written runs. Writer and judge share one spending cap.
 // Reports go to data/exam-eval/ (gitignored). Each exam costs roughly what one in the app does; the judge adds a few cents.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
@@ -28,6 +30,10 @@ const JUDGE = !process.argv.includes("--no-judge");
 const only = arg("only", "")?.split(",").filter(Boolean);
 const subjects = FIXTURES.filter((f) => !only?.length || only.includes(f.id));
 const api = makeApi({ key: KEY, model: MODEL, budget: Number(arg("budget", "5")), log: console.log });
+const WRITER = arg("writer", "");
+const GEMINI_KEY = process.env.GEMINI_API_KEY?.trim();
+if (WRITER && !GEMINI_KEY && !DRY) { console.error("--writer needs GEMINI_API_KEY (enter it in the key window)."); process.exit(1); }
+const writerApi = WRITER ? makeApi({ key: GEMINI_KEY, model: WRITER, budget: Number(arg("budget", "5")), log: console.log, ledger: api.ledger }) : api;
 
 // past exams to match (read locally; PDFs through the same text extraction idea as the app: text layer, line by line)
 async function pdfPages(path) {
@@ -47,7 +53,7 @@ const BUILTIN = process.argv.includes("--builtin") ? JSON.parse(readFileSync("pu
 for (const f of STYLE_FILES) PAST.push({ id: f, title: basename(f).replace(/\.(pdf|txt)$/i, ""), pages: /\.pdf$/i.test(f) ? await pdfPages(f) : readFileSync(f, "utf8").split(/\f|\n-{3,} ?page break ?-{3,}\n/i) });
 
 const results = [];
-const lines = [`# Exam-writer evaluation — ${new Date().toISOString()}`, `model ${MODEL} · ${QUESTIONS} questions · judge ${JUDGE ? "on" : "off"}`, ""];
+const lines = [`# Exam-writer evaluation — ${new Date().toISOString()}`, `writer ${WRITER || MODEL} · judge model ${MODEL} · ${QUESTIONS} questions · judge ${JUDGE ? "on" : "off"}`, ""];
 outer: for (const f of subjects) {
   for (let r = 0; r < RUNS; r++) {
     const past = PAST.length ? pickPastExams(f.pages, PAST, 9000) : BUILTIN.length ? chooseStyleExamples(f.pages, [], BUILTIN) : [];
@@ -59,7 +65,7 @@ outer: for (const f of subjects) {
     const t0 = Date.now();
     let row = { subject: f.id, run: r + 1 };
     try {
-      const w = await writeExam(api, f, { past, questions: QUESTIONS });
+      const w = await writeExam(writerApi, f, { past, questions: QUESTIONS });
       row = { ...row, ...w.stats, caseShare: +(w.stats.cases / Math.max(1, w.stats.questions)).toFixed(2), stop: w.stop, seconds: Math.round((Date.now() - t0) / 1000), inTok: w.usage?.input_tokens, outTok: w.usage?.output_tokens };
       lines.push(`## ${f.title} — run ${r + 1}`, "", "```", ...w.qs.map(questionText), "```", "");
       if (JUDGE) {
