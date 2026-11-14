@@ -5,8 +5,11 @@ import { APP } from "@/lib/telemetry";
 
 /** Shown once after an update that moves things around, so nothing feels "gone". Bump the list with the version. */
 const NOTES: { title: string; body: string }[] = [
+  { title: "A tidier pen rail", body: "Widths, colours and saved pens are now one ink button in the rail. The last three colours you used sit beside it, one tap each. Zoom moved to the page bar at the bottom." },
+  { title: "Selecting is one row", body: "After you lasso ink, the common actions sit on one row and the rest are under More." },
+  { title: "Real dialogs", body: "Renaming, tagging and deleting now ask in the app instead of in a browser pop-up." },
   { title: "Google Gemini, a cheaper AI", body: "You can now add a Google Gemini key in Settings → AI features → Google Gemini. Reading handwriting, working checks and short answers go to Gemini first, and Claude takes over if Gemini can't do a job. With only a Gemini key, everything runs on Gemini. Exams were tuned on Claude, so Gemini's are less tested." },
-  { title: "See an exam being written", body: "While Claude writes an exam you now see how far it has got (“Writing question 3 of 8”). If the connection drops part-way, Pipit tells you within about a minute and asks you to try again, instead of waiting in silence. Keep Pipit open until it finishes." },
+  { title: "See an exam being written", body: "While an exam is written you now see how far it has got (“Writing question 3 of 8”). If the connection drops part-way, Pipit tells you within about a minute and asks you to try again, instead of waiting in silence. Keep Pipit open until it finishes." },
   { title: "A getting-started card", body: "New here? An empty Library now shows three steps: add Pipit to your Home Screen, set up AI if you want it, and back up to Files. Dismiss it once and it stays gone." },
   { title: "Real science icons in exam diagrams", body: "Exam diagrams can now use real scientific icons (cells, organelles, organs, organisms, lab glassware) from Bioicons, with credit shown under each diagram. Structures to identify are labelled with letters, like a real paper." },
   { title: "Fresh cases every exam", body: "Practice exams now remember the real-world situations they used, so the next exam on the same notes picks different ones. You practise the ideas, not a few favourite examples." },
