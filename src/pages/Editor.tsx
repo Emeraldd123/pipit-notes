@@ -111,13 +111,16 @@ function printImages(urls: string[]) {
   const doc = iframe.contentWindow!.document;
   doc.open();
   const imgs = urls.map((u, i) => `<img src="${u}" style="display:block;width:100%;height:auto;${i < urls.length - 1 ? "page-break-after:always;" : ""}">`).join("");
-  doc.write(
-    `<style>@page{margin:0}html,body{margin:0;padding:0}img{display:block;width:100%}</style>${imgs}` +
-      `<script>(function(){var imgs=document.images,left=imgs.length;if(!left){window.print();return;}` +
-      `function done(){if(--left<=0){window.focus();setTimeout(function(){window.print();},60);}}` +
-      `for(var i=0;i<imgs.length;i++){if(imgs[i].complete)done();else{imgs[i].onload=done;imgs[i].onerror=done;}}})();<\/script>`
-  );
+  // no inline script: this page waits for the images, then prints the frame (keeps the content policy strict)
+  doc.write(`<style>@page{margin:0}html,body{margin:0;padding:0}img{display:block;width:100%}</style>${imgs}`);
   doc.close();
+  const win = iframe.contentWindow!;
+  const pending = Array.from(doc.images);
+  let left = pending.length;
+  const go = () => { win.focus(); setTimeout(() => win.print(), 60); };
+  const done = () => { if (--left <= 0) go(); };
+  if (!left) go();
+  for (const img of pending) { if (img.complete) done(); else { img.onload = done; img.onerror = done; } }
   setTimeout(() => iframe.remove(), 60000);
 }
 

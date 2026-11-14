@@ -15,7 +15,7 @@ export async function lastBackupAt(): Promise<number | null> {
 /** True if there's data worth backing up and no backup in the last week. */
 export async function backupIsOverdue(): Promise<boolean> {
   const d = await db();
-  if ((await d.count("notes")) === 0) return false;
+  if (!(await d.getAll("notes")).some((n) => !n.deletedAt)) return false;   // only notes in Recently deleted: nothing to nag about
   const last = await lastBackupAt();
   return !last || Date.now() - last > BACKUP_NAG_MS;
 }

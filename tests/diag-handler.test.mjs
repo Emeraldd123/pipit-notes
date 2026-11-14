@@ -74,9 +74,9 @@ test("reading needs the token: 503 when unset, 401 when wrong, 200 when right", 
   await handleDiag(req("POST", { body: JSON.stringify(report()) }), store, ENV);
   assert.equal((await handleDiag(req("GET"), store, {})).status, 503);
   assert.equal((await handleDiag(req("GET"), store, ENV)).status, 401);
-  assert.equal((await handleDiag(req("GET", { url: "https://x/f?token=wrong-token-value!" }), store, ENV)).status, 401);
-  assert.equal((await handleDiag(req("GET", { url: "https://x/f?token=short" }), store, ENV)).status, 401);
-  const ok = await handleDiag(req("GET", { url: "https://x/f?token=s3cret-token-value" }), store, ENV);
+  assert.equal((await handleDiag(req("GET", { url: "https://x/f", headers: { authorization: "Bearer wrong-token-value!" } }), store, ENV)).status, 401);
+  assert.equal((await handleDiag(req("GET", { url: "https://x/f", headers: { authorization: "Bearer short" } }), store, ENV)).status, 401);
+  const ok = await handleDiag(req("GET", { url: "https://x/f", headers: { authorization: "Bearer s3cret-token-value" } }), store, ENV);
   assert.equal(ok.status, 200);
   assert.equal(JSON.parse(ok.body).count, 1);
   const bearer = await handleDiag(req("GET", { headers: { authorization: "Bearer s3cret-token-value" } }), store, ENV);
@@ -86,7 +86,7 @@ test("reading needs the token: 503 when unset, 401 when wrong, 200 when right", 
 test("reads newest first, honours limit and since", async () => {
   const store = memStore();
   for (let i = 1; i <= 5; i++) await handleDiag(req("POST", { body: JSON.stringify(report({ session: "s" + i })) }), store, ENV, i * 1000);
-  const get = async (qs) => JSON.parse((await handleDiag(req("GET", { url: "https://x/f?token=s3cret-token-value" + qs }), store, ENV)).body);
+  const get = async (qs) => JSON.parse((await handleDiag(req("GET", { url: "https://x/f?" + qs.replace(/^&/, ""), headers: { authorization: "Bearer s3cret-token-value" } }), store, ENV)).body);
   const all = await get("");
   assert.deepEqual(all.reports.map((r) => r.session), ["s5", "s4", "s3", "s2", "s1"]);
   assert.equal((await get("&limit=2")).count, 2);
@@ -156,7 +156,7 @@ test("an oversize report is refused from its declared length, before the body is
 test("wrong tokens are rate-limited, and a locked-out sender learns nothing even with the right token", async () => {
   const store = memStore();
   const t0 = 80 * RATE_WINDOW_MS;
-  const get = (token, ip, now = t0) => handleDiag(req("GET", { url: "https://x/f?token=" + token, headers: from(ip) }), store, ENV, now);
+  const get = (token, ip, now = t0) => handleDiag(req("GET", { url: "https://x/f", headers: { ...from(ip), authorization: "Bearer " + token } }), store, ENV, now);
   for (let i = 0; i < MAX_BAD_READS_PER_SENDER; i++) assert.equal((await get("wrong-token-value!", "203.0.113.9")).status, 401);
   assert.equal((await get("wrong-token-value!", "203.0.113.9")).status, 429);
   assert.equal((await get("s3cret-token-value", "203.0.113.9")).status, 429); // no oracle while locked out
@@ -167,7 +167,7 @@ test("wrong tokens are rate-limited, and a locked-out sender learns nothing even
 test("a GET with no token at all never returns reports", async () => {
   const store = memStore();
   await handleDiag(req("POST", { body: JSON.stringify(report()) }), store, ENV);
-  for (const r of [await handleDiag(req("GET"), store, ENV), await handleDiag(req("GET", { url: "https://x/f?token=" }), store, ENV), await handleDiag(req("GET", { headers: { authorization: "Bearer " } }), store, ENV), await handleDiag(req("GET"), store, { DIAG_READ_TOKEN: "" })]) {
+  for (const r of [await handleDiag(req("GET"), store, ENV), await handleDiag(req("GET", { url: "https://x/f", headers: { authorization: "Bearer " } }), store, ENV), await handleDiag(req("GET", { headers: { authorization: "Bearer " } }), store, ENV), await handleDiag(req("GET"), store, { DIAG_READ_TOKEN: "" })]) {
     assert.ok(r.status === 401 || r.status === 503);
     assert.ok(!r.body.includes("abc123"));
   }

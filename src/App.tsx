@@ -9,11 +9,30 @@ import { applyTheme, getSettings } from "./lib/settings";
 // load. The Editor (which carries KaTeX) is the screen people open next, so it is fetched in the
 // background as soon as the Library has painted instead of waiting for the first tap on a note.
 const loadEditor = () => import("./pages/Editor");
-const EditorPage = lazy(() => loadEditor().then((m) => ({ default: m.EditorPage })));
-const SearchPage = lazy(() => import("./pages/SearchPage").then((m) => ({ default: m.SearchPage })));
-const SettingsPage = lazy(() => import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
-const GraphPage = lazy(() => import("./pages/GraphPage").then((m) => ({ default: m.GraphPage })));
-const StudyPage = lazy(() => import("./pages/StudyPage").then((m) => ({ default: m.StudyPage })));
+/**
+ * A screen's code couldn't be fetched (offline before it was ever cached, or a deploy replaced it mid-session):
+ * show a small "couldn't open" screen with Retry instead of the crash screen. Retry reloads the page, which also
+ * picks up a newer build if that was the cause.
+ */
+function screen<P extends object>(load: () => Promise<React.ComponentType<P>>) {
+  return lazy(() => load().then((C) => ({ default: C })).catch(() => ({ default: ScreenFailed as unknown as React.ComponentType<P> })));
+}
+function ScreenFailed() {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+      <p className="text-sm"><strong>Couldn&apos;t open this screen.</strong> <span className="text-foreground-muted">Are you offline? It opens offline once it has loaded online one time.</span></p>
+      <div className="flex gap-2">
+        <button onClick={() => location.reload()} className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-white [@media(pointer:coarse)]:min-h-11">Retry</button>
+        <button onClick={() => { location.hash = "#/"; }} className="rounded-xl border border-border px-4 py-2 text-sm [@media(pointer:coarse)]:min-h-11">Back to notes</button>
+      </div>
+    </div>
+  );
+}
+const EditorPage = screen(() => loadEditor().then((m) => m.EditorPage));
+const SearchPage = screen(() => import("./pages/SearchPage").then((m) => m.SearchPage));
+const SettingsPage = screen(() => import("./pages/SettingsPage").then((m) => m.SettingsPage));
+const GraphPage = screen(() => import("./pages/GraphPage").then((m) => m.GraphPage));
+const StudyPage = screen(() => import("./pages/StudyPage").then((m) => m.StudyPage));
 
 // Same look as the Editor's own "Opening…" state, so the hand-over between the two is not a visible jump.
 const PageLoading = () => (

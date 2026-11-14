@@ -2,7 +2,7 @@
 // back. Pure logic over a tiny store interface, so it's unit-tested without Netlify.
 //
 //   POST  /.netlify/functions/diag                  store a report (called by the app)
-//   GET   /.netlify/functions/diag?token=…&limit=20  read recent reports (owner only)
+//   GET   /.netlify/functions/diag?limit=20 with Authorization: Bearer <token>  read recent reports (owner only)
 //
 // Reading requires the DIAG_READ_TOKEN environment variable (set it in the Netlify UI).
 // Writing needs no secret (the app has none), so every report is validated, size-capped
@@ -128,7 +128,8 @@ export async function handleDiag(req, store, env, now = Date.now()) {
   if (req.method === "GET") {
     const url = new URL(req.url, "http://localhost");
     const auth = req.header("authorization") ?? "";
-    const supplied = url.searchParams.get("token") ?? (auth.startsWith("Bearer ") ? auth.slice(7) : "");
+    // header only: a token in the URL ends up in logs and browser history
+    const supplied = auth.startsWith("Bearer ") ? auth.slice(7) : "";
     if (!env.DIAG_READ_TOKEN) return json(503, { error: "reading is disabled: set DIAG_READ_TOKEN in the site's environment variables" });
     // Stop token guessing: after too many wrong tokens a sender is refused for the rest of the
     // window, and that refusal comes before the token is looked at, so it reveals nothing.
