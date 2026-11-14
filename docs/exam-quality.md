@@ -84,3 +84,34 @@ are within noise. The real gains were from round 1 to round 2.
 In the app, every question has a **Report** button. A reported question stops counting toward the
 score and the report reaches the diagnostics summary (no content). That remains the backstop for
 anything that slips through.
+
+## Gemini as the writer (November 2026)
+
+Friends with only a Gemini key get exams written by Gemini 3.8 Flash (the stronger model the app uses for
+big jobs). One run with the same fixtures, prompt and validation, and the same Claude judge, so the scores
+compare with round 3. Physics failed (Google returned "high demand" three times), so the comparison
+covers the four subjects both runs completed: biology, chemistry, economics and statistics. Cost: $0.28.
+
+| Average over bio, chem, econ, stats | Claude (round 3) | Gemini 3.8 Flash |
+|---|---|---|
+| Realistic | 1.76 | 1.91 |
+| Applied (case questions) | 1.83 | 1.42 |
+| Self-contained | 2.00 | 1.79 |
+| One defensible answer | 1.80 | 1.57 |
+| Factually accurate | 1.61 | 1.51 |
+| Distractors | 1.63 | 1.42 |
+| Questions per exam | 6–8 | 8 every time |
+| MCQ answer keys pointing at the wrong option | 0 | 0 |
+| Time to write one exam | about 1–2 min | 2–4 min |
+
+What this says, with one exam per subject (differences under about 0.2 are noise):
+- **Gemini's exams are usable but weaker.** It is clearly behind on case questions (applied, −0.4)
+  and somewhat behind on self-contained, one defensible answer and distractors (about −0.2 each).
+  Accuracy is close (−0.1). It was slightly more realistic and always returned all 8 questions.
+- **The judge's most common complaint was reaching past the notes**: questions needing facts the
+  student's notes don't contain (oligomycin, ATP binding sites in biology), which hurts self-contained
+  and one-answer scores. That is the gap the double-check pass targets, which is why it starts on for
+  Gemini-written exams.
+- **Gemini is slower** to write a full exam, so the progress display matters more on that path.
+
+Report: `data/exam-eval/2026-11-14T05-08-13-944Z.md` (local, gitignored).
